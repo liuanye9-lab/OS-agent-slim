@@ -1,204 +1,954 @@
 /**
- * Pixel Avatar — 泰拉瑞亚风像素机器人状态管理器
+ * StableAgent OS — Pixel Agent Avatar v5
  *
- * 使用 CSS box-shadow 像素画技术绘制机械数字机器人。
- * 支持多种动态状态：闲置呼吸、思考摇摆、工作中、搜索、庆祝。
+ * Canvas-based pixel-art character with 2D room navigation.
+ * Black-haired girl (Q版) moves between stations, performs task-animated actions.
  *
- * 事件 → 机器人状态映射
- *   workflow:started  → thinking (思考)
- *   memory:retrieval  → searching (搜索记忆)
- *   memory:retrieving → searching
- *   memory:retrieved  → working (筛选记忆)
- *   rag:searched      → working (查阅知识库)
- *   workflow:planned  → thinking (规划)
- *   execute:completed → working (执行)
- *   eval:completed    → working (评分)
- *   workflow:completed→ celebrating (完成庆祝)
- *   workflow:init     → thinking (准备就绪)
- *
- *   V3 新增事件映射:
- *   budget:allocated   → thinking (打算盘)
- *   context:built      → idle (上下文包就绪)
- *   approval:required  → idle (举手等待——用 idle + 特殊光环色)
- *   approval:pending   → idle
- *   workflow:paused    → idle
- *   workflow:resumed   → working
- *   workflow:failed    → idle (特殊红色光环)
- *   默认              → idle (闲置)
+ * Architecture:
+ *   Room (background) → Character (sprite) → Animation System → Event System
  */
+// ============================================================================
+// 像素画引擎 — 绘制 16×16 角色 Sprite 到 Canvas
+// ============================================================================
+
+const SPRITE_SIZE = 16;
+const SCALE = 4;
+
+// ---- 调色板 ----
+const C = {
+  SKIN:     '#fce4dc',
+  SKIN_SHD: '#e8c8b8',
+  SKIN_DRK: '#d4a894',
+  HAIR:     '#1a1a2e',
+  HAIR_LT:  '#2d2d44',
+  HAIR_TIP: '#3d3d54',
+  DRESS:    '#1c1c28',
+  DRESS_LT: '#2a2a3c',
+  SHOE:     '#0d0d18',
+  WHITE:    '#ffffff',
+  EYE:      '#16213e',
+  EYE_LT:   '#4a6fa5',
+  BLUSH:    '#f0b0b0',
+  MOUTH:    '#d47878',
+  PAPER:    '#fafaf0',
+  BOOK:     '#8b4513',
+  BOOK_PG:  '#f5deb3',
+  DESK:     '#6b4226',
+  SHELF:    '#8b6914',
+  FLOOR:    '#d4a853',
+  FLOOR2:   '#c49a43',
+  WALL:     '#f5efe6',
+  WALL_SHD: '#e8e0d5',
+  WINDOW:   '#a8d8ea',
+  WINDOW2:  '#c8e8fa',
+  SPARKLE:  '#ffd700',
+  RED:      '#ff3b30',
+  GREEN:    '#30d158',
+};
 
 // ============================================================================
-// 粒子管理器
+// 角色帧定义 — 每个状态有多帧动画
+// 16×16 网格，每像素用 palette key 表示，'.' 表示透明
 // ============================================================================
 
-const ParticleManager = {
-    container: null,
-    active: false,
+// --- IDLE (站立, 2帧呼吸) ---
+const FRAMES_IDLE = [
+  // 帧0: 正常站立
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS.....',
+    '...SllSllS.....',
+    '...SSS.SSS.....',
+    '...SbbSb.S.....',
+    '....S..SS......',
+    '...KKKKK.......',
+    '...K.K.K.......',
+    '...K..K........',
+    '...............',
+  ],
+  // 帧1: 微呼吸 (衣服略鼓)
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDDD..',
+    '...SSSSSSSS....',
+    '...SllSllS.....',
+    '...SSSS.SS.....',
+    '...SbbSS.S.....',
+    '....SS.SS......',
+    '...KKKKK.......',
+    '...K.K.K.......',
+    '...K..K........',
+    '...............',
+  ],
+];
 
-    init() {
-        this.container = document.getElementById('particles-layer');
-        if (!this.container) return;
-        // 预创建粒子
-        this.container.innerHTML = '';
-        for (let i = 0; i < 6; i++) {
-            const p = document.createElement('div');
-            p.className = 'particle';
-            p.style.left = (20 + Math.random() * 60) + '%';
-            p.style.animationDelay = (Math.random() * 3) + 's';
-            p.style.animationDuration = (2.5 + Math.random() * 2) + 's';
-            this.container.appendChild(p);
-        }
-    },
+// --- WALK (4帧行走) ---
+const FRAMES_WALK = [
+  // 帧0: 迈左腿
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS.....',
+    '...SllSllS.....',
+    '...SSS.SSS.....',
+    '...SbbSbS......',
+    '....SSS........',
+    '...KK..K.......',
+    '...KK..K.......',
+    '...K...........',
+    '...............',
+  ],
+  // 帧1: 过渡
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS.....',
+    '...SllSllS.....',
+    '...SSSS.S......',
+    '...SbbSb.......',
+    '....S..........',
+    '...KKKK........',
+    '...K..K........',
+    '...............',
+    '...............',
+  ],
+  // 帧2: 迈右腿 (镜像)
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS.....',
+    '...SllSllS.....',
+    '....SSS.SS.....',
+    '....SbbSbS.....',
+    '....SSS........',
+    '...K..KK.......',
+    '...K..KK.......',
+    '........K......',
+    '...............',
+  ],
+  // 帧3: 过渡
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS.....',
+    '.....S.SSSS....',
+    '.....SbbSb.....',
+    '......S........',
+    '......S........',
+    '...KKKK........',
+    '...K..K........',
+    '...............',
+    '...............',
+  ],
+];
 
-    start() {
-        if (!this.container || this.active) return;
-        this.active = true;
-        this.container.style.display = 'block';
-        this.container.querySelectorAll('.particle').forEach(p => {
-            p.style.animationPlayState = 'running';
-        });
-    },
+// --- WORK (伏案工作, 2帧) ---
+const FRAMES_WORK = [
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSS......WW.',
+    '...SSS.....WWW.',
+    '...SllS...WWW..',
+    '...SSSS..WWW...',
+    '..SSbbS.WWW....',
+    '..KK..K........',
+    '..K...K........',
+    '...............',
+    '...............',
+  ],
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSS......WW.',
+    '...SSS.....WWW.',
+    '...SllS...WWW..',
+    '...SSSS..WWW...',
+    '..SSbbS.WWW....',
+    '..K..K.........',
+    '..K...K........',
+    '...............',
+    '...............',
+  ],
+];
 
-    stop() {
-        if (!this.container) return;
-        this.active = false;
-        this.container.querySelectorAll('.particle').forEach(p => {
-            p.style.animationPlayState = 'paused';
-        });
-        setTimeout(() => {
-            if (!this.active && this.container) {
-                this.container.style.display = 'none';
-            }
-        }, 500);
+// --- THINK (托腮思考, 2帧) ---
+const FRAMES_THINK = [
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS.....',
+    '..SSllSllS.....',
+    '..SSSSSSSS.....',
+    '....SbbSbS.....',
+    '.....SSSS......',
+    '...KKKKK.......',
+    '...K.K.K.......',
+    '...K...........',
+    '...............',
+  ],
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS.....',
+    '.SSSllSllS.....',
+    '.SSSSSSSS......',
+    '...SbbSbS......',
+    '....SSSS.......',
+    '...KKKKK.......',
+    '...K.K.K.......',
+    '...K...........',
+    '...............',
+  ],
+];
+
+// --- SEARCH (翻书/查找, 2帧) ---
+const FRAMES_SEARCH = [
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS.....',
+    '...SllSllS.....',
+    '.SSSSSSS...BB..',
+    '.SSbbSbS..BB...',
+    '..SSSSS..BB....',
+    '.KKKKK.........',
+    '.K.K.K.........',
+    '...............',
+    '...............',
+  ],
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS.....',
+    '...SllSllS.....',
+    '..SSSSSS..BB...',
+    '..SSbbSb..BB...',
+    '..SSSS...BB....',
+    '.KKKK..........',
+    '.K.K...........',
+    '...............',
+    '...............',
+  ],
+];
+
+// --- CELEBRATE (庆祝跳跃, 2帧) ---
+const FRAMES_CELEBRATE = [
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS..**.',
+    '..SSllSllS..**.',
+    '..SSSSSSS......',
+    '...SbbSbS......',
+    '....SSS........',
+    '...KK.........',
+    '...K..........',
+    '...............',
+    '.....K..K......',
+  ],
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS..**.',
+    '.SSllSllS...**.',
+    '.SSSSSSS.......',
+    '..SbbSbS.......',
+    '...SSS.........',
+    '..KK...........',
+    '..K............',
+    '..K..K.........',
+    '...............',
+  ],
+];
+
+// --- SKILL 系列 (V4) ---
+const FRAMES_SKILL_LEARN = [ // 读书
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS..BB.',
+    '...SllSllS..BB.',
+    '...SSSSSS..BB..',
+    '...SbbSSS.BB...',
+    '....SSSS.......',
+    '...KK.K........',
+    '...K..K........',
+    '...............',
+    '...............',
+  ],
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS..BB.',
+    '...SllSllS..BB.',
+    '...SSSSSS..BB..',
+    '..SbbSS...BB...',
+    '..SSS..........',
+    '..K.K..........',
+    '..K..K.........',
+    '...............',
+    '...............',
+  ],
+];
+
+const FRAMES_SKILL_PATCH = [ // 伏案写字
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSS......PP.',
+    '...SSS.....PPP.',
+    '...SllS...PPP..',
+    '...SSSS..PPP...',
+    '..SSbbS.PPP....',
+    '..KK..K........',
+    '..K...K........',
+    '...............',
+    '...............',
+  ],
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSS......PP.',
+    '...SSS.....PPP.',
+    '...SllS...PPP..',
+    '...SSSS..PPP...',
+    '..SSbbS.PPP....',
+    '..K..K.........',
+    '..K...K........',
+    '...............',
+    '...............',
+  ],
+];
+
+const FRAMES_SKILL_VALID = [ // 举手验证
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS..GG.',
+    '...SllSllS..GG.',
+    '.SSSSSSSS......',
+    '.SSbbSbS.......',
+    '..SSSS.........',
+    '.KKKK..........',
+    '.K..K..........',
+    '...............',
+    '...............',
+  ],
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS..GG.',
+    '...SllSllS..GG.',
+    '.SSSSSSS.......',
+    '.SSbbSbS.......',
+    '.SSSS..........',
+    '.KKK...........',
+    '.K..K..........',
+    '...............',
+    '...............',
+  ],
+];
+
+const FRAMES_SKILL_REJECT = [ // 摇头
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '..dDDDDDDdD....',
+    '..dDDDDDDdD....',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS..RR.',
+    '...SllSllS..RR.',
+    '...SSSSSS......',
+    '...SbbSbS......',
+    '....SSSS.......',
+    '...KKKK........',
+    '...K..K........',
+    '...............',
+    '...............',
+  ],
+  [
+    '......DDDDDD....',
+    '.....DDDDDDDD..',
+    '.....DDDDDDDD..',
+    '....dDDDDDDdD..',
+    '....dDDDDDDdD..',
+    '.....DDDDDDDDD.',
+    '.....DDDDDDDDD.',
+    '.....SSSSSSS.RR',
+    '.....SllSllS.RR',
+    '.....SSSSSS....',
+    '.....SbbSbS....',
+    '......SSSS.....',
+    '.....KKKK......',
+    '.....K..K......',
+    '...............',
+    '...............',
+  ],
+];
+
+const FRAMES_SKILL_ACCEPT = [ // 点头+金光
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS..**.',
+    '...SllSllS..**.',
+    '..SSSSSS.......',
+    '..SbbSbS.......',
+    '...SSS.........',
+    '...KKK.........',
+    '...K..K........',
+    '.....K.........',
+    '...............',
+  ],
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '...SSSSSSS..**.',
+    '...SllSllS..**.',
+    '.SSSSSS........',
+    '.SSbbSbS.......',
+    '.SSSS..........',
+    '.KKK...........',
+    '.K..K..........',
+    '.K.............',
+    '...............',
+  ],
+];
+
+const FRAMES_SKILL_EXPORT = [ // 举起纸张
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '..SSSSSSSS..PP.',
+    '..SllSllSS.PPP.',
+    '..SSSSSSS.PPP..',
+    '...SbbSbS.PP...',
+    '....SSSS.......',
+    '...KKKK........',
+    '...K..K........',
+    '...............',
+    '...............',
+  ],
+  [
+    '....DDDDDD......',
+    '...DDDDDDDD....',
+    '...DDDDDDDD....',
+    '...dDDDDDDdD...',
+    '...dDDDDDDdD...',
+    '...DDDDDDDDD...',
+    '...DDDDDDDDD...',
+    '.SSSSSSSS..PP..',
+    '.SllSllSS.PPP..',
+    '.SSSSSSS.PPP...',
+    '..SbbSbS.PP....',
+    '...SSSS........',
+    '..KKKK.........',
+    '..K..K.........',
+    '...............',
+    '...............',
+  ],
+];
+
+// ---- 帧索引 ----
+const ANIMATIONS = {
+  idle:      { frames: FRAMES_IDLE,      speed: 800, loop: true },
+  walking:   { frames: FRAMES_WALK,      speed: 150, loop: true },
+  working:   { frames: FRAMES_WORK,      speed: 400, loop: true },
+  thinking:  { frames: FRAMES_THINK,     speed: 500, loop: true },
+  searching: { frames: FRAMES_SEARCH,    speed: 350, loop: true },
+  celebrate: { frames: FRAMES_CELEBRATE, speed: 300, loop: true },
+  skill_learning: { frames: FRAMES_SKILL_LEARN, speed: 500, loop: true },
+  skill_patching: { frames: FRAMES_SKILL_PATCH, speed: 350, loop: true },
+  skill_validating:{ frames: FRAMES_SKILL_VALID, speed: 400, loop: true },
+  skill_rejected: { frames: FRAMES_SKILL_REJECT, speed: 250, loop: true },
+  skill_accepted: { frames: FRAMES_SKILL_ACCEPT, speed: 400, loop: true },
+  skill_exported: { frames: FRAMES_SKILL_EXPORT, speed: 400, loop: true },
+};
+
+// ---- 房间物体绘制 ----
+function drawBackground(ctx, w, h, t) {
+  // 墙壁
+  ctx.fillStyle = C.WALL;
+  ctx.fillRect(0, 0, w, h * 0.55);
+  // 墙壁纹理
+  ctx.fillStyle = C.WALL_SHD;
+  for (let x = 0; x < w; x += 32) {
+    ctx.fillRect(x, 0, 1, h * 0.55);
+  }
+  for (let y = 0; y < h * 0.55; y += 32) {
+    ctx.fillRect(0, y, w, 1);
+  }
+
+  // 窗户 (左上)
+  const wx = 12, wy = 16, ww = 40, wh = 36;
+  ctx.fillStyle = C.WINDOW;
+  ctx.fillRect(wx, wy, ww, wh);
+  ctx.strokeStyle = '#b8956a';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(wx, wy, ww, wh);
+  ctx.beginPath();
+  ctx.moveTo(wx + ww/2, wy);
+  ctx.lineTo(wx + ww/2, wy + wh);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(wx, wy + wh/2);
+  ctx.lineTo(wx + ww, wy + wh/2);
+  ctx.stroke();
+  // 窗外光
+  ctx.fillStyle = C.WINDOW2;
+  ctx.fillRect(wx+1, wy+1, ww/2-1, wh/2-1);
+
+  // 地板
+  ctx.fillStyle = C.FLOOR;
+  ctx.fillRect(0, h * 0.55, w, h * 0.45);
+  // 地板条纹
+  for (let x = 0; x < w; x += 48) {
+    ctx.fillStyle = x % 96 === 0 ? C.FLOOR2 : C.FLOOR;
+    ctx.fillRect(x, h * 0.55, 48, h * 0.45);
+  }
+
+  // 书架 (左侧)
+  const sx = 8, sy = h * 0.35, sw = 36, sh = h * 0.35;
+  ctx.fillStyle = C.SHELF;
+  ctx.fillRect(sx, sy, sw, sh);
+  ctx.strokeStyle = '#6b4c1e';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(sx, sy, sw, sh);
+  // 书架隔板
+  for (let by = sy + sh/3; by < sy + sh; by += sh/3) {
+    ctx.beginPath();
+    ctx.moveTo(sx, by);
+    ctx.lineTo(sx + sw, by);
+    ctx.stroke();
+  }
+  // 书架上的书
+  const bookColors = ['#e74c3c','#3498db','#2ecc71','#f39c12','#9b59b6'];
+  for (let bi = 0; bi < 3; bi++) {
+    for (let bj = 0; bj < 3; bj++) {
+      ctx.fillStyle = bookColors[(bi*3+bj) % bookColors.length];
+      ctx.fillRect(sx + 4 + bj * 10, sy + 4 + bi * (sh/3), 7, sh/3 - 8);
     }
+  }
+
+  // 书桌 (右侧)
+  const dx = w * 0.48, dy = h * 0.55, dw = w * 0.5, dh = 3;
+  ctx.fillStyle = C.DESK;
+  ctx.fillRect(dx, dy, dw, dh);
+  // 桌腿
+  ctx.fillRect(dx + 4, dy + dh, 3, 16);
+  ctx.fillRect(dx + dw - 7, dy + dh, 3, 16);
+  // 桌上的东西
+  ctx.fillStyle = '#aaa';
+  ctx.fillRect(dx + 10, dy - 4, 8, 4);  // 小物件
+  ctx.fillStyle = '#ddd';
+  ctx.fillRect(dx + 24, dy - 6, 14, 6); // 纸张
+
+  // 地上装饰
+  ctx.fillStyle = C.WALL_SHD;
+  ctx.fillRect(w * 0.6, h * 0.55 + 2, 12, 1);
+  ctx.fillRect(w * 0.7, h * 0.55 + 2, 14, 1);
+}
+
+// ---- 角色绘制 ----
+function drawSprite(ctx, frame, x, y, flip) {
+  const sz = SPRITE_SIZE;
+  const sc = SCALE;
+  ctx.save();
+  const cx = x - sz * sc / 2;
+
+  if (flip) {
+    ctx.translate(x + sz * sc / 2, 0);
+    ctx.scale(-1, 1);
+    ctx.translate(-(x + sz * sc / 2), 0);
+  }
+
+  for (let row = 0; row < sz; row++) {
+    for (let col = 0; col < sz; col++) {
+      const ch = frame[row][col];
+      if (ch === '.') continue;
+      const color = C[ch] || ch;
+      ctx.fillStyle = color;
+      ctx.fillRect(
+        cx + col * sc,
+        y - sz * sc + row * sc,
+        sc, sc
+      );
+    }
+  }
+
+  ctx.restore();
+}
+
+// ---- 浮动粒子效果 ----
+function drawParticles(ctx, x, y, t, type) {
+  if (type === 'sparkle') {
+    for (let i = 0; i < 3; i++) {
+      const px = x - 16 + Math.sin(t/400 + i*2) * 20 + i * 16;
+      const py = y - 40 + Math.cos(t/300 + i*3) * 12;
+      const alpha = 0.5 + Math.sin(t/200 + i) * 0.5;
+      ctx.fillStyle = `rgba(255,215,0,${alpha})`;
+      ctx.beginPath();
+      ctx.arc(px, py, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  if (type === 'red_x') {
+    for (let i = 0; i < 2; i++) {
+      const px = x + (i === 0 ? -14 : 14) + Math.sin(t/200) * 3;
+      const py = y - 48 + i * 8;
+      ctx.strokeStyle = C.RED;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(px-3, py-3); ctx.lineTo(px+3, py+3);
+      ctx.moveTo(px+3, py-3); ctx.lineTo(px-3, py+3);
+      ctx.stroke();
+    }
+  }
+  if (type === 'check') {
+    const gx = x + 12, gy = y - 48;
+    ctx.strokeStyle = C.GREEN;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(gx-4, gy); ctx.lineTo(gx, gy+4); ctx.lineTo(gx+6, gy-4);
+    ctx.stroke();
+  }
+}
+
+// ---- 影子 ----
+function drawShadow(ctx, x, y) {
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + 4, 14, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ============================================================================
+// 主引擎
+// ============================================================================
+const PixelAgent = {
+  canvas: null,
+  ctx: null,
+  animFrame: 0,
+  lastTime: 0,
+  charX: 0,
+  charY: 0,
+  targetX: 0,
+  targetY: 0,
+  state: 'idle',
+  flip: false,
+  particleType: null,
+  timer: 0,
+
+  // 房间各"站点"坐标
+  STATIONS: {
+    center:   { x: 0.5, y: 0.65 },
+    desk:     { x: 0.65, y: 0.62 },
+    shelf:    { x: 0.15, y: 0.58 },
+    window:   { x: 0.12, y: 0.28 },
+    door:     { x: 0.9, y: 0.68 },
+  },
+
+  init() {
+    this.canvas = document.getElementById('agent-canvas');
+    if (!this.canvas) return;
+
+    this.ctx = this.canvas.getContext('2d');
+    this.resize();
+
+    const st = this.STATIONS.center;
+    this.charX = this.canvas.width * st.x;
+    this.charY = this.canvas.height * st.y;
+    this.targetX = this.charX;
+    this.targetY = this.charY;
+
+    window.addEventListener('resize', () => this.resize());
+    this.lastTime = performance.now();
+    this.loop(this.lastTime);
+  },
+
+  resize() {
+    if (!this.canvas) return;
+    const rect = this.canvas.parentElement.getBoundingClientRect();
+    this.canvas.width = Math.max(rect.width, 180);
+    this.canvas.height = Math.max(rect.height, 200);
+    // 重新校准位置
+    const st = this.STATIONS[this._currentStation] || this.STATIONS.center;
+    this.targetX = this.canvas.width * st.x;
+    this.targetY = this.canvas.height * st.y;
+  },
+
+  goTo(station) {
+    if (!this.STATIONS[station]) {
+      station = 'center';
+    }
+    this._currentStation = station;
+    const st = this.STATIONS[station];
+    this.targetX = this.canvas.width * st.x;
+    this.targetY = this.canvas.height * st.y;
+  },
+
+  play(state, particle) {
+    if (ANIMATIONS[state]) {
+      this.state = state;
+      this.particleType = particle || null;
+      this.timer = 0;
+    }
+  },
+
+  _framesFor(state) {
+    const a = ANIMATIONS[state];
+    return a ? a.frames : ANIMATIONS.idle.frames;
+  },
+
+  _speedFor(state) {
+    const a = ANIMATIONS[state];
+    return a ? a.speed : 800;
+  },
+
+  loop(time) {
+    const dt = time - this.lastTime;
+    this.lastTime = time;
+    this.timer += dt;
+    const speed = this._speedFor(this.state);
+
+    // 帧动画
+    const frames = this._framesFor(this.state);
+    if (this.timer >= speed) {
+      this.timer = 0;
+      this.animFrame = (this.animFrame + 1) % frames.length;
+    }
+
+    // 移动（只有 walking 状态时实际移动；其他状态切换中间态）
+    const dx = this.targetX - this.charX;
+    const dy = this.targetY - this.charY;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+
+    if (dist > 3) {
+      const step = 1.2;
+      this.charX += (dx / dist) * step;
+      this.charY += (dy / dist) * step;
+      // 到达后切换状态
+      if (Math.abs(dx) < 2 && Math.abs(dy) < 2) {
+        this.charX = this.targetX;
+        this.charY = this.targetY;
+      }
+      // 方向翻转
+      if (Math.abs(dx) > 1) this.flip = dx < 0;
+    }
+
+    // 渲染
+    const { ctx, canvas: c } = this;
+    ctx.clearRect(0, 0, c.width, c.height);
+    drawBackground(ctx, c.width, c.height, time);
+    drawShadow(ctx, this.charX, this.charY);
+
+    // 粒子
+    if (this.particleType) {
+      drawParticles(ctx, this.charX, this.charY, time, this.particleType);
+    }
+
+    // 角色
+    const f = frames[this.animFrame];
+    drawSprite(ctx, f, this.charX, this.charY, this.flip);
+
+    requestAnimationFrame(t => this.loop(t));
+  },
 };
 
 // ============================================================================
-// 事件类型 → 机器人状态映射
+// 事件桥接 — Dashboard 调用
 // ============================================================================
 
-const STATE_MAP = {
-    // 原有映射
-    'workflow:started':  { cssClass: 'robot-thinking', label: '思考中...', particles: true },
-    'memory:retrieval':  { cssClass: 'robot-searching', label: '搜索记忆中...', particles: true },
-    'memory:retrieving': { cssClass: 'robot-searching', label: '搜索记忆中...', particles: true },
-    'memory:retrieved':  { cssClass: 'robot-working', label: '分析记忆中...', particles: true },
-    'rag:searched':      { cssClass: 'robot-working', label: '查阅知识库...', particles: true },
-    'workflow:planned':  { cssClass: 'robot-thinking', label: '规划执行中...', particles: true },
-    'execute:completed': { cssClass: 'robot-working', label: '执行完毕！', particles: true },
-    'eval:completed':    { cssClass: 'robot-working', label: '评测中...', particles: true },
-    'workflow:completed':{ cssClass: 'robot-celebrating', label: '全部完成！', particles: true },
-    'workflow:init':     { cssClass: 'robot-thinking', label: '准备就绪！', particles: true },
+const EVENT_TO_ANIM = {
+  // 基础
+  'workflow:started':   { state: 'thinking',  station: 'center', particle: null },
+  'memory:retrieval':   { state: 'searching', station: 'shelf',  particle: null },
+  'memory:retrieving':  { state: 'searching', station: 'shelf',  particle: null },
+  'memory:retrieved':   { state: 'working',   station: 'desk',   particle: null },
+  'rag:searched':       { state: 'working',   station: 'desk',   particle: null },
+  'workflow:planned':   { state: 'thinking',  station: 'window', particle: null },
+  'execute:completed':  { state: 'working',   station: 'desk',   particle: null },
+  'eval:completed':     { state: 'thinking',  station: 'desk',   particle: 'sparkle' },
+  'workflow:completed': { state: 'celebrate', station: 'center', particle: 'sparkle' },
+  'workflow:init':      { state: 'thinking',  station: 'center', particle: null },
 
-    // V3 新增事件映射
-    'budget:allocated':   { cssClass: 'robot-thinking', label: '算盘中...', particles: true },
-    'context:built':      { cssClass: 'robot-idle', label: '上下文就绪', particles: false },
-    'approval:required':  { cssClass: 'robot-idle', label: '等待审批...', particles: false, glowClass: 'glow-approval' },
-    'approval:pending':   { cssClass: 'robot-idle', label: '等待审批...', particles: false, glowClass: 'glow-approval' },
-    'workflow:paused':    { cssClass: 'robot-idle', label: '已暂停', particles: false },
-    'workflow:resumed':   { cssClass: 'robot-working', label: '继续执行...', particles: true },
-    'workflow:failed':    { cssClass: 'robot-idle', label: '执行失败', particles: false, glowClass: 'glow-error' },
-    'workflow:cancelled': { cssClass: 'robot-idle', label: '已取消', particles: false },
+  // V3
+  'budget:allocated':    { state: 'thinking',  station: 'desk',    particle: null },
+  'context:built':       { state: 'idle',      station: 'center',  particle: null },
+  'approval:required':   { state: 'idle',      station: 'center',  particle: null },
+  'approval:pending':    { state: 'idle',      station: 'center',  particle: null },
+  'workflow:paused':     { state: 'idle',      station: 'center',  particle: null },
+  'workflow:resumed':    { state: 'working',   station: 'desk',    particle: null },
+  'workflow:failed':     { state: 'idle',      station: 'center',  particle: 'red_x' },
+  'workflow:cancelled':  { state: 'idle',      station: 'center',  particle: null },
 
-    // V4 新增: SkillOpt 事件映射
-    'skillopt.epoch_started':        { cssClass: 'robot-skill-learning', label: '技能学习中...', particles: true },
-    'skillopt.rollouts_collected':   { cssClass: 'robot-skill-learning', label: '整理对话记录...', particles: true },
-    'skillopt.failures_analyzed':    { cssClass: 'robot-skill-learning', label: '复盘失败案例...', particles: true },
-    'skillopt.successes_analyzed':   { cssClass: 'robot-skill-learning', label: '发现成功模式...', particles: true },
-    'skillopt.patch_merged':         { cssClass: 'robot-skill-patching', label: '合并改进方案...', particles: true },
-    'skillopt.patch_ranked':         { cssClass: 'robot-skill-patching', label: '排序改进建议...', particles: true },
-    'skillopt.candidate_created':    { cssClass: 'robot-skill-patching', label: '生成候选技能...', particles: true },
-    'skillopt.validation_passed':    { cssClass: 'robot-skill-accepted', label: '验证通过！', particles: true, glowClass: 'glow-skill-accepted' },
-    'skillopt.validation_failed':    { cssClass: 'robot-skill-rejected', label: '验证未通过', particles: true, glowClass: 'glow-skill-rejected' },
-    'skillopt.rejected_buffer_updated': { cssClass: 'robot-skill-rejected', label: '放入废纸篓...', particles: true, glowClass: 'glow-skill-rejected' },
-    'skillopt.slow_update_created':  { cssClass: 'robot-skill-learning', label: '生成长期规律...', particles: true },
-    'skillopt.best_skill_exported':  { cssClass: 'robot-skill-exported', label: '导出最优技能！', particles: true, glowClass: 'glow-skill-accepted' },
+  // V4 SkillOpt
+  'skillopt.epoch_started':         { state: 'skill_learning',  station: 'shelf',   particle: null },
+  'skillopt.rollouts_collected':    { state: 'skill_learning',  station: 'desk',    particle: null },
+  'skillopt.failures_analyzed':     { state: 'skill_learning',  station: 'desk',    particle: 'red_x' },
+  'skillopt.successes_analyzed':    { state: 'skill_learning',  station: 'desk',    particle: 'check' },
+  'skillopt.patch_merged':          { state: 'skill_patching',  station: 'desk',    particle: null },
+  'skillopt.patch_ranked':          { state: 'skill_patching',  station: 'desk',    particle: null },
+  'skillopt.candidate_created':     { state: 'skill_patching',  station: 'desk',    particle: null },
+  'skillopt.validation_passed':     { state: 'skill_accepted',  station: 'center',  particle: 'sparkle' },
+  'skillopt.validation_failed':     { state: 'skill_rejected',  station: 'center',  particle: 'red_x' },
+  'skillopt.rejected_buffer_updated': { state: 'skill_rejected', station: 'center', particle: 'red_x' },
+  'skillopt.slow_update_created':   { state: 'skill_learning',  station: 'shelf',   particle: null },
+  'skillopt.best_skill_exported':   { state: 'skill_exported',  station: 'center',  particle: 'sparkle' },
 };
 
-const IDLE_STATE = { cssClass: 'robot-idle', label: '待命中...', particles: false };
-
-// ============================================================================
-// V4 新增: SkillOpt 本地解释映射
-// ============================================================================
-
-const SKILLOPT_EXPLANATIONS = {
-    'skillopt.epoch_started': '🔄 它开始了一轮技能学习：回顾最近的对话，找出哪里可以做得更好。',
-    'skillopt.rollouts_collected': '📝 它整理完了最近的对话记录，准备从中学习。',
-    'skillopt.failures_analyzed': '🔍 它正在复盘失败案例，找出用户反复不满意的地方。',
-    'skillopt.successes_analyzed': '✨ 它发现了一些做得很好的模式，准备把它们固化下来。',
-    'skillopt.patch_merged': '🧩 它正在把成功经验和失败教训合并成一份改进方案。',
-    'skillopt.patch_ranked': '📊 它在给改进建议排序：先解决最影响体验的问题。',
-    'skillopt.candidate_created': '📄 新的技能文档草案已生成，但它不会马上生效——要先通过验证。',
-    'skillopt.validation_passed': '✅ 新技能文档通过了验证测试！确实比原来的更好，马上更新。',
-    'skillopt.validation_failed': '❌ 这次改进在验证中表现不如预期，它把失败的尝试记录了下来。',
-    'skillopt.rejected_buffer_updated': '🗑️ 它把无效的修改放进了废纸篓，防止以后重复尝试。',
-    'skillopt.slow_update_created': '🐢 它总结了一些长期稳定的规律，写进了技能文档的深层保护区。',
-    'skillopt.best_skill_exported': '📦 最优技能文档已导出，可以部署给 AI 助手使用了。',
+const STATE_LABELS = {
+  idle: '待命中...', thinking: '思考中...', searching: '搜索中...',
+  working: '工作中...', celebrate: '全部完成！',
+  skill_learning: '技能学习中...', skill_patching: '修改技能中...',
+  skill_validating: '验证中...', skill_rejected: '未通过验证',
+  skill_accepted: '验证通过！', skill_exported: '已导出！',
 };
 
-// ============================================================================
-// 公共 API
-// ============================================================================
-
-/**
- * 根据事件类型更新机器人状态。
- * @param {string} eventType
- */
 function updateAvatar(eventType) {
-    const state = STATE_MAP[eventType] || IDLE_STATE;
-    const stage = document.getElementById('robot-stage');
-
-    if (!stage) return;
-
-    // 切换 CSS 类
-    stage.className = 'robot-stage ' + state.cssClass;
-
-    // V3: 特殊光环处理
-    const glow = stage.querySelector('.robot-glow');
-    if (glow) {
-        // 清除旧的光环类
-        glow.classList.remove('glow-approval', 'glow-error');
-        // 应用新的光环类
-        if (state.glowClass) {
-            glow.classList.add(state.glowClass);
-        }
-    }
-
-    // 更新标签
-    const label = document.getElementById('robot-status-label');
-    if (label) label.textContent = state.label;
-
-    // 粒子效果
-    if (state.particles) {
-        ParticleManager.start();
-    } else {
-        ParticleManager.stop();
-    }
+  const anim = EVENT_TO_ANIM[eventType];
+  if (!anim) {
+    PixelAgent.play('idle', null);
+    PixelAgent.goTo('center');
+    updateLabel('idle');
+    return;
+  }
+  PixelAgent.goTo(anim.station);
+  PixelAgent.play(anim.state, anim.particle);
+  updateLabel(anim.state);
 }
 
-/**
- * 重置到闲置状态。
- */
+function updateLabel(state) {
+  const label = document.getElementById('robot-status-label');
+  if (label) label.textContent = STATE_LABELS[state] || '工作中...';
+}
+
 function resetAvatar() {
-    const stage = document.getElementById('robot-stage');
-    if (!stage) return;
-    stage.className = 'robot-stage robot-idle';
-
-    // 清除特殊光环
-    const glow = stage.querySelector('.robot-glow');
-    if (glow) {
-        glow.classList.remove('glow-approval', 'glow-error');
-    }
-
-    const label = document.getElementById('robot-status-label');
-    if (label) label.textContent = IDLE_STATE.label;
-
-    ParticleManager.stop();
+  PixelAgent.play('idle', null);
+  PixelAgent.goTo('center');
+  updateLabel('idle');
 }
 
-// ============================================================================
-// 初始化
-// ============================================================================
+// ---- 初始化 ----
 document.addEventListener('DOMContentLoaded', () => {
-    ParticleManager.init();
+  PixelAgent.init();
 });

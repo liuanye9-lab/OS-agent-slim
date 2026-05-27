@@ -207,28 +207,26 @@ body::before {
 }
 
 /* --------------------------------------------------------------------------
-   左侧 — Hero 机器人区域
+   左侧 — 像素角色房间
    -------------------------------------------------------------------------- */
 .hero-panel {
-    width: 380px;
+    width: 420px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
     background: var(--color-surface);
     backdrop-filter: var(--blur);
     -webkit-backdrop-filter: var(--blur);
     border: 1px solid var(--color-glass-border);
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-md);
-    padding: 40px 32px;
-    gap: 24px;
+    padding: 24px 24px 28px;
+    gap: 16px;
     position: relative;
     overflow: hidden;
 }
 
-/* 玻璃面板上的微光 */
 .hero-panel::before {
     content: '';
     position: absolute;
@@ -246,153 +244,25 @@ body::before {
     z-index: 1;
 }
 
-/* 机器人舞台 */
-.robot-stage {
-    width: 200px;
-    height: 200px;
+/* Canvas 房间容器 */
+.room-container {
+    width: 100%;
+    height: 240px;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: #faf8f5;
+    border: 2px solid var(--color-glass-border-subtle);
     position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
 }
 
-/* 机器人光环 */
-.robot-glow {
-    position: absolute;
-    width: 140px;
-    height: 140px;
-    border-radius: 50%;
-    background: radial-gradient(circle, var(--color-accent-glow) 0%, transparent 70%);
-    animation: glow-breathe 3s ease-in-out infinite;
-    z-index: 0;
+.room-container canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    image-rendering: auto;
 }
 
-@keyframes glow-breathe {
-    0%, 100% { transform: scale(0.9); opacity: 0.6; }
-    50% { transform: scale(1.15); opacity: 1; }
-}
-
-/* CSS 像素画机器人 — 画布容器 */
-.robot-canvas {
-    width: 160px;
-    height: 160px;
-    position: relative;
-    z-index: 1;
-    image-rendering: pixelated;
-}
-
-/* 机器人部件 — 用 box-shadow 像素画 */
-.robot-sprite {
-    width: 4px;
-    height: 4px;
-    position: absolute;
-    border-radius: 0;
-    box-shadow:
-        /* 天线 */
-        72px 8px 0 2px var(--color-robot-gold),
-        76px 12px 0 2px var(--color-robot-gold),
-        /* 头部 — 金属灰色 */
-        72px 16px 0 2px var(--color-robot-body), 76px 16px 0 2px var(--color-robot-body),
-        68px 20px 0 2px var(--color-robot-body), 72px 20px 0 2px var(--color-robot-body), 76px 20px 0 2px var(--color-robot-body), 80px 20px 0 2px var(--color-robot-body),
-        64px 24px 0 2px var(--color-robot-body), 68px 24px 0 2px var(--color-robot-body), 72px 24px 0 2px var(--color-robot-body), 76px 24px 0 2px var(--color-robot-body), 80px 24px 0 2px var(--color-robot-body), 84px 24px 0 2px var(--color-robot-body),
-        64px 28px 0 2px var(--color-robot-body), 68px 28px 0 2px var(--color-robot-red), 72px 28px 0 2px var(--color-robot-body), 76px 28px 0 2px var(--color-robot-red), 80px 28px 0 2px var(--color-robot-body), 84px 28px 0 2px var(--color-robot-body),
-        64px 32px 0 2px var(--color-robot-body), 68px 32px 0 2px var(--color-robot-body), 72px 32px 0 2px var(--color-robot-light), 76px 32px 0 2px var(--color-robot-light), 80px 32px 0 2px var(--color-robot-body), 84px 32px 0 2px var(--color-robot-body),
-        68px 36px 0 2px var(--color-robot-body), 72px 36px 0 2px var(--color-robot-body), 76px 36px 0 2px var(--color-robot-body), 80px 36px 0 2px var(--color-robot-body),
-        /* 身体 */
-        68px 40px 0 2px var(--color-robot-body), 72px 40px 0 2px var(--color-robot-body), 76px 40px 0 2px var(--color-robot-body), 80px 40px 0 2px var(--color-robot-body),
-        64px 44px 0 2px var(--color-robot-body), 68px 44px 0 2px var(--color-robot-body), 72px 44px 0 2px var(--color-robot-gold), 76px 44px 0 2px var(--color-robot-gold), 80px 44px 0 2px var(--color-robot-body), 84px 44px 0 2px var(--color-robot-body),
-        64px 48px 0 2px var(--color-robot-body), 68px 48px 0 2px var(--color-robot-body), 72px 48px 0 2px var(--color-robot-body), 76px 48px 0 2px var(--color-robot-body), 80px 48px 0 2px var(--color-robot-body), 84px 48px 0 2px var(--color-robot-body),
-        64px 52px 0 2px var(--color-robot-body), 68px 52px 0 2px var(--color-robot-body), 72px 52px 0 2px var(--color-robot-body), 76px 52px 0 2px var(--color-robot-body), 80px 52px 0 2px var(--color-robot-body), 84px 52px 0 2px var(--color-robot-body),
-        /* 腿部 */
-        68px 56px 0 2px var(--color-robot-body), 72px 56px 0 2px var(--color-robot-body), 76px 56px 0 2px var(--color-robot-body), 80px 56px 0 2px var(--color-robot-body),
-        64px 60px 0 2px rgb(80,90,100), 68px 60px 0 2px rgb(70,80,90), 72px 60px 0 2px rgb(60,70,80), 76px 60px 0 2px rgb(70,80,90), 80px 60px 0 2px rgb(80,90,100), 84px 60px 0 2px rgb(80,90,100),
-        64px 64px 0 2px rgb(80,90,100), 68px 64px 0 2px rgb(70,80,90), 72px 64px 0 2px rgb(60,70,80), 76px 64px 0 2px rgb(70,80,90), 80px 64px 0 2px rgb(80,90,100), 84px 64px 0 2px rgb(80,90,100),
-        /* 手臂 */
-        52px 44px 0 2px var(--color-robot-body), 56px 44px 0 2px var(--color-robot-body), 60px 44px 0 2px var(--color-robot-body),
-        48px 48px 0 2px var(--color-robot-body), 52px 48px 0 2px rgb(90,100,110), 56px 48px 0 2px rgb(80,90,100), 60px 48px 0 2px var(--color-robot-body),
-        48px 52px 0 2px var(--color-robot-body), 52px 52px 0 2px rgb(90,100,110), 56px 52px 0 2px rgb(80,90,100),
-        88px 44px 0 2px var(--color-robot-body), 92px 44px 0 2px var(--color-robot-body), 96px 44px 0 2px var(--color-robot-body),
-        88px 48px 0 2px var(--color-robot-body), 92px 48px 0 2px rgb(80,90,100), 96px 48px 0 2px rgb(90,100,110), 100px 48px 0 2px var(--color-robot-body),
-        92px 52px 0 2px rgb(80,90,100), 96px 52px 0 2px rgb(90,100,110), 100px 52px 0 2px var(--color-robot-body);
-    /* 眼灯动画 */
-    transition: box-shadow 0.3s ease;
-}
-
-/* 机器人各状态动画 */
-.robot-idle .robot-sprite {
-    animation: robot-breathe 4s ease-in-out infinite;
-}
-
-.robot-thinking .robot-sprite {
-    animation: robot-think 1.2s ease-in-out infinite;
-}
-
-.robot-working .robot-sprite {
-    animation: robot-work 0.5s steps(2) infinite;
-    box-shadow:
-        72px 8px 0 2px var(--color-robot-gold),
-        76px 12px 0 2px #fff,
-        /* 亮黄天线 */
-        72px 16px 0 2px var(--color-robot-body), 76px 16px 0 2px var(--color-robot-body),
-        68px 20px 0 2px var(--color-robot-body), 72px 20px 0 2px var(--color-robot-body), 76px 20px 0 2px var(--color-robot-body), 80px 20px 0 2px var(--color-robot-body),
-        64px 24px 0 2px var(--color-robot-body), 68px 24px 0 2px var(--color-robot-body), 72px 24px 0 2px var(--color-robot-body), 76px 24px 0 2px var(--color-robot-body), 80px 24px 0 2px var(--color-robot-body), 84px 24px 0 2px var(--color-robot-body),
-        64px 28px 0 2px var(--color-robot-body), 68px 28px 0 2px var(--color-robot-red), 72px 28px 0 2px var(--color-robot-body), 76px 28px 0 2px var(--color-robot-red), 80px 28px 0 2px var(--color-robot-body), 84px 28px 0 2px var(--color-robot-body),
-        64px 32px 0 2px var(--color-robot-body), 68px 32px 0 2px var(--color-robot-body), 72px 32px 0 2px #fff, 76px 32px 0 2px #fff, 80px 32px 0 2px var(--color-robot-body), 84px 32px 0 2px var(--color-robot-body),
-        68px 36px 0 2px var(--color-robot-body), 72px 36px 0 2px var(--color-robot-body), 76px 36px 0 2px var(--color-robot-body), 80px 36px 0 2px var(--color-robot-body),
-        68px 40px 0 2px var(--color-robot-body), 72px 40px 0 2px var(--color-robot-body), 76px 40px 0 2px var(--color-robot-body), 80px 40px 0 2px var(--color-robot-body),
-        64px 44px 0 2px var(--color-robot-body), 68px 44px 0 2px var(--color-robot-body), 72px 44px 0 2px var(--color-robot-gold), 76px 44px 0 2px var(--color-robot-gold), 80px 44px 0 2px var(--color-robot-body), 84px 44px 0 2px var(--color-robot-body),
-        64px 48px 0 2px var(--color-robot-body), 68px 48px 0 2px var(--color-robot-body), 72px 48px 0 2px var(--color-robot-body), 76px 48px 0 2px var(--color-robot-body), 80px 48px 0 2px var(--color-robot-body), 84px 48px 0 2px var(--color-robot-body),
-        64px 52px 0 2px var(--color-robot-body), 68px 52px 0 2px var(--color-robot-body), 72px 52px 0 2px var(--color-robot-body), 76px 52px 0 2px var(--color-robot-body), 80px 52px 0 2px var(--color-robot-body), 84px 52px 0 2px var(--color-robot-body),
-        68px 56px 0 2px var(--color-robot-body), 72px 56px 0 2px var(--color-robot-body), 76px 56px 0 2px var(--color-robot-body), 80px 56px 0 2px var(--color-robot-body),
-        64px 60px 0 2px rgb(80,90,100), 68px 60px 0 2px rgb(70,80,90), 72px 60px 0 2px rgb(60,70,80), 76px 60px 0 2px rgb(70,80,90), 80px 60px 0 2px rgb(80,90,100), 84px 60px 0 2px rgb(80,90,100),
-        64px 64px 0 2px rgb(80,90,100), 68px 64px 0 2px rgb(70,80,90), 72px 64px 0 2px rgb(60,70,80), 76px 64px 0 2px rgb(70,80,90), 80px 64px 0 2px rgb(80,90,100), 84px 64px 0 2px rgb(80,90,100),
-        52px 44px 0 2px var(--color-robot-body), 56px 44px 0 2px var(--color-robot-body), 60px 44px 0 2px var(--color-robot-body),
-        48px 48px 0 2px var(--color-robot-body), 52px 48px 0 2px rgb(90,100,110), 56px 48px 0 2px rgb(80,90,100), 60px 48px 0 2px var(--color-robot-body),
-        48px 52px 0 2px var(--color-robot-body), 52px 52px 0 2px rgb(90,100,110), 56px 52px 0 2px rgb(80,90,100),
-        88px 44px 0 2px var(--color-robot-body), 92px 44px 0 2px var(--color-robot-body), 96px 44px 0 2px var(--color-robot-body),
-        88px 48px 0 2px var(--color-robot-body), 92px 48px 0 2px rgb(80,90,100), 96px 48px 0 2px rgb(90,100,110), 100px 48px 0 2px var(--color-robot-body),
-        92px 52px 0 2px rgb(80,90,100), 96px 52px 0 2px rgb(90,100,110), 100px 52px 0 2px var(--color-robot-body);
-}
-
-.robot-searching .robot-sprite {
-    animation: robot-search 0.8s ease-in-out infinite;
-}
-
-.robot-celebrating .robot-sprite {
-    animation: robot-celebrate 0.3s steps(3) infinite;
-}
-
-@keyframes robot-breathe {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-3px); }
-}
-
-@keyframes robot-think {
-    0%, 100% { transform: translateY(0) rotate(0deg); }
-    25% { transform: translateY(-2px) rotate(-1deg); }
-    75% { transform: translateY(-2px) rotate(1deg); }
-}
-
-@keyframes robot-work {
-    0% { transform: translateY(0); }
-    50% { transform: translateY(-4px); }
-    100% { transform: translateY(0); }
-}
-
-@keyframes robot-search {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-4px); }
-    75% { transform: translateX(4px); }
-}
-
-@keyframes robot-celebrate {
-    0% { transform: translateY(0) scale(1); }
-    33% { transform: translateY(-8px) scale(1.05); }
-    66% { transform: translateY(-2px) scale(1.02); }
-    100% { transform: translateY(0) scale(1); }
-}
-
-/* 机器人状态标签 */
+/* 状态标签 */
 .robot-status {
     font-size: 15px;
     font-weight: 600;
@@ -407,38 +277,7 @@ body::before {
     text-align: center;
     line-height: 1.6;
     min-height: 42px;
-    max-width: 280px;
-}
-
-/* 粒子效果层 */
-.particles-container {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    z-index: 2;
-}
-
-.particle {
-    position: absolute;
-    width: 3px;
-    height: 3px;
-    background: var(--color-accent);
-    border-radius: 50%;
-    opacity: 0;
-    animation: particle-float 3s ease-in-out infinite;
-}
-
-.particle:nth-child(1) { left: 30%; animation-delay: 0s; }
-.particle:nth-child(2) { left: 50%; animation-delay: 0.6s; }
-.particle:nth-child(3) { left: 70%; animation-delay: 1.2s; }
-.particle:nth-child(4) { left: 40%; animation-delay: 1.8s; }
-.particle:nth-child(5) { left: 60%; animation-delay: 2.4s; }
-
-@keyframes particle-float {
-    0% { bottom: 20%; opacity: 0; transform: translateY(0) scale(0); }
-    20% { opacity: 1; transform: translateY(-10px) scale(1); }
-    80% { opacity: 0.6; transform: translateY(-60px) scale(0.6); }
-    100% { bottom: 80%; opacity: 0; transform: translateY(-80px) scale(0); }
+    max-width: 300px;
 }
 
 /* --------------------------------------------------------------------------

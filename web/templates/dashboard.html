@@ -19,7 +19,7 @@
         <nav class="nav-bar">
             <div class="nav-brand">
                 <div class="nav-logo">S</div>
-                <h1 class="nav-title">StableAgent OS <span>· V3 实时观察</span></h1>
+                <h1 class="nav-title">StableAgent OS <span>· V5 实时观察</span></h1>
             </div>
             <div class="nav-status">
                 <div class="status-dot" id="ws-dot"></div>
@@ -49,24 +49,11 @@
         <!-- ============================================================= -->
         <div class="main-content">
 
-            <!-- 左侧：像素机器人 Hero 面板 -->
+            <!-- 左侧：像素角色房间面板 -->
             <aside class="hero-panel">
-                <!-- 粒子层 -->
-                <div class="particles-container" id="particles-layer" style="display:none;">
-                    <div class="particle"></div>
-                    <div class="particle"></div>
-                    <div class="particle"></div>
-                    <div class="particle"></div>
-                    <div class="particle"></div>
-                    <div class="particle"></div>
-                </div>
-
-                <!-- 机器人舞台 -->
-                <div class="robot-stage robot-idle" id="robot-stage">
-                    <div class="robot-glow"></div>
-                    <div class="robot-canvas">
-                        <div class="robot-sprite"></div>
-                    </div>
+                <!-- Canvas 房间 -->
+                <div class="room-container" id="room-container">
+                    <canvas id="agent-canvas"></canvas>
                 </div>
 
                 <!-- 状态说明 -->
