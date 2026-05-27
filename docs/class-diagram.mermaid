@@ -1,0 +1,299 @@
+classDiagram
+    %% ── 数据模型 ──
+    class SkillDocument {
+        +str id
+        +int version
+        +str content
+        +float created_at
+        +float updated_at
+        +str source
+        +float score
+        +int parent_version
+        +str status
+    }
+
+    class RolloutTrajectory {
+        +str id
+        +str task_input
+        +str task_type
+        +str user_intent_guess
+        +dict context_pack
+        +str skill_version
+        +str model_output
+        +str user_feedback
+        +dict eval_scores
+        +list~dict~ trace_events
+        +dict token_usage
+        +float created_at
+    }
+
+    class SkillEdit {
+        +str id
+        +str op
+        +str target
+        +str content
+        +str reason
+        +str source_type
+        +int support_count
+        +str risk_level
+        +float created_at
+    }
+
+    class SkillPatch {
+        +str id
+        +list~SkillEdit~ edits
+        +str reasoning
+        +list~str~ source_rollout_ids
+        +float estimated_impact
+        +float estimated_risk
+        +float created_at
+    }
+
+    class ValidationResult {
+        +str candidate_skill_version
+        +str baseline_skill_version
+        +float baseline_score
+        +float candidate_score
+        +bool passed
+        +float score_delta
+        +list~str~ regression_cases
+        +str explanation
+    }
+
+    class UserIntentProfile {
+        +str user_id
+        +dict explicit_intents
+        +dict implicit_intents
+        +dict output_preferences
+        +list~str~ rejection_signals
+        +list~str~ correction_signals
+        +float updated_at
+    }
+
+    class IntentTaxonomy {
+        +list~str~ categories
+        +dict category_rules
+    }
+
+    class RejectedEdit {
+        +str id
+        +str edit_content
+        +str reason
+        +float rejected_at
+        +int rejection_count
+    }
+
+    %% ── 服务类 ──
+    class SkillDocumentStore {
+        -str _base_path
+        -str _versions_path
+        +load_current_skill() SkillDocument
+        +load_best_skill() SkillDocument
+        +save_candidate_skill(SkillDocument) str
+        +promote_to_current(str) SkillDocument
+        +promote_to_best(str) SkillDocument
+        +list_versions() list~SkillDocument~
+        +diff_versions(str, str) str
+    }
+
+    class RolloutCollector {
+        -str _storage_dir
+        -SkillDocumentStore _skill_store
+        +collect_from_workflow_run(dict) RolloutTrajectory
+        +save_rollout(RolloutTrajectory) None
+        +load_recent_rollouts(int) list~RolloutTrajectory~
+        +split_success_failure(list~RolloutTrajectory~) tuple
+    }
+
+    class IntentSignalExtractor {
+        -IntentTaxonomy _taxonomy
+        +extract(RolloutTrajectory) dict
+    }
+
+    class SuccessFailureAnalyzer {
+        -IntentSignalExtractor _intent_extractor
+        +analyze_failures(list~RolloutTrajectory~, SkillDocument, int) SkillPatch
+        +analyze_successes(list~RolloutTrajectory~, SkillDocument, int) SkillPatch
+    }
+
+    class PatchMerger {
+        -RejectedEditBuffer _rejected_buffer
+        +merge(SkillPatch, SkillPatch, RejectedEditBuffer) SkillPatch
+        -_deduplicate(list~SkillEdit~) list~SkillEdit~
+        -_resolve_conflicts(list~SkillEdit~) list~SkillEdit~
+    }
+
+    class PatchRanker {
+        +rank(SkillPatch, int) SkillPatch
+        -_score_edit(SkillEdit) float
+    }
+
+    class PatchApplier {
+        +apply(SkillDocument, SkillPatch) SkillDocument
+        -_apply_append(str, SkillEdit) str
+        -_apply_insert_after(str, SkillEdit) str
+        -_apply_replace(str, SkillEdit) str
+        -_apply_delete(str, SkillEdit) str
+        -_protect_slow_update_region(str) tuple~str,str,str~
+    }
+
+    class ValidationGate {
+        -ValidationDataset _dataset
+        -RegressionSuite _regression
+        -RubricJudge _judge
+        +validate(SkillDocument, SkillDocument, list) ValidationResult
+        -_run_eval(SkillDocument, list) float
+        -_check_regressions(SkillDocument, SkillDocument, list) list~str~
+    }
+
+    class RejectedEditBuffer {
+        -str _buffer_path
+        +add_rejected(SkillEdit, str) None
+        +load_recent(int) list~RejectedEdit~
+        +is_similar_to_rejected(SkillEdit) bool
+    }
+
+    class SlowMetaUpdater {
+        -OptimizerMemory _memory
+        +generate_slow_update(SkillDocument, SkillDocument, list) SkillPatch
+    }
+
+    class OptimizerMemory {
+        -str _meta_skill_path
+        +load_meta_skill() str
+        +update_meta_skill(str) None
+    }
+
+    class SkillExporter {
+        -SkillDocumentStore _store
+        +export_best_skill() str
+        +export_version(str) str
+    }
+
+    class SkillOptimizationEngine {
+        -SkillDocumentStore _doc_store
+        -RolloutCollector _collector
+        -SuccessFailureAnalyzer _analyzer
+        -PatchMerger _merger
+        -PatchRanker _ranker
+        -PatchApplier _applier
+        -ValidationGate _gate
+        -RejectedEditBuffer _rej_buffer
+        -SlowMetaUpdater _slow_updater
+        -OptimizerMemory _memory
+        -SkillExporter _exporter
+        -EventBus _event_bus
+        +run_epoch(int, int, int) ValidationResult
+        +run_step(list~RolloutTrajectory~, int) ValidationResult
+        +export_best_skill() str
+        +get_status() dict
+    }
+
+    class PromptContracts {
+        +str SKILL_STRUCTURE_CONTRACT
+        +str SLOW_UPDATE_MARKER_START
+        +str SLOW_UPDATE_MARKER_END
+        +validate_structure(str) bool
+    }
+
+    class ValidationDataset {
+        -str _data_dir
+        +load_cases() list
+        +add_case(dict) None
+        +remove_case(str) None
+    }
+
+    class RegressionSuite {
+        +check_regressions(SkillDocument, SkillDocument, list) list~str~
+    }
+
+    class RubricJudge {
+        +score(str, str) float
+    }
+
+    %% ── V3 修改类 ──
+    class StableAgentOrchestrator {
+        +SkillOptimizationEngine skill_opt_engine
+        +run_skill_optimization_epoch() ValidationResult
+    }
+
+    class WorkflowEngine {
+        +_step_skillopt_collecting(Workflow) None
+        +_step_skillopt_scoring(Workflow) None
+    }
+
+    class EventBus {
+        +publish(Event) None
+        +subscribe(Callable) None
+    }
+
+    %% ── 枚举 ──
+    class SkillDocumentStatus {
+        <<enumeration>>
+        DRAFT
+        CURRENT
+        BEST
+        REJECTED
+        ARCHIVED
+    }
+
+    class SkillEditOp {
+        <<enumeration>>
+        APPEND
+        INSERT_AFTER
+        REPLACE
+        DELETE
+    }
+
+    class SkillOptWorkflowState {
+        <<enumeration>>
+        IDLE
+        COLLECTING
+        SCORING
+        SPLITTING
+        REFLECTING
+        PATCHING
+        MERGING
+        RANKING
+        APPLYING
+        VALIDATING
+        EXPORTING
+    }
+
+    %% ── 组合关系 ──
+    SkillOptimizationEngine *-- SkillDocumentStore
+    SkillOptimizationEngine *-- RolloutCollector
+    SkillOptimizationEngine *-- SuccessFailureAnalyzer
+    SkillOptimizationEngine *-- PatchMerger
+    SkillOptimizationEngine *-- PatchRanker
+    SkillOptimizationEngine *-- PatchApplier
+    SkillOptimizationEngine *-- ValidationGate
+    SkillOptimizationEngine *-- RejectedEditBuffer
+    SkillOptimizationEngine *-- SlowMetaUpdater
+    SkillOptimizationEngine *-- OptimizerMemory
+    SkillOptimizationEngine *-- SkillExporter
+
+    ValidationGate *-- ValidationDataset
+    ValidationGate *-- RegressionSuite
+    ValidationGate *-- RubricJudge
+
+    %% ── 依赖关系 ──
+    RolloutCollector --> SkillDocumentStore : reads skill version
+    SuccessFailureAnalyzer --> IntentSignalExtractor : uses
+    PatchMerger --> RejectedEditBuffer : checks
+    SlowMetaUpdater --> OptimizerMemory : reads/writes
+    SkillOptimizationEngine --> EventBus : publishes events
+    StableAgentOrchestrator --> SkillOptimizationEngine : owns
+    StableAgentOrchestrator --> WorkflowEngine : owns
+
+    %% ── 数据包含关系 ──
+    SkillPatch "1" --> "*" SkillEdit : contains
+    SkillDocumentStore --> SkillDocument : manages
+    RolloutCollector --> RolloutTrajectory : collects
+    ValidationGate --> ValidationResult : produces
+    RejectedEditBuffer --> RejectedEdit : stores
+    IntentSignalExtractor --> IntentTaxonomy : uses
+
+    %% ── 枚举使用 ──
+    SkillDocument --> SkillDocumentStatus : status
+    SkillEdit --> SkillEditOp : op

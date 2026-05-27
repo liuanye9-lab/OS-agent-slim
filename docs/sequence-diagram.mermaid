@@ -1,0 +1,100 @@
+sequenceDiagram
+    actor User
+    participant Orch as StableAgentOrchestrator
+    participant Engine as SkillOptimizationEngine
+    participant Collector as RolloutCollector
+    participant Extractor as IntentSignalExtractor
+    participant Analyzer as SuccessFailureAnalyzer
+    participant Merger as PatchMerger
+    participant Ranker as PatchRanker
+    participant Applier as PatchApplier
+    participant Gate as ValidationGate
+    participant Buffer as RejectedEditBuffer
+    participant Store as SkillDocumentStore
+    participant Bus as EventBus
+    participant Exporter as SkillExporter
+
+    User->>Orch: run_skill_optimization_epoch()
+    Orch->>Engine: run_epoch(max_rollouts=40, reflection_batch_size=8, edit_budget=4)
+
+    rect rgb(240, 248, 255)
+        Note over Engine,Collector: Step 1-2: Rollout & Score
+        Engine->>Bus: publish(skillopt:epoch_started)
+        Engine->>Collector: load_recent_rollouts(40)
+        Collector-->>Engine: list~RolloutTrajectory~
+
+        loop For each trajectory
+            Engine->>Extractor: extract(trajectory)
+            Extractor-->>Engine: intent_signals dict
+            Engine->>Engine: compute overall_score
+        end
+    end
+
+    rect rgb(255, 248, 240)
+        Note over Engine,Analyzer: Step 3-4: Split & Reflect
+        Engine->>Collector: split_success_failure(trajectories)
+        Collector-->>Engine: (successes, failures)
+
+        Engine->>Store: load_current_skill()
+        Store-->>Engine: current_skill: SkillDocument
+
+        Engine->>Analyzer: analyze_failures(failures, current_skill, edit_budget)
+        Analyzer-->>Engine: failure_patch: SkillPatch
+
+        Engine->>Analyzer: analyze_successes(successes, current_skill, edit_budget)
+        Analyzer-->>Engine: success_patch: SkillPatch
+    end
+
+    rect rgb(240, 255, 240)
+        Note over Engine,Ranker: Step 5-7: Patch → Merge → Rank
+        Engine->>Buffer: load_recent(50)
+        Buffer-->>Engine: rejected_edits
+
+        Engine->>Merger: merge(failure_patch, success_patch, rejected_buffer)
+        Merger-->>Engine: merged_patch: SkillPatch
+
+        Engine->>Ranker: rank(merged_patch, edit_budget)
+        Ranker-->>Engine: ranked_patch: SkillPatch (bounded)
+    end
+
+    rect rgb(255, 240, 255)
+        Note over Engine,Gate: Step 8-9: Apply & Validate
+        Engine->>Applier: apply(current_skill, ranked_patch)
+        Applier-->>Engine: candidate_skill: SkillDocument
+
+        Engine->>Store: save_candidate_skill(candidate_skill)
+        Store-->>Engine: candidate_version_id
+
+        Engine->>Gate: validate(current_skill, candidate_skill, validation_cases)
+        Gate-->>Engine: result: ValidationResult
+
+        alt result.passed == true
+            Engine->>Store: promote_to_current(candidate_version_id)
+            Engine->>Bus: publish(skillopt:skill_updated)
+            Engine->>Bus: publish(skillopt:validation_passed)
+
+            opt candidate_score significantly better
+                Engine->>Store: promote_to_best(candidate_version_id)
+                Engine->>Exporter: export_best_skill()
+                Exporter-->>Engine: best_skill_path
+            end
+        else result.passed == false
+            Engine->>Buffer: add_rejected(each edit in ranked_patch)
+            Engine->>Bus: publish(skillopt:validation_failed)
+        end
+    end
+
+    rect rgb(248, 248, 248)
+        Note over Engine,Exporter: Step 10-11-12: Buffer → Slow Update → Export
+        Engine->>Buffer: add_rejected(edits)
+        Buffer-->>Engine: ok
+
+        opt epoch_count % 10 == 0
+            Engine->>Engine: generate_slow_update()
+        end
+
+        Engine->>Bus: publish(skillopt:epoch_completed)
+    end
+
+    Engine-->>Orch: ValidationResult
+    Orch-->>User: optimization result summary

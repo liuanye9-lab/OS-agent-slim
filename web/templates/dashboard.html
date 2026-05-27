@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StableAgent OS · 实时观察</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230071e3'/><text x='50%25' y='55%25' dominant-baseline='central' text-anchor='middle' fill='white' font-size='18' font-family='system-ui'>S</text></svg>">
+</head>
+<body>
+    <!-- ================================================================= -->
+    <!-- 主应用容器 -->
+    <!-- ================================================================= -->
+    <div class="app-container">
+
+        <!-- ============================================================= -->
+        <!-- 顶部导航栏 — 玻璃半透明 -->
+        <!-- ============================================================= -->
+        <nav class="nav-bar">
+            <div class="nav-brand">
+                <div class="nav-logo">S</div>
+                <h1 class="nav-title">StableAgent OS <span>· V3 实时观察</span></h1>
+            </div>
+            <div class="nav-status">
+                <div class="status-dot" id="ws-dot"></div>
+                <span id="ws-text">连接中...</span>
+            </div>
+        </nav>
+
+        <!-- ============================================================= -->
+        <!-- V3 新增：任务提交区域 -->
+        <!-- ============================================================= -->
+        <div class="task-submit-area" id="task-submit-area">
+            <input
+                type="text"
+                id="task-input"
+                class="task-input"
+                placeholder="输入任务描述，然后按回车或点击发起任务..."
+                onkeydown="if(event.key==='Enter')submitTask()"
+            />
+            <button class="task-submit-btn" onclick="submitTask()">发起任务</button>
+            <select class="run-selector" id="run-selector" onchange="onRunSelect()">
+                <option value="">-- Run 历史 --</option>
+            </select>
+        </div>
+
+        <!-- ============================================================= -->
+        <!-- 主体内容 — Hero 机器人 + 时间线 -->
+        <!-- ============================================================= -->
+        <div class="main-content">
+
+            <!-- 左侧：像素机器人 Hero 面板 -->
+            <aside class="hero-panel">
+                <!-- 粒子层 -->
+                <div class="particles-container" id="particles-layer" style="display:none;">
+                    <div class="particle"></div>
+                    <div class="particle"></div>
+                    <div class="particle"></div>
+                    <div class="particle"></div>
+                    <div class="particle"></div>
+                    <div class="particle"></div>
+                </div>
+
+                <!-- 机器人舞台 -->
+                <div class="robot-stage robot-idle" id="robot-stage">
+                    <div class="robot-glow"></div>
+                    <div class="robot-canvas">
+                        <div class="robot-sprite"></div>
+                    </div>
+                </div>
+
+                <!-- 状态说明 -->
+                <div class="robot-status" id="robot-status-label">待命中...</div>
+                <div class="robot-explanation" id="robot-explanation">
+                    等待任务开始...
+                </div>
+
+                <!-- V3 新增：Token 仪表 -->
+                <div class="token-bar-container" id="token-bar-container">
+                    <div class="token-bar-label">
+                        <span>Token 已用 / 预算</span>
+                        <span id="token-bar-text">0 / 0</span>
+                    </div>
+                    <div class="token-bar-track">
+                        <div class="token-bar-fill" id="token-bar-fill" style="width: 0%;"></div>
+                    </div>
+                </div>
+
+                <!-- V4 新增：Skill 学习面板 -->
+                <div class="skill-panel" id="skill-panel">
+                    <div class="skill-panel-title">🧠 技能学习</div>
+                    <div class="skill-panel-status" id="skill-panel-status">
+                        <span class="skill-panel-label">状态：</span>
+                        <span id="skill-epoch-text">未启动</span>
+                    </div>
+                    <div class="skill-panel-versions" id="skill-panel-versions">
+                        <span>当前版本：<strong id="skill-current-ver">-</strong></span>
+                        <span>最优版本：<strong id="skill-best-ver">-</strong></span>
+                    </div>
+                    <button class="skill-trigger-btn" onclick="triggerOptimizationEpoch()">
+                        ⚡ 触发一轮学习
+                    </button>
+                </div>
+            </aside>
+
+            <!-- 右侧：事件时间线面板 -->
+            <section class="content-panel">
+                <!-- 面板头部 -->
+                <div class="panel-header">
+                    <h2 class="panel-title">事件时间线</h2>
+                    <div class="panel-actions">
+                        <div class="segmented-control">
+                            <button class="segment-btn active" id="btn-simple" onclick="switchMode('simple')">
+                                简易
+                            </button>
+                            <button class="segment-btn" id="btn-expert" onclick="switchMode('expert')">
+                                专业
+                            </button>
+                        </div>
+                        <button class="btn-icon" onclick="clearTimeline()" title="清空时间线">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+                                <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M6 7v5M10 7v5M3 4l1 9a1 1 0 001 1h6a1 1 0 001-1l1-9"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 时间线列表 -->
+                <div class="timeline-list" id="timeline-list">
+                    <div class="timeline-empty" id="timeline-empty">
+                        <div class="empty-icon">📡</div>
+                        <div class="empty-text">等待事件...</div>
+                        <div class="empty-hint">发起任务后将在此处显示实时事件</div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- ============================================================= -->
+        <!-- V3 新增：Bad Case 角落卡片 -->
+        <!-- ============================================================= -->
+        <div class="bad-case-corner" id="bad-case-corner">
+            <div class="bad-case-header" onclick="toggleBadCases()">
+                <span class="bad-case-title">⚠️ Bad Cases</span>
+                <span class="bad-case-count" id="bad-case-count">0</span>
+            </div>
+            <div class="bad-case-list" id="bad-case-list" style="display:none;"></div>
+        </div>
+
+        <!-- ============================================================= -->
+        <!-- V4 新增：Skill 状态卡片（Bad Case 卡片旁边） -->
+        <!-- ============================================================= -->
+        <div class="skill-status-corner" id="skill-status-corner">
+            <div class="skill-status-card">
+                <div class="skill-status-header">🧠 技能状态</div>
+                <div class="skill-status-row">
+                    <span>当前版本</span>
+                    <span class="skill-status-val" id="skill-card-current">-</span>
+                </div>
+                <div class="skill-status-row">
+                    <span>最优版本</span>
+                    <span class="skill-status-val" id="skill-card-best">-</span>
+                </div>
+                <div class="skill-status-row">
+                    <span>优化回合</span>
+                    <span class="skill-status-val" id="skill-card-epochs">0</span>
+                </div>
+                <div class="skill-status-row">
+                    <span>通过 / 拒绝</span>
+                    <span class="skill-status-val">
+                        <span style="color:var(--color-success)" id="skill-card-accepted">0</span>
+                        /
+                        <span style="color:var(--color-danger)" id="skill-card-rejected">0</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- Scripts -->
+    <!-- ================================================================= -->
+    <script src="/static/pixel_avatar.js"></script>
+    <script>
+        // ================================================================
+        // 全局状态
+        // ================================================================
+        let currentMode = 'simple';
+        let ws = null;
+        let reconnectTimer = null;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT = 10;
+
+        // ================================================================
+        // WebSocket 连接
+        // ================================================================
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/dashboard/ws/events`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                reconnectAttempts = 0;
+                updateWsStatus('connected');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'event') {
+                        const evt = msg.data;
+                        addTimelineEntry(evt);
+                        updateAvatar(evt.type);
+                        fetchExplanation(evt.type);
+                    }
+                } catch (err) {
+                    console.error('[WS] Parse error:', err);
+                }
+            };
+
+            ws.onclose = () => {
+                updateWsStatus('disconnected');
+                scheduleReconnect();
+            };
+
+            ws.onerror = () => {
+                updateWsStatus('disconnected');
+            };
+        }
+
+        function scheduleReconnect() {
+            if (reconnectAttempts >= MAX_RECONNECT) {
+                updateWsStatus('failed');
+                return;
+            }
+            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+            reconnectAttempts++;
+            clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(() => {
+                updateWsStatus('reconnecting');
+                connectWebSocket();
+            }, delay);
+        }
+
+        function updateWsStatus(status) {
+            const dot = document.getElementById('ws-dot');
+            const text = document.getElementById('ws-text');
+            if (!dot || !text) return;
+
+            dot.className = 'status-dot';
+            switch (status) {
+                case 'connected':
+                    dot.classList.add('connected');
+                    text.textContent = '已连接';
+                    break;
+                case 'disconnected':
+                    dot.classList.add('disconnected');
+                    text.textContent = '已断开';
+                    break;
+                case 'reconnecting':
+                    dot.classList.add('reconnecting');
+                    text.textContent = `重连中 (${reconnectAttempts})`;
+                    break;
+                case 'failed':
+                    dot.classList.add('failed');
+                    text.textContent = '连接失败';
+                    break;
+            }
+        }
+
+        // ================================================================
+        // 时间线
+        // ================================================================
+
+        function addTimelineEntry(evt) {
+            const list = document.getElementById('timeline-list');
+            const empty = document.getElementById('timeline-empty');
+            if (empty) empty.style.display = 'none';
+
+            const timeStr = formatTimestamp(evt.timestamp);
+            const explanation = getLocalExplanation(evt.type);
+
+            const entry = document.createElement('div');
+            entry.className = 'timeline-entry';
+            entry.innerHTML = `
+                <div class="entry-time">${timeStr}</div>
+                <div class="entry-body">
+                    <span class="entry-tag">${escapeHtml(evt.type)}</span>
+                    <span class="entry-explanation simple-view">${explanation}</span>
+                    <pre class="entry-json expert-view" style="display:none;">${escapeHtml(JSON.stringify(evt, null, 2))}</pre>
+                </div>
+            `;
+
+            if (currentMode === 'expert') {
+                entry.querySelector('.simple-view').style.display = 'none';
+                entry.querySelector('.expert-view').style.display = 'block';
+            }
+
+            list.insertBefore(entry, list.firstChild);
+
+            // 限制 200 条
+            let count = 0;
+            for (const child of list.children) {
+                if (child.classList.contains('timeline-entry')) count++;
+            }
+            while (count > 200) {
+                const last = list.querySelector('.timeline-entry:last-child');
+                if (last) { last.remove(); count--; }
+            }
+        }
+
+        function clearTimeline() {
+            const list = document.getElementById('timeline-list');
+            list.innerHTML = `
+                <div class="timeline-empty" id="timeline-empty">
+                    <div class="empty-icon">📡</div>
+                    <div class="empty-text">已清空，等待新事件...</div>
+                    <div class="empty-hint">发起任务后将在此处显示实时事件</div>
+                </div>
+            `;
+        }
+
+        // ================================================================
+        // 模式切换
+        // ================================================================
+
+        function switchMode(mode) {
+            currentMode = mode;
+            document.getElementById('btn-simple').classList.toggle('active', mode === 'simple');
+            document.getElementById('btn-expert').classList.toggle('active', mode === 'expert');
+
+            document.querySelectorAll('.timeline-entry').forEach(entry => {
+                const sv = entry.querySelector('.simple-view');
+                const ev = entry.querySelector('.expert-view');
+                if (!sv || !ev) return;
+                sv.style.display = mode === 'simple' ? '' : 'none';
+                ev.style.display = mode === 'expert' ? 'block' : 'none';
+            });
+        }
+
+        // ================================================================
+        // 解释获取
+        // ================================================================
+
+        async function fetchExplanation(eventType) {
+            try {
+                const resp = await fetch(`/dashboard/explain/${encodeURIComponent(eventType)}`);
+                const data = await resp.json();
+                updateRobotExplanation(data.explanation);
+            } catch {
+                updateRobotExplanation(getLocalExplanation(eventType));
+            }
+        }
+
+        function updateRobotExplanation(text) {
+            const el = document.getElementById('robot-explanation');
+            if (el) el.textContent = text;
+        }
+
+        // ================================================================
+        // V3 新增：任务提交
+        // ================================================================
+
+        async function submitTask() {
+            const input = document.getElementById('task-input');
+            const taskText = input.value.trim();
+            if (!taskText) return;
+
+            // 显示提交状态
+            updateRobotExplanation('正在提交任务...');
+            resetAvatar();
+            clearTimeline();
+
+            try {
+                const res = await fetch('/mcp/api/process_task', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ task_input: taskText })
+                });
+                const data = await res.json();
+                if (data.code === 0) {
+                    updateRobotExplanation('任务已提交，等待事件推送...');
+                    // 刷新 run 历史和 token
+                    fetchRunHistory();
+                    fetchTokenBudget();
+                } else {
+                    updateRobotExplanation('任务提交失败：' + (data.message || '未知错误'));
+                }
+            } catch (err) {
+                updateRobotExplanation('网络错误，无法提交任务');
+                console.error('[Task] Submit error:', err);
+            }
+
+            input.value = '';
+        }
+
+        // ================================================================
+        // V3 新增：Run 历史
+        // ================================================================
+
+        async function fetchRunHistory() {
+            try {
+                const res = await fetch('/dashboard/api/summary');
+                const data = await res.json();
+                if (!data.ok) return;
+
+                const sel = document.getElementById('run-selector');
+                // 保留第一个 option（占位符）
+                sel.innerHTML = '<option value="">-- Run 历史 (' + (data.summary.run_count || 0) + ' 条) --</option>';
+
+                // 从 storage 获取详细 runs
+                try {
+                    const runsRes = await fetch('/dashboard/api/eval-trend');
+                    const runsData = await runsRes.json();
+                    if (runsData.ok && runsData.scores) {
+                        runsData.scores.forEach(r => {
+                            const opt = document.createElement('option');
+                            opt.value = r.run_id;
+                            opt.textContent = `[${r.overall_score != null ? r.overall_score.toFixed(2) : 'N/A'}] ${r.task}`;
+                            sel.appendChild(opt);
+                        });
+                    }
+                } catch (e) {
+                    console.error('[Runs] Fetch error:', e);
+                }
+            } catch (err) {
+                console.error('[Summary] Fetch error:', err);
+            }
+        }
+
+        function onRunSelect() {
+            const sel = document.getElementById('run-selector');
+            const runId = sel.value;
+            if (!runId) return;
+            fetchRunTrace(runId);
+        }
+
+        async function fetchRunTrace(runId) {
+            try {
+                const res = await fetch(`/dashboard/api/run/${runId}/trace`);
+                const data = await res.json();
+                if (data.ok && data.spans) {
+                    updateRobotExplanation(`Run ${runId.slice(0, 8)}: ${data.count} 条 trace span`);
+                }
+            } catch (err) {
+                console.error('[Trace] Fetch error:', err);
+            }
+        }
+
+        // ================================================================
+        // V3 新增：Token 仪表
+        // ================================================================
+
+        async function fetchTokenBudget() {
+            try {
+                const res = await fetch('/dashboard/api/summary');
+                const data = await res.json();
+                if (!data.ok) return;
+
+                const runCount = data.summary.run_count || 0;
+                const usedTokens = runCount * 500; // 粗略估算
+                const budget = 8000;
+
+                document.getElementById('token-bar-text').textContent =
+                    `${usedTokens} / ${budget}`;
+
+                const pct = Math.min(100, (usedTokens / budget) * 100);
+                document.getElementById('token-bar-fill').style.width = pct + '%';
+            } catch (err) {
+                console.error('[Token] Fetch error:', err);
+            }
+        }
+
+        // ================================================================
+        // V3 新增：Bad Case 角落卡片
+        // ================================================================
+
+        async function fetchBadCases() {
+            try {
+                const res = await fetch('/dashboard/api/bad-cases?limit=3');
+                const data = await res.json();
+                if (!data.ok) return;
+
+                document.getElementById('bad-case-count').textContent =
+                    data.count || 0;
+
+                const list = document.getElementById('bad-case-list');
+                list.innerHTML = '';
+                (data.bad_cases || []).forEach(bc => {
+                    const card = document.createElement('div');
+                    card.className = 'bad-case-card';
+                    const timeStr = new Date(bc.timestamp * 1000).toLocaleTimeString('zh-CN', {
+                        hour: '2-digit', minute: '2-digit'
+                    });
+                    card.innerHTML = `
+                        <div class="bad-case-card-type">${escapeHtml(bc.task_type)}</div>
+                        <div class="bad-case-card-text">${escapeHtml(bc.input_context || '')}</div>
+                        <div class="bad-case-card-score">评分: ${bc.overall_score != null ? bc.overall_score.toFixed(2) : 'N/A'}</div>
+                    `;
+                    list.appendChild(card);
+                });
+            } catch (err) {
+                console.error('[BadCase] Fetch error:', err);
+            }
+        }
+
+        function toggleBadCases() {
+            const list = document.getElementById('bad-case-list');
+            const isVisible = list.style.display !== 'none';
+            list.style.display = isVisible ? 'none' : 'block';
+            if (!isVisible) fetchBadCases();
+        }
+
+        // ================================================================
+        // 辅助
+        // ================================================================
+
+        function formatTimestamp(ts) {
+            const d = new Date(ts * 1000);
+            return d.toLocaleTimeString('zh-CN', {
+                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+            });
+        }
+
+        function getLocalExplanation(eventType) {
+            const map = {
+                'workflow:started': '它刚刚接到任务，开始思考怎么处理。',
+                'memory:retrieval': '它正在翻找以前的记忆卡片，看看有没有相似的经验。',
+                'memory:retrieving': '它正在翻找以前的记忆卡片，看看有没有相似的经验。',
+                'memory:retrieved': '找到了一些相关的记忆，正在筛选最有用的那些。',
+                'rag:searched': '它正在查阅知识库，寻找参考资料。',
+                'workflow:planned': '它正在估算这次要花多少 token，选择用大模型还是小模型。',
+                'execute:completed': '任务执行完毕，正在检查结果质量。',
+                'eval:completed': '它正在给自己打分，看看这次做得怎么样。',
+                'workflow:completed': '全部完成！正在总结经验，把好的做法记录下来。',
+                'workflow:init': '🚀 准备工作就绪，马上开始处理任务。',
+                'context:built': '上下文已构建完成，开始进入执行流程。',
+                'budget:allocated': '📐 Token 预算已分配，准备执行。',
+                'approval:required': '✋ 需要审批才能继续。',
+                'approval:pending': '✋ 等待审批中。',
+                'workflow:paused': '⏸️ 工作流已暂停。',
+                'workflow:resumed': '▶️ 工作流已恢复。',
+                'workflow:failed': '❌ 工作流执行失败。',
+                // V4 SkillOpt 事件
+                'skillopt.epoch_started': '🔄 它开始了一轮技能学习：回顾最近的对话，找出哪里可以做得更好。',
+                'skillopt.rollouts_collected': '📝 它整理完了最近的对话记录，准备从中学习。',
+                'skillopt.failures_analyzed': '🔍 它正在复盘失败案例，找出用户反复不满意的地方。',
+                'skillopt.successes_analyzed': '✨ 它发现了一些做得很好的模式，准备把它们固化下来。',
+                'skillopt.patch_merged': '🧩 它正在把成功经验和失败教训合并成一份改进方案。',
+                'skillopt.patch_ranked': '📊 它在给改进建议排序：先解决最影响体验的问题。',
+                'skillopt.candidate_created': '📄 新的技能文档草案已生成，但它不会马上生效——要先通过验证。',
+                'skillopt.validation_passed': '✅ 新技能文档通过了验证测试！确实比原来的更好，马上更新。',
+                'skillopt.validation_failed': '❌ 这次改进在验证中表现不如预期，它把失败的尝试记录了下来。',
+                'skillopt.rejected_buffer_updated': '🗑️ 它把无效的修改放进了废纸篓，防止以后重复尝试。',
+                'skillopt.slow_update_created': '🐢 它总结了一些长期稳定的规律，写进了技能文档的深层保护区。',
+                'skillopt.best_skill_exported': '📦 最优技能文档已导出，可以部署给 AI 助手使用了。',
+            };
+            return map[eventType] || '它正在处理下一步。';
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // ================================================================
+        // V4 新增：SkillOpt 状态
+        // ================================================================
+
+        async function fetchSkillOptStatus() {
+            try {
+                const res = await fetch('/dashboard/api/skillopt/status');
+                const data = await res.json();
+                if (!data.ok) return;
+
+                const s = data.status;
+                document.getElementById('skill-epoch-text').textContent =
+                    s.total_epochs > 0
+                        ? `已运行 ${s.total_epochs} 个回合`
+                        : '未启动';
+                document.getElementById('skill-current-ver').textContent =
+                    s.current_version;
+                document.getElementById('skill-best-ver').textContent =
+                    s.best_version;
+
+                // 更新角落卡片
+                document.getElementById('skill-card-current').textContent =
+                    s.current_version;
+                document.getElementById('skill-card-best').textContent =
+                    s.best_version;
+                document.getElementById('skill-card-epochs').textContent =
+                    s.total_epochs;
+                document.getElementById('skill-card-accepted').textContent =
+                    s.accepted_patches;
+                document.getElementById('skill-card-rejected').textContent =
+                    s.rejected_patches;
+            } catch (err) {
+                console.error('[SkillOpt] Status fetch error:', err);
+            }
+        }
+
+        async function triggerOptimizationEpoch() {
+            const btn = document.querySelector('.skill-trigger-btn');
+            const origText = btn.textContent;
+            btn.textContent = '⏳ 运行中...';
+            btn.disabled = true;
+
+            updateRobotExplanation('正在运行技能优化回合...');
+
+            try {
+                const res = await fetch('/mcp/tools/skillopt/run_epoch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ max_rollouts: 40 })
+                });
+                const data = await res.json();
+                if (data.code === 0) {
+                    updateRobotExplanation(
+                        data.message || '优化回合完成！'
+                    );
+                } else {
+                    updateRobotExplanation(
+                        '优化失败：' + (data.message || '未知错误')
+                    );
+                }
+                // 刷新状态
+                fetchSkillOptStatus();
+            } catch (err) {
+                updateRobotExplanation('网络错误，无法触发优化回合');
+                console.error('[SkillOpt] Epoch trigger error:', err);
+            }
+
+            btn.textContent = origText;
+            btn.disabled = false;
+        }
+
+        // ================================================================
+        // 启动
+        // ================================================================
+        document.addEventListener('DOMContentLoaded', () => {
+            connectWebSocket();
+            fetchRunHistory();
+            fetchTokenBudget();
+            fetchBadCases();
+            fetchSkillOptStatus();
+            // 每 30 秒刷新一次数据
+            setInterval(() => {
+                fetchRunHistory();
+                fetchTokenBudget();
+                fetchSkillOptStatus();
+            }, 30000);
+        });
+    </script>
+</body>
+</html>
