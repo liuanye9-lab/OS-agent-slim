@@ -135,9 +135,10 @@ def create_app() -> FastAPI:
         # 创建 DashboardSync 并挂载（使用 gateway 的 event_stream）
         dash_sync: DashboardSync = DashboardSync(gateway.event_stream)
         sync_app = dash_sync.create_app()
-        app.mount("/dashboard", sync_app)
-    except ImportError:
-        pass  # V5 模块未安装时优雅跳过
+        app.mount("/dashboard-sync", sync_app)
+    except Exception as e:
+        import logging
+        logging.getLogger("uvicorn").warning(f"V5 MCP Gateway mount skipped: {e}")
 
     # ------------------------------------------------------------------
     # 6. 配置静态文件和模板

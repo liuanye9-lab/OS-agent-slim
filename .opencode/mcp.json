@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "stableagent": {
+      "command": "python3",
+      "args": ["mcp_bridge.py", "--url", "http://localhost:8000/mcp/v5/mcp"],
+      "cwd": "${workspaceFolder}"
+    }
+  }
+}
