@@ -460,6 +460,188 @@ class DecisionNarrator:
             })
         return result
 
+    # V6.5: narrate() — 大白话决策解释
+    def narrate(
+        self,
+        event_type: str,
+        stage: str,
+        payload: dict[str, Any],
+        locale: str = "zh",
+    ) -> dict[str, str]:
+        """为 22 种事件类型生成大白话双语解释。
+
+        返回 dict: status_text_zh/en, decision_summary_zh/en, why_zh/en, next_step_zh/en。
+        不含 chain_of_thought — 只展示可观察决策摘要。
+        """
+        templates = {
+            "mcp.call.received": {
+                "status_text_zh": "接收任务", "status_text_en": "Receiving task",
+                "decision_summary_zh": "它收到了一个新任务，开始准备处理。",
+                "decision_summary_en": "It received a new task and is preparing to handle it.",
+                "why_zh": "这是 OS Agent 自优化工作流的起点。", "why_en": "This is the entry point of the OS Agent workflow.",
+                "next_step_zh": "接下来会分析任务类型。", "next_step_en": "Next, it will classify the task.",
+            },
+            "task.classified": {
+                "status_text_zh": "分析任务", "status_text_en": "Classifying task",
+                "decision_summary_zh": "它正在判断这个任务属于哪种类型。",
+                "decision_summary_en": "It's determining what type of task this is.",
+                "why_zh": "不同类型的任务需要不同的处理策略和预算分配。", "why_en": "Different task types need different strategies.",
+                "next_step_zh": "接下来会理解具体意图。", "next_step_en": "Next, it will parse the intent.",
+            },
+            "intent.parsed": {
+                "status_text_zh": "理解意图", "status_text_en": "Understanding intent",
+                "decision_summary_zh": "它正在判断你真正想要什么结果。",
+                "decision_summary_en": "It's figuring out what result you really want.",
+                "why_zh": "只有理解了真实意图，才不会跑偏。", "why_en": "Understanding intent prevents going off track.",
+                "next_step_zh": "接下来会估算 token 预算。", "next_step_en": "Next, it will estimate the token budget.",
+            },
+            "context.budgeted": {
+                "status_text_zh": "计算预算", "status_text_en": "Estimating budget",
+                "decision_summary_zh": "它正在根据任务复杂度分配 token 预算。",
+                "decision_summary_en": "It's allocating token budget based on task complexity.",
+                "why_zh": "确保在有限的上下文窗口中高效执行。", "why_en": "To execute efficiently within the context window.",
+                "next_step_zh": "接下来会查找相关记忆。", "next_step_en": "Next, it will retrieve relevant memories.",
+            },
+            "memory.retrieved": {
+                "status_text_zh": "查找记忆", "status_text_en": "Retrieving memory",
+                "decision_summary_zh": "它正在从历史经验中找和这个任务相关的记忆。",
+                "decision_summary_en": "It's finding prior experiences related to this task.",
+                "why_zh": "避免每次都从零开始，也能更贴近你的偏好。", "why_en": "This avoids starting from scratch each time.",
+                "next_step_zh": "接下来会搜索项目资料。", "next_step_en": "Next, it will search project knowledge.",
+            },
+            "rag.retrieved": {
+                "status_text_zh": "查找资料", "status_text_en": "Searching knowledge",
+                "decision_summary_zh": "它正在从项目资料和文档中找有用的内容。",
+                "decision_summary_en": "It's finding useful content from project docs.",
+                "why_zh": "项目特有的知识无法从通用记忆中获取。", "why_en": "Project-specific knowledge can't come from general memory.",
+                "next_step_zh": "接下来会整理上下文包。", "next_step_en": "Next, it will build the context pack.",
+            },
+            "context.compressed": {
+                "status_text_zh": "压缩上下文", "status_text_en": "Compressing context",
+                "decision_summary_zh": "上下文太多，它在压缩非关键信息以保留核心空间。",
+                "decision_summary_en": "Context is large, it's compressing non-critical info.",
+                "why_zh": "确保最重要的信息不会被 token 限制截断。", "why_en": "To ensure critical info isn't truncated by token limits.",
+                "next_step_zh": "接下来会构建最终上下文。", "next_step_en": "Next, it will build the final context.",
+            },
+            "context.built": {
+                "status_text_zh": "整理上下文", "status_text_en": "Building context",
+                "decision_summary_zh": "它正在把记忆、资料和任务需求打包成一个精简的上下文。",
+                "decision_summary_en": "It's packing memories, docs and task into a concise context.",
+                "why_zh": "一个高质量的上下文包能显著提升模型输出质量。", "why_en": "A high-quality context pack improves model output.",
+                "next_step_zh": "接下来会制定执行计划。", "next_step_en": "Next, it will create an execution plan.",
+            },
+            "workflow.plan.created": {
+                "status_text_zh": "规划步骤", "status_text_en": "Planning steps",
+                "decision_summary_zh": "它正在决定先做什么、后做什么、用什么工具。",
+                "decision_summary_en": "It's deciding what to do first and which tools to use.",
+                "why_zh": "有序执行比随机尝试效率高得多。", "why_en": "Ordered execution is more efficient than random attempts.",
+                "next_step_zh": "接下来会开始调用工具。", "next_step_en": "Next, it will start calling tools.",
+            },
+            "tool.call.started": {
+                "status_text_zh": "调用工具", "status_text_en": "Calling tool",
+                "decision_summary_zh": "它正在调用外部工具来执行具体操作。",
+                "decision_summary_en": "It's calling an external tool to execute.",
+                "why_zh": "复杂任务需要借助专业工具来完成。", "why_en": "Complex tasks need specialized tools.",
+                "next_step_zh": "等待工具返回结果。", "next_step_en": "Waiting for tool result.",
+            },
+            "tool.call.completed": {
+                "status_text_zh": "工具完成", "status_text_en": "Tool completed",
+                "decision_summary_zh": "工具调用成功，结果已纳入当前上下文。",
+                "decision_summary_en": "Tool call succeeded, result integrated.",
+                "why_zh": "工具的结果会帮助后续步骤做出更好的决策。", "why_en": "Tool results inform better decisions in later steps.",
+                "next_step_zh": "接下来会继续执行下一步。", "next_step_en": "Next, it will proceed to the next step.",
+            },
+            "security.checked": {
+                "status_text_zh": "安全检查", "status_text_en": "Security check",
+                "decision_summary_zh": "它正在检查当前操作是否存在安全风险。",
+                "decision_summary_en": "It's checking for security risks.",
+                "why_zh": "高风险操作必须经过验证才能继续。", "why_en": "High-risk operations must be verified.",
+                "next_step_zh": "如果需要会请求人工确认。", "next_step_en": "If needed, it will request human approval.",
+            },
+            "approval.required": {
+                "status_text_zh": "等待确认", "status_text_en": "Waiting for approval",
+                "decision_summary_zh": "检测到高风险操作，需要你确认是否继续。",
+                "decision_summary_en": "High-risk operation detected, needs your approval.",
+                "why_zh": "保护你的项目安全是最优先的。", "why_en": "Project safety is the top priority.",
+                "next_step_zh": "请确认是否继续执行。", "next_step_en": "Please confirm whether to proceed.",
+            },
+            "eval.completed": {
+                "status_text_zh": "评估结果", "status_text_en": "Evaluating",
+                "decision_summary_zh": "它正在检查当前输出是否达到质量标准。",
+                "decision_summary_en": "It's checking if the output meets quality standards.",
+                "why_zh": "评估结果是后续自我优化的关键依据。", "why_en": "Evaluation results are key for self-optimization.",
+                "next_step_zh": "如果达标就完成任务，否则记录改进点。", "next_step_en": "If passed, done. Otherwise, record improvements.",
+            },
+            "badcase.recorded": {
+                "status_text_zh": "记录案例", "status_text_en": "Recording case",
+                "decision_summary_zh": "它正在记录这次失败的原因，作为未来改进的基础。",
+                "decision_summary_en": "It's recording why this failed for future improvement.",
+                "why_zh": "只有知道哪里失败，下次才能不再犯同样的错误。", "why_en": "Recording failures prevents repeating mistakes.",
+                "next_step_zh": "这些案例会进入 SkillOpt 优化循环。", "next_step_en": "These cases will feed into SkillOpt.",
+            },
+            "skillopt.rollout.collected": {
+                "status_text_zh": "收集数据", "status_text_en": "Collecting rollout",
+                "decision_summary_zh": "它正在收集这次执行的所有数据作为学习材料。",
+                "decision_summary_en": "It's collecting execution data as learning material.",
+                "why_zh": "足够的数据是自我优化的基础。", "why_en": "Sufficient data is the foundation of self-optimization.",
+                "next_step_zh": "接下来会分析成功和失败的模式。", "next_step_en": "Next, it will analyze success and failure patterns.",
+            },
+            "skillopt.pattern.found": {
+                "status_text_zh": "发现规律", "status_text_en": "Pattern found",
+                "decision_summary_zh": "它从历史数据中发现了一些成功或失败的模式。",
+                "decision_summary_en": "It found some success or failure patterns in the data.",
+                "why_zh": "这些规律可以转化为具体的 skill 改进规则。", "why_en": "These patterns can become skill improvement rules.",
+                "next_step_zh": "接下来会提出 skill 改进方案。", "next_step_en": "Next, it will propose skill patches.",
+            },
+            "skillopt.patch.proposed": {
+                "status_text_zh": "提出改进", "status_text_en": "Patch proposed",
+                "decision_summary_zh": "它正在生成具体的 skill 文档修改方案。",
+                "decision_summary_en": "It's generating specific skill doc modifications.",
+                "why_zh": "只有把经验写进 skill 文档，下次才能真正用上。", "why_en": "Only written rules can be used next time.",
+                "next_step_zh": "接下来会验证改进是否有效。", "next_step_en": "Next, it will validate the improvement.",
+            },
+            "skillopt.validation.completed": {
+                "status_text_zh": "验证通过", "status_text_en": "Validation passed",
+                "decision_summary_zh": "改进方案通过了验证，确认确实比之前更好。",
+                "decision_summary_en": "The improvement passed validation, confirmed better.",
+                "why_zh": "只有经过验证的改进才会真正生效。", "why_en": "Only validated improvements are applied.",
+                "next_step_zh": "接下来会导出更新后的 skill。", "next_step_en": "Next, it will export the updated skill.",
+            },
+            "skillopt.exported": {
+                "status_text_zh": "导出技能", "status_text_en": "Skill exported",
+                "decision_summary_zh": "更新的 skill 文档已保存，下次执行会自动使用新规则。",
+                "decision_summary_en": "Updated skill doc saved, will be used next time.",
+                "why_zh": "持久化 skill 文档让优化效果可以跨会话保持。", "why_en": "Persisted skills maintain improvement across sessions.",
+                "next_step_zh": "任务已完成。", "next_step_en": "Task completed.",
+            },
+            "task.completed": {
+                "status_text_zh": "任务完成", "status_text_en": "Completed",
+                "decision_summary_zh": "所有步骤执行完毕，任务目标已达成。",
+                "decision_summary_en": "All steps done, task goal achieved.",
+                "why_zh": "它按照规划顺利完成了整个工作流。", "why_en": "It followed the plan and completed the workflow.",
+                "next_step_zh": "你可以查看 Dashboard 了解详情。", "next_step_en": "Check the Dashboard for details.",
+            },
+            "task.failed": {
+                "status_text_zh": "任务失败", "status_text_en": "Failed",
+                "decision_summary_zh": "任务执行失败，正在记录失败原因。",
+                "decision_summary_en": "Task failed, recording the reason.",
+                "why_zh": "失败信息会被用于后续改进和避免重复错误。", "why_en": "Failure info will be used for future improvement.",
+                "next_step_zh": "你可以查看 Dashboard 了解失败原因。", "next_step_en": "Check the Dashboard for failure details.",
+            },
+        }
+
+        info = templates.get(event_type, {
+            "status_text_zh": "处理中", "status_text_en": "Processing",
+            "decision_summary_zh": "系统正在根据预设规则执行操作。",
+            "decision_summary_en": "System is executing based on preset rules.",
+            "why_zh": "这是自动化流程的一部分。", "why_en": "This is part of the automated workflow.",
+            "next_step_zh": "等待下一步。", "next_step_en": "Awaiting next step.",
+        })
+
+        if locale == "en":
+            return {k: v for k, v in info.items() if k.endswith("_en") or k == "status_text_en"}
+        return info
+
     # ------------------------------------------------------------------
     # 内部辅助方法
     # ------------------------------------------------------------------

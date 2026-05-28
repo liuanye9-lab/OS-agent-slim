@@ -195,32 +195,38 @@ def create_app() -> FastAPI:
 
     @app.get("/runs/{run_id}")
     async def run_page(run_id: str):
-        """按 run_id 返回 Dashboard V2 页面。
-
-        将 HTML 中的 RUN_ID_PLACEHOLDER 替换为实际 run_id，
-        以便前端 JS 能连接到对应的 WebSocket。
-
-        Args:
-            run_id: 运行唯一标识。
-
-        Returns:
-            HTMLResponse 包含注入 run_id 的 Dashboard V2 页面。
-        """
-        if os.path.exists(dashboard_v2_html_path):
-            with open(dashboard_v2_html_path, "r", encoding="utf-8") as f:
+        """按 run_id 返回 Dashboard V3 页面 (V6.5)。"""
+        dashboard_v3_html_path: str = os.path.join(templates_dir, "dashboard_v3.html")
+        if os.path.exists(dashboard_v3_html_path):
+            with open(dashboard_v3_html_path, "r", encoding="utf-8") as f:
                 html_content = f.read()
-            # 注入 run_id 到 meta 标签供前端 JS 读取
             html_content = html_content.replace(
                 "<head>",
                 f'<head>\n    <meta name="run-id" content="{run_id}">',
             )
             return HTMLResponse(content=html_content)
-        return HTMLResponse(
-            content="<h1>Dashboard V2 not found</h1>", status_code=404
-        )
+        # fallback to V2
+        if os.path.exists(dashboard_v2_html_path):
+            with open(dashboard_v2_html_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
+            html_content = html_content.replace(
+                "<head>",
+                f'<head>\n    <meta name="run-id" content="{run_id}">',
+            )
+            return HTMLResponse(content=html_content)
+        return HTMLResponse(content="<h1>Run page not found</h1>", status_code=404)
+
+    # V6.5: Dashboard V3 路由（必须在 Dashboard mount 之前）
+    @app.get("/dashboard/v3")
+    async def dashboard_v3():
+        dashboard_v3_html_path: str = os.path.join(templates_dir, "dashboard_v3.html")
+        if os.path.exists(dashboard_v3_html_path):
+            with open(dashboard_v3_html_path, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read())
+        return HTMLResponse(content="<h1>Dashboard V3 not found</h1>", status_code=404)
 
     # ------------------------------------------------------------------
-    # 7. 挂载 Dashboard（/dashboard 前缀）— 必须在 V2 路由之后
+    # 7. 挂载 Dashboard（/dashboard 前缀）— 必须在 V2/V3 路由之后
     # ------------------------------------------------------------------
     dashboard: Dashboard = Dashboard(event_bus, orchestrator=orchestrator)
     dashboard.mount_to(app, prefix="/dashboard")
@@ -298,6 +304,131 @@ def create_app() -> FastAPI:
             "feedback_id": fb.feedback_id,
             "learning_evidence": learning_evidence,
         })
+
+    # ------------------------------------------------------------------
+    # V6.5: /connect 一键接入页面
+    # ------------------------------------------------------------------
+
+    connect_html_path: str = os.path.join(templates_dir, "connect.html")
+
+    @app.get("/connect")
+    async def connect_page():
+        """一键接入页面 — 展示 Claude Code / Codex / Cursor 接入方式。"""
+        if os.path.exists(connect_html_path):
+            with open(connect_html_path, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read())
+        return HTMLResponse(content="<h1>Connect page not found</h1>", status_code=404)
+
+    # ------------------------------------------------------------------
+    # V6.5: /api/connect/* 接入配置 API
+    # ------------------------------------------------------------------
+
+    @app.get("/api/connect/health")
+    async def connect_health():
+        """健康检查 — 返回服务状态和接入信息。"""
+        try:
+            from stable_agent.quickstart import SetupDetector
+            d = SetupDetector()
+            result = d.health_check()
+            # 补充工具数量
+            try:
+                from stable_agent.gateway.tool_schemas import TOOLS
+                result["tools_count"] = len(TOOLS)
+            except Exception:
+                result["tools_count"] = 0
+            return result
+        except Exception as e:
+            return {"ok": False, "server": "error", "error": str(e)}
+
+    @app.get("/api/connect/config/{client}")
+    async def connect_config(client: str):
+        """返回指定客户端的 MCP 配置。"""
+        try:
+            from stable_agent.quickstart import ConfigGenerator
+            g = ConfigGenerator()
+            if client == "claude":
+                return g.claude_config()
+            elif client == "codex":
+                return g.codex_config()
+            else:
+                return g.generic_config()
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.post("/api/connect/check_mcp")
+    async def connect_check_mcp(request: Request):
+        """检查 MCP 端点是否可用。"""
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.post(
+                    "http://127.0.0.1:8000/mcp/v5/mcp",
+                    json={"jsonrpc": "2.0", "method": "tools/list", "id": 1},
+                )
+                data = resp.json()
+                tools = data.get("result", {}).get("tools", [])
+                return {"ok": True, "tools_count": len(tools)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    # ------------------------------------------------------------------
+    # V6.5: /api/runs/{run_id}/* 运行数据 API
+    # ------------------------------------------------------------------
+
+    @app.get("/api/runs/{run_id}/events")
+    async def get_run_events(run_id: str):
+        """获取指定 run_id 的所有历史事件（支持 Dashboard 刷新后回放）。"""
+        try:
+            from stable_agent.observation.run_store import RunStore
+            store = RunStore()
+            events = store.get_events(run_id)
+            import dataclasses
+            result = []
+            for e in events:
+                if dataclasses.is_dataclass(e):
+                    result.append(dataclasses.asdict(e))
+                elif isinstance(e, dict):
+                    result.append(e)
+                else:
+                    result.append({"raw": str(e)})
+            return result
+        except Exception as e:
+            import logging
+            logging.getLogger("uvicorn").warning(f"get_run_events failed: {e}")
+            return []
+
+    @app.get("/api/runs/{run_id}/summary")
+    async def get_run_summary(run_id: str):
+        """获取指定 run_id 的任务总结。"""
+        try:
+            from stable_agent.observation.run_store import RunStore
+            store = RunStore()
+            return store.get_run_summary(run_id)
+        except Exception as e:
+            import logging
+            logging.getLogger("uvicorn").warning(f"get_run_summary failed: {e}")
+            return {"run_id": run_id, "error": str(e)}
+
+    @app.post("/api/runs/{run_id}/feedback")
+    async def submit_run_feedback(run_id: str, request: Request):
+        """提交用户对特定 run 的反馈。"""
+        try:
+            body = await request.json()
+            from stable_agent.observation.user_feedback_signal import UserFeedbackSignal
+            import uuid
+            fb = UserFeedbackSignal(
+                feedback_id=str(uuid.uuid4()),
+                run_id=run_id,
+                signal_type=body.get("label", body.get("signal_type", "")),
+                comment=body.get("comment", ""),
+            )
+            try:
+                dash_sync.sync_feedback(fb.to_dict())
+            except Exception:
+                pass
+            return {"ok": True, "feedback_id": fb.feedback_id}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     return app
 

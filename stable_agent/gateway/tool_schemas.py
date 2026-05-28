@@ -195,6 +195,38 @@ TOOLS: dict[str, dict[str, Any]] = {
         },
         "risk_level": "high",
     },
+    # V6.5: /os-agent 快捷入口
+    "stableagent.task.os_agent": {
+        "name": "stableagent.task.os_agent",
+        "title": "OS Agent 自优化工作流",
+        "description": "启动 StableAgent OS 自优化工作流，将执行过程实时同步到可视化面板。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_input": {
+                    "type": "string",
+                    "description": "用户希望 OS Agent 执行或优化的任务",
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["auto", "diagnose", "optimize", "skillopt", "observe"],
+                    "default": "auto",
+                    "description": "运行模式",
+                },
+                "open_dashboard": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "是否返回 Dashboard 链接",
+                },
+                "run_id": {
+                    "type": "string",
+                    "description": "可选，已有 run_id",
+                },
+            },
+            "required": ["task_input"],
+        },
+        "risk_level": "medium",
+    },
 }
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StableAgent OS — 一键接入</title>
+<link rel="stylesheet" href="/static/styles_v2.css">
+<style>
+.connect-hero { text-align: center; padding: 60px 20px 40px; }
+.connect-hero h1 { font-size: 2.4rem; font-weight: 700; margin: 0 0 8px; background: linear-gradient(135deg, #6366f1, #7c9cff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.connect-hero p { color: var(--text-muted); font-size: 1.1rem; }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 24px; padding: 20px 40px 40px; max-width: 1200px; margin: 0 auto; }
+.glass-card.connect-card { padding: 28px; display: flex; flex-direction: column; gap: 16px; }
+.connect-card .card-icon { font-size: 2.2rem; }
+.connect-card h3 { margin: 0; font-size: 1.25rem; }
+.connect-card .status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 500; }
+.status-badge.online { background: rgba(82, 199, 165, 0.15); color: #2d8a6e; }
+.status-badge.offline { background: rgba(239, 111, 108, 0.15); color: #c0392b; }
+.connect-card .endpoint-code { background: rgba(0,0,0,0.04); padding: 10px 14px; border-radius: 10px; font-family: monospace; font-size: 0.82rem; word-break: break-all; }
+.connect-card .action-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-glass { padding: 8px 18px; border-radius: 10px; border: 1px solid var(--glass-border); background: var(--glass-bg); backdrop-filter: blur(20px); cursor: pointer; font-size: 0.9rem; transition: all 0.2s; }
+.btn-glass:hover { background: rgba(124, 156, 255, 0.15); }
+.btn-glass.copy-ok { background: rgba(82, 199, 165, 0.2) !important; border-color: #52c7a5 !important; }
+.config-preview { max-height: 0; overflow: hidden; transition: max-height 0.35s ease; }
+.config-preview.open { max-height: 400px; }
+.config-preview pre { margin: 8px 0 0; padding: 12px; background: rgba(0,0,0,0.04); border-radius: 10px; font-size: 0.78rem; white-space: pre-wrap; }
+.toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #18181b; color: #fff; padding: 10px 24px; border-radius: 12px; font-size: 0.9rem; z-index: 9999; animation: toastIn 0.3s ease, toastOut 0.3s ease 1.5s forwards; }
+@keyframes toastIn { from { opacity:0; transform:translateX(-50%) translateY(-10px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
+@keyframes toastOut { from { opacity:1; } to { opacity:0; } }
+</style>
+</head>
+<body class="liquid-bg">
+<div class="connect-hero">
+  <h1>StableAgent OS</h1>
+  <p>选择你的 AI 编程助手，一键接入自优化 Agent 工作流</p>
+</div>
+
+<div class="card-grid">
+  <!-- Claude Code -->
+  <div class="glass-card connect-card" id="card-claude">
+    <div class="card-icon">🧠</div>
+    <h3>Claude Code</h3>
+    <div><span class="status-badge" id="badge-claude">...</span></div>
+    <div class="endpoint-code" id="endpoint-claude">...</div>
+    <div class="action-row">
+      <button class="btn-glass" onclick="copyConfig('claude')">📋 复制配置</button>
+      <button class="btn-glass" onclick="healthCheck()">🩺 健康检查</button>
+      <button class="btn-glass" onclick="window.open('/dashboard/v2')">📊 打开 Dashboard</button>
+    </div>
+    <div style="font-size:0.85rem;color:var(--text-muted);">推荐命令: <code style="background:rgba(124,156,255,0.12);padding:2px 8px;border-radius:4px;">/os-agent</code></div>
+    <div class="config-preview" id="preview-claude"><pre></pre></div>
+  </div>
+
+  <!-- Codex -->
+  <div class="glass-card connect-card" id="card-codex">
+    <div class="card-icon">⚡</div>
+    <h3>Codex</h3>
+    <div><span class="status-badge" id="badge-codex">...</span></div>
+    <div class="endpoint-code" id="endpoint-codex">...</div>
+    <div class="action-row">
+      <button class="btn-glass" onclick="copyConfig('codex')">📋 复制 MCP JSON</button>
+      <button class="btn-glass" onclick="healthCheck()">🩺 健康检查</button>
+      <button class="btn-glass" onclick="window.open('/dashboard/v2')">📊 打开 Dashboard</button>
+    </div>
+    <div style="font-size:0.85rem;color:var(--text-muted);">配置: <code style="background:rgba(124,156,255,0.12);padding:2px 8px;border-radius:4px;">.codex/os-agent/mcp_config.example.json</code></div>
+    <div class="config-preview" id="preview-codex"><pre></pre></div>
+  </div>
+
+  <!-- 通用 MCP -->
+  <div class="glass-card connect-card" id="card-generic">
+    <div class="card-icon">🔌</div>
+    <h3>Cursor / 通用 MCP</h3>
+    <div><span class="status-badge" id="badge-generic">...</span></div>
+    <div class="endpoint-code" id="endpoint-generic">...</div>
+    <div class="action-row">
+      <button class="btn-glass" onclick="copyConfig('generic')">📋 复制 MCP JSON</button>
+      <button class="btn-glass" onclick="healthCheck()">🩺 健康检查</button>
+      <button class="btn-glass" onclick="window.open('/dashboard/v2')">📊 打开 Dashboard</button>
+    </div>
+    <div style="font-size:0.85rem;color:var(--text-muted);">支持所有兼容 MCP 协议的客户端</div>
+    <div class="config-preview" id="preview-generic"><pre></pre></div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<script src="/static/connect.js"></script>
+</body>
+</html>

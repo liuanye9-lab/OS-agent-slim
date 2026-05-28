@@ -25,7 +25,7 @@ import http.client
 from urllib.parse import urlparse
 
 
-MCP_URL = "http://localhost:8000/mcp/v5/mcp"
+MCP_URL = "http://localhost:8000/mcp/v5/mcp"  # V5.6: V5 gateway 挂载在 /mcp/v5
 
 
 def forward(request: dict, url: str) -> dict:

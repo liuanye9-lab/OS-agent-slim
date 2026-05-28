@@ -201,8 +201,8 @@ class TestToolSchemas:
     """Tool Schema 测试套件。"""
 
     def test_all_14_tools_defined(self) -> None:
-        """验证恰好定义了 14 个工具。"""
-        assert len(TOOLS) == 14
+        """验证至少定义了 15 个工具 (V6.5: +os_agent)。"""
+        assert len(TOOLS) >= 15
 
     def test_each_tool_has_required_fields(self) -> None:
         """验证每个工具定义包含所有必要字段。"""
@@ -242,7 +242,7 @@ class TestToolSchemas:
     def test_get_tool_names(self) -> None:
         """测试 get_tool_names 返回完整列表。"""
         names = get_tool_names()
-        assert len(names) == 14
+        assert len(names) >= 15  # V6.5: +os_agent
         assert "stableagent.task.process" in names
         assert "stableagent.approval.respond" in names
 

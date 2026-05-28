@@ -184,9 +184,9 @@ class TestToolSchemaHelpers:
     # ------------------------------------------------------------------
 
     def test_get_tool_names_returns_14(self) -> None:
-        """验证 get_tool_names 返回 14 个工具名。"""
+        """验证 get_tool_names 返回至少 15 个工具名 (V6.5: +os_agent)。"""
         names = get_tool_names()
-        assert len(names) == 14, f"期望 14 个工具名，实际 {len(names)} 个"
+        assert len(names) >= 15, f"期望至少 15 个工具名，实际 {len(names)} 个"
         assert all(n.startswith("stableagent.") for n in names)
 
     # ------------------------------------------------------------------

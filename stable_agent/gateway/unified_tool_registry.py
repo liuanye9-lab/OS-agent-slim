@@ -107,6 +107,7 @@ class UnifiedToolRegistry:
         self._register("stableagent.skillopt.export_best", self._h_skillopt_export)
         self._register("stableagent.trace.get_run", self._h_trace_get_run)
         self._register("stableagent.approval.respond", self._h_approval_respond)
+        self._register("stableagent.task.os_agent", self._h_task_os_agent)  # V6.5: /os-agent
 
     # ------------------------------------------------------------------
     # 辅助方法
@@ -841,4 +842,89 @@ class UnifiedToolRegistry:
                 ctx, tool_name,
                 ok=False, is_error=True,
                 plain_text=f"审批响应失败：{exc}",
+            )
+
+    # V6.5: /os-agent 快捷入口
+    def _h_task_os_agent(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.task.os_agent — OS Agent 自优化工作流。
+
+        启动完整自优化链路（Context → Memory → RAG → Budget → Workflow →
+        Eval → SkillOpt），每阶段发布 TraceEvent 供 Dashboard 实时订阅。
+
+        Args:
+            ctx: RunContext。
+            args: 包含 task_input、mode 等参数字典。
+
+        Returns:
+            包含 run_id / dashboard_url / progress_pct 的 StableAgentToolResult。
+        """
+        tool_name = "stableagent.task.os_agent"
+        task_input: str = args.get("task_input", "")
+        mode: str = args.get("mode", "auto")
+        open_dashboard: bool = args.get("open_dashboard", True)
+
+        if self._orchestrator is None:
+            return self._make_result(
+                ctx, tool_name, ok=False, is_error=True,
+                plain_text="Orchestrator 未注入",
+                plain_text_zh="Orchestrator 未注入，无法启动 OS Agent",
+                plain_text_en="Orchestrator not injected, cannot start OS Agent",
+            )
+
+        try:
+            from stable_agent.observation.progress_model import ProgressTracker
+            tracker = ProgressTracker()
+
+            # 阶段 1: 接收任务
+            stage = tracker.get_stage("mcp_received")
+            ctx.current_stage = stage.label_zh
+            ctx.progress_pct = stage.pct
+
+            # 阶段 2: 执行任务
+            raw_result: Any = self._orchestrator.process_task(task_input)
+            # 确保可 JSON 序列化
+            import dataclasses
+            if dataclasses.is_dataclass(raw_result):
+                result = dataclasses.asdict(raw_result)  # type: ignore[arg-type]
+            elif isinstance(raw_result, dict):
+                result = raw_result
+            else:
+                result = {"output": str(raw_result)}
+
+            # 阶段 3: 完成
+            stage = tracker.get_stage("completed")
+            ctx.current_stage = stage.label_zh
+            ctx.progress_pct = stage.pct
+
+            return self._make_result(
+                ctx, tool_name,
+                ok=True,
+                data={
+                    "run_id": ctx.run_id,
+                    "dashboard_url": f"/runs/{ctx.run_id}" if open_dashboard else "",
+                    "current_stage": stage.label_zh,
+                    "progress_pct": stage.pct,
+                    "status_text_zh": stage.status_text_zh,
+                    "status_text_en": stage.status_text_en,
+                    "task_output": result,
+                    "mode": mode,
+                    "next_actions": ["查看 Dashboard", "查看决策时间线"],
+                },
+                plain_text=f"OS Agent 任务完成：{task_input[:80]}",
+                plain_text_zh=f"OS Agent 任务完成：{task_input[:80]}",
+                plain_text_en=f"OS Agent task completed: {task_input[:80]}",
+                dashboard_url=f"/runs/{ctx.run_id}" if open_dashboard else "",
+                next_actions=["查看 Dashboard", "查看决策时间线"],
+            )
+        except Exception as exc:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.exception("os_agent 执行失败: %s", exc)
+            return self._make_result(
+                ctx, tool_name,
+                ok=False, is_error=True,
+                plain_text=f"OS Agent 执行失败：{exc}",
+                plain_text_zh=f"OS Agent 任务失败：{exc}",
+                plain_text_en=f"OS Agent task failed: {exc}",
+                dashboard_url=f"/runs/{ctx.run_id}" if open_dashboard else "",
             )
