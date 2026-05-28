@@ -837,9 +837,8 @@ def create_app() -> FastAPI:
         try:
             from stable_agent.saas import ApiKeyManager, SaasRepository
             mgr = ApiKeyManager(SaasRepository())
-            key_record, raw_key = mgr.create_key(body["workspace_id"], body["name"],
-                scopes=body.get("scopes", ["runs:write"]))
-            return {"key_id": key_record.id, "api_key": raw_key, "prefix": key_record.key_prefix}
+            result = mgr.create_key(body["workspace_id"], body["name"])
+            return {"key_id": result["key_id"], "api_key": result["raw_key"], "prefix": "sk_"}
         except Exception as e:
             return {"error": str(e)}
 

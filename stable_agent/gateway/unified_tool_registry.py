@@ -1200,9 +1200,9 @@ class UnifiedToolRegistry:
         try:
             from stable_agent.saas import ApiKeyManager
             mgr = ApiKeyManager(repository=self._get_saas_repo())
-            key_record, raw_key = mgr.create_key(workspace_id=ws_id, name=name, scopes=scopes)
+            result = mgr.create_key(workspace_id=ws_id, name=name)
             return self._make_result(ctx, tool_name, ok=True,
-                data={"key_id": key_record.id, "api_key": raw_key, "prefix": key_record.key_prefix,
+                data={"key_id": result["key_id"], "api_key": result["raw_key"], "prefix": "sk_",
                       "scopes": scopes, "note": "请立即保存此密钥，仅显示一次"},
                 plain_text=f"API Key 已创建: {key_record.id} (key={raw_key})",
                 plain_text_zh=f"API Key 已创建，请立即保存: {raw_key}",

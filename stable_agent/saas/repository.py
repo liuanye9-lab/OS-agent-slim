@@ -312,6 +312,9 @@ class SaasRepository:
         # 为 runs 表添加 SaaS 列和索引（幂等，忽略不存在的表）
         try:
             for col, col_def in [
+                ("workspace_id", "TEXT"),
+                ("project_id", "TEXT"),
+                ("agent_id", "TEXT"),
                 ("progress_pct", "INTEGER DEFAULT 0"),
                 ("intent_alignment_score", "REAL"),
                 ("token_used", "INTEGER DEFAULT 0"),
