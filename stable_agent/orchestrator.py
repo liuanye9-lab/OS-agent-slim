@@ -22,9 +22,12 @@ V3 升级：
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from stable_agent.models import (
     ApprovalRequest,
@@ -342,8 +345,8 @@ class StableAgentOrchestrator:
             mem.usage_count += 1
             try:
                 self.storage.save_memory(mem)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("存储操作失败，继续执行: %s", e)
 
         # 裁剪记忆
         pruned_memories: list[MemoryItem] = self.budget_manager.prune_memory(
@@ -362,13 +365,15 @@ class StableAgentOrchestrator:
                     )
                 else:
                     rag_chunks = []
-            except Exception:
+            except Exception as e:
                 # 回退到 build_context_pack
+                logger.warning("RAG 检索失败，回退到 build_context_pack: %s", e)
                 try:
                     rag_chunks = self.rag_manager.build_context_pack(
                         task_type, budget["rag"]
                     )
-                except Exception:
+                except Exception as e2:
+                    logger.warning("RAG build_context_pack 回退也失败: %s", e2)
                     rag_chunks = []
 
         # 7. 上下文包构建
@@ -476,8 +481,8 @@ class StableAgentOrchestrator:
             if bad_case is not None:
                 try:
                     self.storage.save_bad_case(bad_case)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("存储操作失败，继续执行: %s", e)
 
         # 15. 持久化 run 记录
         run_id = self._current_run_id or str(uuid.uuid4())
@@ -492,15 +497,15 @@ class StableAgentOrchestrator:
         )
         try:
             self.storage.save_run(run_record)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("存储操作失败，继续执行: %s", e)
 
         # 16. 持久化 context_pack
         context_pack.run_id = run_id
         try:
             self.storage.save_context_pack(context_pack)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("存储操作失败，继续执行: %s", e)
 
         # 17. 返回结构化结果
         events_count: int = len(self.event_bus._events)
@@ -541,8 +546,8 @@ class StableAgentOrchestrator:
         # 持久化
         try:
             self.storage.save_run(record)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("存储操作失败，继续执行: %s", e)
 
         # 发布 run:started 事件
         self.event_bus.publish(
@@ -577,8 +582,8 @@ class StableAgentOrchestrator:
         # 更新状态
         try:
             self.storage.update_run(run_id, {"status": "running"})
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("存储操作失败，继续执行: %s", e)
 
         # 发布 run:resumed 事件
         self.event_bus.publish(
@@ -672,7 +677,8 @@ class StableAgentOrchestrator:
                     rag_chunks = self.retrieval_critic.critique(
                         task_input, raw_chunks
                     )
-            except Exception:
+            except Exception as e:
+                logger.warning("RAG 检索失败，回退为空: %s", e)
                 rag_chunks = []
 
         # 构建上下文包
@@ -709,8 +715,8 @@ class StableAgentOrchestrator:
         runs: list[RunRecord] = []
         try:
             runs = self.storage.list_runs(limit=1000)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("存储操作失败，继续执行: %s", e)
 
         return {
             "memory_count": len(self.memory_bank._items),

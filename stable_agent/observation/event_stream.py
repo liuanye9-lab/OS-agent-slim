@@ -90,6 +90,33 @@ class EventStream:
                     # 队列已满时跳过，避免阻塞发布者
                     pass
 
+    def publish_sync(self, run_id: str, event: dict[str, Any]) -> None:
+        """同步发布事件（线程安全）。在同步 handler 中安全调用。
+
+        自动检测当前是否有运行中的事件循环：
+        - 有：通过 run_coroutine_threadsafe 调度协程
+        - 无：通过 asyncio.run 临时创建循环执行
+
+        Args:
+            run_id: 目标运行标识。
+            event: 事件字典。
+        """
+        try:
+            # 尝试获取运行中的事件循环
+            loop = asyncio.get_running_loop()
+            # 有运行中的 loop，创建 future 但不等待
+            asyncio.run_coroutine_threadsafe(
+                self.publish(run_id, event), loop
+            )
+        except RuntimeError:
+            # 无运行中的事件循环，用 asyncio.run
+            try:
+                asyncio.run(self.publish(run_id, event))
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.exception("publish_sync 失败: %s", e)
+
     async def publish_global(self, event: dict[str, Any]) -> None:
         """向所有 run 的所有订阅者发布事件。
 

@@ -18,8 +18,12 @@ V3 升级：
 
 from __future__ import annotations
 
+import logging
 import subprocess
+from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class VersionControlManager:
@@ -45,6 +49,24 @@ class VersionControlManager:
     # 内部工具方法
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _validate_repo_path(path: str) -> Path:
+        """验证路径是否为有效的 git 仓库。
+
+        Args:
+            path: 待验证的路径字符串。
+
+        Returns:
+            解析后的绝对路径 Path 对象。
+
+        Raises:
+            ValueError: 如果路径不是 git 仓库（缺少 .git 目录）。
+        """
+        repo = Path(path).resolve()
+        if not (repo / ".git").exists():
+            raise ValueError(f"不是 git 仓库: {repo}")
+        return repo
+
     def _run_git(self, args: list[str]) -> tuple[int, str, str]:
         """执行 git 命令并返回结果。
 
@@ -59,7 +81,7 @@ class VersionControlManager:
                 ["git"] + args,
                 capture_output=True,
                 text=True,
-                cwd=self.repo_path,
+                cwd=str(Path(self.repo_path).resolve()),
                 timeout=30,
             )
             return result.returncode, result.stdout.strip(), result.stderr.strip()
@@ -103,6 +125,8 @@ class VersionControlManager:
 
         # STUB: 使用 subprocess，错误时返回 None。
         """
+        self._validate_repo_path(self.repo_path)
+
         # git add -A
         rc_add, _, stderr_add = self._run_git(["add", "-A"])
         if rc_add != 0:
@@ -175,6 +199,8 @@ class VersionControlManager:
 
         # STUB: 简单调用 git reset --hard。
         """
+        self._validate_repo_path(self.repo_path)
+
         returncode, _, _ = self._run_git(
             ["reset", "--hard", checkpoint_id]
         )
@@ -287,6 +313,8 @@ class VersionControlManager:
             >>> isinstance(result, bool)
             True
         """
+        self._validate_repo_path(self.repo_path)
+
         # Step 1: stash 当前变更
         stash_rc, stash_stdout, stash_stderr = self._run_git(
             ["stash", "push", "-m", "safe_revert_backup"]

@@ -24,10 +24,12 @@
 
 from __future__ import annotations
 
+import logging
 import time
-import asyncio
 import uuid
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from stable_agent.gateway.run_context import RunContext
 from stable_agent.gateway.tool_schemas import get_tool_by_name, get_risk_level, get_avatar_state
@@ -166,9 +168,9 @@ class ToolRouter:
                 )
                 self._publish_event(approval_event)
                 self._append_to_store(ctx.run_id, approval_event)
-            except Exception:
+            except Exception as e:
                 # 审批创建失败不阻塞执行
-                pass
+                logger.warning("审批请求创建失败，继续执行: %s", e)
 
         # 5. 发布 tool.risk_checked 事件
         risk_checked_event: dict[str, Any] = self._make_event_dict(
@@ -284,8 +286,8 @@ class ToolRouter:
                 risk_order: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "forbidden": 3}
                 if risk_order.get(policy_risk, 0) > risk_order.get(schema_risk, 0):
                     return policy_risk
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("安全策略风险评估失败，使用 schema 默认风险等级: %s", e)
 
         return schema_risk
 
@@ -386,34 +388,17 @@ class ToolRouter:
                     payload=event_dict,
                 )
                 self._event_bus.publish(evt)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("EventBus 发布事件失败: %s", e)
 
-        # 通过 EventStream 异步发布
+        # 通过 EventStream 发布（使用 publish_sync 线程安全）
         if self._event_stream is not None:
             run_id: str = event_dict.get("run_id", "")
             if run_id:
                 try:
-                    # 尝试在已有事件循环中发布
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.ensure_future(
-                            self._event_stream.publish(run_id, event_dict)
-                        )
-                    else:
-                        loop.run_until_complete(
-                            self._event_stream.publish(run_id, event_dict)
-                        )
-                except RuntimeError:
-                    # 无事件循环，同步方式处理
-                    try:
-                        loop = asyncio.new_event_loop()
-                        loop.run_until_complete(
-                            self._event_stream.publish(run_id, event_dict)
-                        )
-                        loop.close()
-                    except Exception:
-                        pass
+                    self._event_stream.publish_sync(run_id, event_dict)
+                except Exception as e:
+                    logger.exception("事件发布失败: %s", e)
 
     def _append_to_store(self, run_id: str, event_dict: dict[str, Any]) -> None:
         """将事件追加到 RunStore。
@@ -425,5 +410,5 @@ class ToolRouter:
         if self._run_store is not None:
             try:
                 self._run_store.append_event(run_id, event_dict)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("追加事件到 RunStore 失败: %s", e)

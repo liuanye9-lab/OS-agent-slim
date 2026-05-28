@@ -109,6 +109,40 @@ class I18nManager:
     """全局翻译管理器。"""
     _instance: I18nManager | None = None
 
+    # ------------------------------------------------------------------
+    # 语义阶段 → 中英双语映射（与前端 AVATAR_STATE_MAP 的 14 个阶段对齐）
+    # ------------------------------------------------------------------
+    _STAGE_TRANSLATIONS: dict[str, dict[str, str]] = {
+        "listening":        {"zh": "正在接收任务",          "en": "Receiving task"},
+        "thinking":         {"zh": "正在理解你的需求",       "en": "Understanding your intent"},
+        "reading_notes":    {"zh": "正在找以前的经验",       "en": "Retrieving prior memory"},
+        "searching_books":  {"zh": "正在查找项目资料",       "en": "Searching project knowledge"},
+        "calculating":      {"zh": "正在计算 token 成本",    "en": "Estimating token budget"},
+        "planning":         {"zh": "正在规划执行步骤",       "en": "Planning execution steps"},
+        "tooling":          {"zh": "正在调用工具",           "en": "Calling a tool"},
+        "safety_check":     {"zh": "正在做安全检查",         "en": "Running safety check"},
+        "waiting_approval": {"zh": "等待你确认",             "en": "Waiting for approval"},
+        "grading":          {"zh": "正在评估结果",           "en": "Evaluating output"},
+        "learning":         {"zh": "正在总结经验",           "en": "Learning from this run"},
+        "archiving":        {"zh": "正在更新 best_skill.md", "en": "Updating best_skill.md"},
+        "done":             {"zh": "任务完成",               "en": "Task completed"},
+        "failed":           {"zh": "任务失败，正在记录原因",  "en": "Task failed, recording reason"},
+    }
+
+    @classmethod
+    def translate_stage(cls, stage: str, locale: str = "zh") -> str:
+        """将 AVATAR_STATE_MAP 中的语义阶段翻译为中/英文。
+
+        Args:
+            stage: 阶段 key，如 "listening"、"thinking" 等。
+            locale: 目标语言，"zh" 或 "en"。
+
+        Returns:
+            翻译后的字符串；若 stage 未注册则原样返回 stage。
+        """
+        info = cls._STAGE_TRANSLATIONS.get(stage, {})
+        return info.get(locale, stage)
+
     def __init__(self, default_locale: str = "zh") -> None:
         self._locale: Literal["zh", "en", "both"] = default_locale
 

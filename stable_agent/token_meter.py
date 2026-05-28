@@ -11,9 +11,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from stable_agent.models import ContextItem
+
+logger = logging.getLogger(__name__)
 
 # 模型价格字典：每 1K token 的 (input_price, output_price)，单位美元
 MODEL_PRICES: dict[str, tuple[float, float]] = {
@@ -36,7 +39,8 @@ def _load_tiktoken_encoder():
         import tiktoken
 
         return tiktoken.get_encoding("cl100k_base")
-    except Exception:
+    except Exception as e:
+        logger.debug("tiktoken 加载失败，回退到启发式估算: %s", e)
         return None
 
 
@@ -73,7 +77,8 @@ class TokenMeter:
         if self.encoder is not None:
             try:
                 return len(self.encoder.encode(text))
-            except Exception:
+            except Exception as e:
+                logger.debug("tiktoken 编码失败，回退到启发式估算: %s", e)
                 pass
 
         # Fallback 启发式估算

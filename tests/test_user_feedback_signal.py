@@ -66,3 +66,29 @@ class TestUserFeedbackSignal:
         signals = extractor.extract(t)
         assert "explicit_intent" in signals
         assert "rejection_signals" in signals
+
+
+def test_user_feedback_signal_fields():
+    """UserFeedbackSignal 字段正确性测试。"""
+    from stable_agent.models import UserFeedbackSignal
+    fb = UserFeedbackSignal(
+        run_id="run_test_1",
+        signal_type="off_track",
+        label_zh="跑偏了",
+        label_en="Off track",
+        comment="它把需求理解成了API设计而非UI设计"
+    )
+    assert fb.feedback_id != ""
+    assert fb.run_id == "run_test_1"
+    assert fb.signal_type == "off_track"
+    assert fb.processed == False
+    assert fb.timestamp > 0
+
+
+def test_feedback_labels_are_valid():
+    """所有有效 signal_type 均可创建 UserFeedbackSignal。"""
+    valid_types = ["aligned", "partial", "off_track", "too_technical", "too_generic", "not_specific", "no_executable_plan"]
+    from stable_agent.models import UserFeedbackSignal
+    for t in valid_types:
+        fb = UserFeedbackSignal(run_id="r", signal_type=t, label_zh=t, label_en=t)
+        assert fb.signal_type == t

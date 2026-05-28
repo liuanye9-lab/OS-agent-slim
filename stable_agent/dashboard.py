@@ -21,9 +21,12 @@ V3 升级：
 
 from __future__ import annotations
 
+import logging
 from typing import Optional, TYPE_CHECKING
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from stable_agent.trace_event_bus import EventBus
@@ -173,8 +176,8 @@ Attributes:
                     await websocket.receive_text()
             except WebSocketDisconnect:
                 pass
-            except Exception:
-                pass
+            except Exception as e:
+                logger.exception("WebSocket 连接异常断开: %s", e)
             finally:
                 # 清理断开连接的客户端
                 if websocket in self._ws_clients:
@@ -355,12 +358,14 @@ Attributes:
                     best = engine.doc_store.load_best_skill()
                     if best is not None:
                         best_version = best.version
-                except Exception:
+                except Exception as e:
+                    logger.warning("SkillOpt 状态查询失败: %s", e)
                     pass
                 try:
                     current = engine.doc_store.load_current_skill()
                     current_version = current.version
-                except Exception:
+                except Exception as e:
+                    logger.warning("SkillOpt 状态查询失败: %s", e)
                     pass
 
                 return {
@@ -466,8 +471,9 @@ Attributes:
                 async def send_to_client(ws: WebSocket, msg: dict) -> None:
                     try:
                         await ws.send_text(json.dumps(msg, ensure_ascii=False))
-                    except Exception:
+                    except Exception as e:
                         # 发送失败，清理客户端
+                        logger.debug("WebSocket 消息发送失败，清理客户端: %s", e)
                         if ws in self._ws_clients:
                             self._ws_clients.remove(ws)
 
@@ -478,9 +484,9 @@ Attributes:
                 except RuntimeError:
                     # 没有运行中的事件循环（如测试环境），跳过
                     pass
-            except Exception:
+            except Exception as e:
                 # 单个客户端失败不影响其他
-                pass
+                logger.debug("事件广播到客户端失败: %s", e)
 
     # ------------------------------------------------------------------
     # 挂载

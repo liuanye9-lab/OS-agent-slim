@@ -22,10 +22,13 @@ V3 升级：
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import uuid
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 from stable_agent.models import Event, TraceSpan
 
@@ -104,9 +107,9 @@ class EventBus:
         for listener in self._listeners:
             try:
                 listener(event)
-            except Exception:
+            except Exception as e:
                 # 捕获所有异常，避免一个 listener 失败影响其他
-                pass
+                logger.debug("事件监听器执行失败: %s", e)
 
         # 记录事件到历史
         self.record(event)
@@ -321,9 +324,8 @@ class TraceStorage:
             # 以追加模式写入 JSONL
             with open(self.storage_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(event_dict, ensure_ascii=False) + "\n")
-        except Exception:
-            # 持久化失败不中断主流程
-            pass
+        except Exception as e:
+            logger.warning("持久化操作失败，不中断主流程: %s", e)
 
     def load_events(self, limit: int = 100) -> list[Event]:
         """从文件读取最近 limit 条事件。
@@ -370,8 +372,9 @@ class TraceStorage:
             # 按时间戳降序排序
             events.sort(key=lambda e: e.timestamp, reverse=True)
 
-        except Exception:
+        except Exception as e:
             # 读取失败返回空列表
+            logger.warning("事件加载失败，返回空列表: %s", e)
             return []
 
         return events
@@ -426,9 +429,8 @@ class TraceStorage:
 
             with open(spans_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(span_dict, ensure_ascii=False) + "\n")
-        except Exception:
-            # 持久化失败不中断主流程
-            pass
+        except Exception as e:
+            logger.warning("持久化操作失败，不中断主流程: %s", e)
 
     def load_spans(
         self, run_id: str, limit: int = 100
@@ -500,7 +502,8 @@ class TraceStorage:
             # 按 started_at 降序
             spans.sort(key=lambda s: s.started_at, reverse=True)
 
-        except Exception:
+        except Exception as e:
+            logger.warning("Span 加载失败，返回空列表: %s", e)
             return []
 
         return spans

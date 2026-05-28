@@ -13,9 +13,12 @@ context_packs、approval_requests 七张表的 CRUD 操作。
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 from stable_agent.models import (
     ApprovalRequest,
@@ -213,7 +216,8 @@ class StableAgentStorage:
             )
             conn.commit()
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return False
 
     def update_run(self, run_id: str, fields: dict[str, Any]) -> bool:
@@ -238,7 +242,8 @@ class StableAgentStorage:
             )
             conn.commit()
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return False
 
     def get_run(self, run_id: str) -> Optional[RunRecord]:
@@ -258,7 +263,8 @@ class StableAgentStorage:
             if row is None:
                 return None
             return self._row_to_run_record(row)
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return None
 
     def list_runs(self, limit: int = 20) -> list[RunRecord]:
@@ -277,7 +283,8 @@ class StableAgentStorage:
                 (limit,),
             ).fetchall()
             return [self._row_to_run_record(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return []
 
     @staticmethod
@@ -338,7 +345,8 @@ class StableAgentStorage:
             )
             conn.commit()
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return False
 
     def load_spans(self, run_id: str) -> list[TraceSpan]:
@@ -357,7 +365,8 @@ class StableAgentStorage:
                 (run_id,),
             ).fetchall()
             return [self._row_to_trace_span(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return []
 
     @staticmethod
@@ -421,7 +430,8 @@ class StableAgentStorage:
             )
             conn.commit()
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return False
 
     def load_memory(
@@ -462,7 +472,8 @@ class StableAgentStorage:
 
             rows = conn.execute(query, params).fetchall()
             return [self._row_to_memory_item(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return []
 
     def update_memory_field(self, memory_id: str, field: str, value: Any) -> bool:
@@ -484,7 +495,8 @@ class StableAgentStorage:
             )
             conn.commit()
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return False
 
     @staticmethod
@@ -558,7 +570,8 @@ class StableAgentStorage:
             )
             conn.commit()
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return False
 
     def load_bad_cases(self, limit: int = 50) -> list[BadCase]:
@@ -577,7 +590,8 @@ class StableAgentStorage:
                 (limit,),
             ).fetchall()
             return [self._row_to_bad_case(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return []
 
     @staticmethod
@@ -644,7 +658,8 @@ class StableAgentStorage:
             )
             conn.commit()
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return False
 
     def load_eval_cases(self, limit: int = 100) -> list[EvalCase]:
@@ -662,7 +677,8 @@ class StableAgentStorage:
                 "SELECT * FROM eval_cases LIMIT ?", (limit,)
             ).fetchall()
             return [self._row_to_eval_case(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return []
 
     @staticmethod
@@ -736,7 +752,8 @@ class StableAgentStorage:
             )
             conn.commit()
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return False
 
     def get_context_pack(self, pack_id: str) -> Optional[ContextPack]:
@@ -756,7 +773,8 @@ class StableAgentStorage:
             if row is None:
                 return None
             return self._row_to_context_pack(row)
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return None
 
     @staticmethod
@@ -828,7 +846,8 @@ class StableAgentStorage:
             )
             conn.commit()
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return False
 
     def update_approval(
@@ -860,7 +879,8 @@ class StableAgentStorage:
             )
             conn.commit()
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return False
 
     def list_pending_approvals(self) -> list[ApprovalRequest]:
@@ -876,7 +896,8 @@ class StableAgentStorage:
                 "ORDER BY created_at ASC"
             ).fetchall()
             return [self._row_to_approval_request(r) for r in rows]
-        except Exception:
+        except Exception as e:
+            logger.warning("数据库操作失败: %s", e)
             return []
 
     @staticmethod

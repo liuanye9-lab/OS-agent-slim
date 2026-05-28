@@ -254,3 +254,96 @@ function getRiskLabel(level) {
     const key = 'risk_' + (level || 'none');
     return t(key);
 }
+
+// =========================================================================
+// window.i18n 全局 API（语义阶段 + 反馈标签 + 语言切换，不刷新页面）
+// =========================================================================
+
+window.i18n = window.i18n || {};
+
+/** @type {'zh' | 'en'} */
+window.i18n.locale = 'zh';
+
+window.i18n.translations = {
+    zh: {
+        // 13+1 个语义阶段
+        stage_listening:        '正在接收任务',
+        stage_thinking:         '正在理解你的需求',
+        stage_memory:           '正在找以前的经验',
+        stage_rag:              '正在查找项目资料',
+        stage_budget:           '正在计算 token 成本',
+        stage_planning:         '正在规划执行步骤',
+        stage_tooling:          '正在调用工具',
+        stage_safety:           '正在做安全检查',
+        stage_approval:         '等待你确认',
+        stage_eval:             '正在评估结果',
+        stage_learning:         '正在总结经验',
+        stage_archiving:        '正在更新 best_skill.md',
+        stage_done:             '任务完成',
+        stage_failed:           '任务失败',
+        // 7 个反馈按钮标签
+        feedback_aligned:       '符合我的意图',
+        feedback_partial:       '部分符合',
+        feedback_off_track:     '跑偏了',
+        feedback_too_technical: '太技术化',
+        feedback_too_generic:   '太空泛',
+        feedback_not_specific:  '不够具体',
+        feedback_no_plan:       '没有给我可执行方案',
+        // 语言切换按钮
+        lang_switch:            '切换到 English',
+    },
+    en: {
+        stage_listening:        'Receiving task',
+        stage_thinking:         'Understanding your intent',
+        stage_memory:           'Retrieving prior memory',
+        stage_rag:              'Searching project knowledge',
+        stage_budget:           'Estimating token budget',
+        stage_planning:         'Planning execution steps',
+        stage_tooling:          'Calling a tool',
+        stage_safety:           'Running safety check',
+        stage_approval:         'Waiting for approval',
+        stage_eval:             'Evaluating output',
+        stage_learning:         'Learning from this run',
+        stage_archiving:        'Updating best_skill.md',
+        stage_done:             'Task completed',
+        stage_failed:           'Task failed',
+        feedback_aligned:       'Aligned with intent',
+        feedback_partial:       'Partially aligned',
+        feedback_off_track:     'Off track',
+        feedback_too_technical: 'Too technical',
+        feedback_too_generic:   'Too generic',
+        feedback_not_specific:  'Not specific enough',
+        feedback_no_plan:       'No executable plan',
+        lang_switch:            '切换到中文',
+    }
+};
+
+/**
+ * window.i18n 取当前语言的翻译文本
+ * @param {string} key
+ * @returns {string}
+ */
+window.i18n.t = function (key) {
+    const translations = this.translations[this.locale] || {};
+    return translations[key] || key;
+};
+
+/**
+ * 切换 window.i18n 语言（不刷新页面）
+ * @param {'zh' | 'en'} locale
+ */
+window.i18n.setLocale = function (locale) {
+    if (!['zh', 'en'].includes(locale)) return;
+    this.locale = locale;
+
+    // 更新所有 [data-i18n] 元素（window.i18n 翻译域）
+    document.querySelectorAll('[data-i18n]').forEach(function (el) {
+        var key = el.getAttribute('data-i18n');
+        var text = window.i18n.t(key);
+        if (text !== key) {
+            el.textContent = text;
+        }
+    });
+
+    document.documentElement.lang = locale;
+};

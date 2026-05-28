@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
 from stable_agent.models import BadCase, Event, EvaluationResult, MemoryItem, TaskType
@@ -154,7 +154,7 @@ def create_app() -> FastAPI:
     #    因为 mount 会遮蔽其前缀下的所有路由）
     # ------------------------------------------------------------------
 
-    from fastapi.responses import HTMLResponse
+    from fastapi.responses import HTMLResponse, JSONResponse
 
     @app.get("/")
     async def root():
@@ -224,6 +224,80 @@ def create_app() -> FastAPI:
     # ------------------------------------------------------------------
     dashboard: Dashboard = Dashboard(event_bus, orchestrator=orchestrator)
     dashboard.mount_to(app, prefix="/dashboard")
+
+    # ------------------------------------------------------------------
+    # 8. 反馈 API 端点 — 接收用户反馈并广播到 DashboardSync
+    # ------------------------------------------------------------------
+
+    @app.post("/api/feedback")
+    async def handle_feedback(request: Request):
+        """接收来自 Dashboard V2 的用户反馈。
+
+        创建 UserFeedbackSignal 并通过 DashboardSync 的 EventStream
+        广播给对应 run 的所有 WebSocket 连接，触发学习面板更新。
+
+        Args:
+            request: FastAPI Request，body 为 JSON。
+
+        Returns:
+            JSONResponse {"ok": True, "feedback_id": str}
+        """
+        body: dict = await request.json()
+
+        # 创建 UserFeedbackSignal
+        from stable_agent.observation.user_feedback_signal import UserFeedbackSignal
+        import uuid
+
+        fb: UserFeedbackSignal = UserFeedbackSignal(
+            feedback_id=str(uuid.uuid4()),
+            run_id=body.get("run_id", ""),
+            signal_type=body.get("signal_type", ""),
+            comment=body.get("comment", ""),
+        )
+
+        # 通过 DashboardSync 广播反馈事件到 WebSocket
+        try:
+            dash_sync.sync_feedback(fb.to_dict())
+        except Exception as e:
+            import logging
+            logging.getLogger("uvicorn").warning(
+                f"sync_feedback 广播失败 (非致命): {e}"
+            )
+
+        # 构建学习证据响应（供前端即时更新学习面板）
+        from stable_agent.observation.learning_evidence import LearningEvidence
+        evidence = LearningEvidence()
+
+        # 根据反馈类型生成学习证据
+        if fb.signal_type in ("aligned",):
+            # 对齐的反馈 = 正面证据，不需要触发 learning
+            learning_evidence = evidence.explain_no_learning(fb.run_id)
+            learning_evidence["feedback_type"] = fb.signal_type
+            learning_evidence["feedback_label"] = fb.label_zh
+        elif fb.signal_type in ("off_track", "not_specific", "no_executable_plan"):
+            # 负面反馈 = 需要触发学习的信号
+            learning_evidence = {
+                "triggered": True,
+                "reason_zh": f"用户反馈：{fb.label_zh}。系统将分析差异并优化 skill 文档。",
+                "reason_en": f"User feedback: {fb.label_en}. System will analyze gaps and optimize skill docs.",
+                "feedback_type": fb.signal_type,
+                "feedback_label": fb.label_zh,
+                "patches": [],
+                "baseline_score": 0.0,
+                "candidate_score": 0.0,
+                "passed": False,
+            }
+        else:
+            # 中性反馈
+            learning_evidence = evidence.explain_no_learning(fb.run_id)
+            learning_evidence["feedback_type"] = fb.signal_type
+            learning_evidence["feedback_label"] = fb.label_zh
+
+        return JSONResponse({
+            "ok": True,
+            "feedback_id": fb.feedback_id,
+            "learning_evidence": learning_evidence,
+        })
 
     return app
 

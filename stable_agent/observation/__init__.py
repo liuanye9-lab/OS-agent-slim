@@ -21,6 +21,9 @@ from stable_agent.observation.decision_trace_builder import DecisionTraceBuilder
 from stable_agent.observation.run_insight import RunInsightGenerator
 from stable_agent.observation.learning_evidence import LearningEvidence
 from stable_agent.observation.dashboard_projection import DashboardProjection
+from stable_agent.observation.user_feedback_signal import (
+    UserFeedbackSignal, FEEDBACK_TYPES, FEEDBACK_LABELS,
+)
 
 __all__ = [
     "RunStore",
@@ -34,4 +37,7 @@ __all__ = [
     "RunInsightGenerator",
     "LearningEvidence",
     "DashboardProjection",
+    "UserFeedbackSignal",
+    "FEEDBACK_TYPES",
+    "FEEDBACK_LABELS",
 ]

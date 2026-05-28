@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from stable_agent.gateway.tool_schemas import AVATAR_SCENE_MAP
 from stable_agent.observation.decision_trace import (
     DecisionEvidence,
     DecisionTrace,
@@ -23,6 +24,7 @@ class DashboardProjection:
 
     Attributes:
         _avatar_state_map: 决策阶段到头像状态的映射。
+        _scene_map: 13 语义场景映射，来自 tool_schemas.AVATAR_SCENE_MAP。
     """
 
     # 风险等级图标映射
@@ -41,26 +43,26 @@ class DashboardProjection:
         "critical": "🚨",
     }
 
-    # 阶段 → avatar 状态
+    # 阶段 → avatar 状态（13 语义场景）
     _STAGE_AVATAR: dict[str, str] = {
         "task_intake": "listening",
         "intent_parse": "thinking",
-        "context_budget": "thinking",
-        "memory_retrieval": "thinking",
-        "rag_retrieval": "searching",
+        "context_budget": "calculating",
+        "memory_retrieval": "reading_notes",
+        "rag_retrieval": "searching_books",
         "context_build": "thinking",
-        "planning": "thinking",
-        "tool_call": "working",
-        "security_check": "checking",
-        "approval_waiting": "waiting",
-        "execution": "working",
-        "evaluation": "thinking",
-        "badcase_record": "sweating",
+        "planning": "planning",
+        "tool_call": "tooling",
+        "security_check": "safety_check",
+        "approval_waiting": "waiting_approval",
+        "execution": "tooling",
+        "evaluation": "grading",
+        "badcase_record": "failed",
         "skill_learning": "learning",
-        "skill_validation": "learning",
-        "skill_export": "celebrating",
-        "completed": "celebrating",
-        "failed": "sweating",
+        "skill_validation": "grading",
+        "skill_export": "archiving",
+        "completed": "done",
+        "failed": "failed",
     }
 
     def project_trace(
@@ -75,8 +77,8 @@ class DashboardProjection:
             locale: 输出语言，"zh" 或 "en"。
 
         Returns:
-            包含 stage_title, what, why, evidence, discarded,
-            decision, next, avatar, risk 等字段的字典。
+            包含 stage_title, what, why, why_zh, why_en, evidence, discarded,
+            decision_trace, decision, next, avatar, risk 等字段的字典。
         """
         is_zh = locale == "zh"
 
@@ -93,8 +95,20 @@ class DashboardProjection:
         evidence = self._project_evidence_list(trace.evidence, locale)
         discarded = self._project_evidence_list(trace.discarded_evidence, locale)
 
-        # 头像
-        avatar = self._STAGE_AVATAR.get(trace.stage, "idle")
+        # 头像状态 → 13 语义场景
+        avatar_state = self._STAGE_AVATAR.get(trace.stage, "listening")
+        avatar = avatar_state
+        scene = self.get_scene_for_stage(trace.stage)
+
+        # 决策轨迹子对象（供前端 decision_timeline.js 使用）
+        decision_trace: dict[str, Any] = {
+            "why_zh": trace.why_zh,
+            "why_en": trace.why_en,
+            "discarded_evidence": discarded,
+            "evidence": evidence,
+            "decision_zh": trace.decision_zh,
+            "decision_en": trace.decision_en,
+        }
 
         # 风险 & 重要程度
         risk = {
@@ -115,11 +129,16 @@ class DashboardProjection:
             "stage_title": stage_title,
             "what": what,
             "why": why,
+            "why_zh": trace.why_zh,
+            "why_en": trace.why_en,
             "evidence": evidence,
             "discarded": discarded,
+            "decision_trace": decision_trace,
             "decision": decision,
             "next": next_step,
             "avatar": avatar,
+            "avatar_state": avatar_state,
+            "scene": scene,
             "risk": risk,
             "importance": importance,
             "confidence": trace.confidence,
@@ -127,6 +146,28 @@ class DashboardProjection:
             "token_budget": trace.token_budget,
             "quality_score": trace.quality_score,
             "timestamp": trace.timestamp.isoformat() if trace.timestamp else None,
+        }
+
+    def get_scene_for_stage(self, stage: str) -> dict[str, Any]:
+        """根据决策阶段获取 13 语义场景配置。
+
+        Args:
+            stage: 决策阶段名，如 "planning"、"tool_call" 等。
+
+        Returns:
+            包含 scene, prop, label_zh, label_en, avatar_state 的字典。
+        """
+        avatar_state = self._STAGE_AVATAR.get(stage, "listening")
+        scene_cfg: dict[str, str] = AVATAR_SCENE_MAP.get(
+            avatar_state,
+            AVATAR_SCENE_MAP["listening"],
+        )
+        return {
+            "scene": scene_cfg["scene"],
+            "prop": scene_cfg["prop"],
+            "label_zh": scene_cfg["label_zh"],
+            "label_en": scene_cfg["label_en"],
+            "avatar_state": avatar_state,
         }
 
     def project_timeline(

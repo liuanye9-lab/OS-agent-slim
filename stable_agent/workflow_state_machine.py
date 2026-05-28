@@ -18,9 +18,12 @@ DECIDE → BUDGET → BUILD_CONTEXT → APPROVAL_REQUIRED → OBSERVE
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from typing import Any, Optional, Protocol, TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 from stable_agent.models import (
     Event,
@@ -275,7 +278,7 @@ class WorkflowEngine:
         if self.event_bus is not None:
             self.event_bus.publish(event)
         else:
-            print(f"[EVENT] {event_type} — {detail}")
+            logger.info("EVENT %s — %s", event_type, detail)
 
     # ------------------------------------------------------------------
     # V4 新增: SkillOpt 状态检查
@@ -752,8 +755,9 @@ class WorkflowEngine:
                 task_type=workflow.task_type,
                 budget=budget_data.get("memory_budget", 2000),
             )
-        except Exception:
+        except Exception as e:
             # 回退到原有检索方式
+            logger.warning("检索失败，回退到原有检索方式: %s", e)
             memory_items = self.memory_router.query_for_task(
                 task_input=task_input,
                 task_type=workflow.task_type,
@@ -858,4 +862,4 @@ class WorkflowEngine:
         if self.event_bus is not None:
             self.event_bus.publish(event)
         else:
-            print(f"[EVENT] {event_type} — {detail}")
+            logger.info("EVENT %s — %s", event_type, detail)

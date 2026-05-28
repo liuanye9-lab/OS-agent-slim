@@ -437,17 +437,17 @@ class TestAvatarStateMap:
     def test_default_state_exists(self) -> None:
         """验证默认状态 "default" 存在。"""
         assert "default" in AVATAR_STATE_MAP
-        assert AVATAR_STATE_MAP["default"] == "idle"
+        assert AVATAR_STATE_MAP["default"] == "listening"  # V5.6: 语义场景升级
 
     def test_get_avatar_state_known(self) -> None:
         """测试已知事件返回正确的头像状态。"""
         assert get_avatar_state("mcp.call.received") == "listening"
-        assert get_avatar_state("task.completed") == "celebrating"
-        assert get_avatar_state("tool.failed") == "sweating"
+        assert get_avatar_state("task.completed") == "done"  # V5.6: 语义场景升级
+        assert get_avatar_state("tool.failed") == "failed"  # V5.6: 语义场景升级
 
     def test_get_avatar_state_unknown(self) -> None:
         """测试未知事件返回默认状态。"""
-        assert get_avatar_state("unknown.event.type") == "idle"
+        assert get_avatar_state("unknown.event.type") == "listening"  # V5.6: 语义场景默认值
 
 
 # ============================================================================

@@ -209,14 +209,106 @@ AVATAR_STATE_MAP: dict[str, str] = {
     "rag.retrieved": "searching_books",
     "tool.risk_checked": "safety_check",
     "approval.required": "waiting_approval",
-    "workflow.step.started": "working",
+    "workflow.step.started": "tooling",
+    "planning.started": "planning",
     "eval.completed": "grading",
-    "skillopt.patch.proposed": "writing_rule",
-    "skillopt.validation.running": "examining",
+    "skillopt.patch.proposed": "learning",
+    "skillopt.validation.running": "grading",
     "skillopt.exported": "archiving",
-    "tool.failed": "sweating",
-    "task.completed": "celebrating",
-    "default": "idle",
+    "tool.failed": "failed",
+    "task.completed": "done",
+    "default": "listening",
+}
+
+# ---------------------------------------------------------------------------
+# 13 语义场景映射 —— 头像状态 → 场景/道具/标签
+# ---------------------------------------------------------------------------
+
+AVATAR_SCENE_MAP: dict[str, dict[str, str]] = {
+    "listening": {
+        "scene": "desk",
+        "prop": "task_card",
+        "label_zh": "正在接收任务",
+        "label_en": "Receiving task",
+    },
+    "thinking": {
+        "scene": "thinking_board",
+        "prop": "magnifier",
+        "label_zh": "正在理解你的需求",
+        "label_en": "Understanding your intent",
+    },
+    "reading_notes": {
+        "scene": "memory_wall",
+        "prop": "memory_cards",
+        "label_zh": "正在找以前的经验",
+        "label_en": "Retrieving prior memory",
+    },
+    "searching_books": {
+        "scene": "library",
+        "prop": "bookshelf",
+        "label_zh": "正在查找项目资料",
+        "label_en": "Searching project knowledge",
+    },
+    "calculating": {
+        "scene": "budget_panel",
+        "prop": "abacus",
+        "label_zh": "正在计算 token 成本",
+        "label_en": "Estimating token budget",
+    },
+    "planning": {
+        "scene": "map_table",
+        "prop": "route_map",
+        "label_zh": "正在规划执行步骤",
+        "label_en": "Planning execution steps",
+    },
+    "tooling": {
+        "scene": "tool_bench",
+        "prop": "wrench",
+        "label_zh": "正在调用工具",
+        "label_en": "Calling a tool",
+    },
+    "safety_check": {
+        "scene": "checkpoint",
+        "prop": "helmet",
+        "label_zh": "正在做安全检查",
+        "label_en": "Running safety check",
+    },
+    "waiting_approval": {
+        "scene": "approval_gate",
+        "prop": "red_card",
+        "label_zh": "等待你确认",
+        "label_en": "Waiting for approval",
+    },
+    "grading": {
+        "scene": "exam_table",
+        "prop": "score_sheet",
+        "label_zh": "正在评估结果",
+        "label_en": "Evaluating output",
+    },
+    "learning": {
+        "scene": "skill_book",
+        "prop": "notebook",
+        "label_zh": "正在总结经验",
+        "label_en": "Learning from this run",
+    },
+    "archiving": {
+        "scene": "archive_cabinet",
+        "prop": "best_skill_file",
+        "label_zh": "正在更新 best_skill.md",
+        "label_en": "Updating best_skill.md",
+    },
+    "done": {
+        "scene": "delivery_desk",
+        "prop": "done_stamp",
+        "label_zh": "任务完成",
+        "label_en": "Task completed",
+    },
+    "failed": {
+        "scene": "error_board",
+        "prop": "warning_sign",
+        "label_zh": "任务失败，正在记录原因",
+        "label_en": "Task failed, recording reason",
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -246,6 +338,19 @@ def get_avatar_state(event_type: str) -> str:
         对应的头像动画状态名称。
     """
     return AVATAR_STATE_MAP.get(event_type, AVATAR_STATE_MAP["default"])
+
+
+def get_scene_for_state(state: str) -> dict[str, str]:
+    """根据头像状态名获取对应的语义场景配置。
+
+    Args:
+        state: 头像状态名，如 "listening"、"thinking" 等。
+
+    Returns:
+        包含 scene, prop, label_zh, label_en 的字典。
+        如果未找到，返回 listening 的默认场景。
+    """
+    return AVATAR_SCENE_MAP.get(state, AVATAR_SCENE_MAP["listening"])
 
 
 def get_risk_level(tool_name: str) -> str:

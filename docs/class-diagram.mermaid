@@ -1,158 +1,265 @@
 classDiagram
-    class BilingualText {
-        +str zh
-        +str en
-        +str mode
-        +__init__(zh: str, en: str)
-        +get(lang: str) str
-        +to_dict() dict
+    %% ===== 模型层 =====
+    class StableAgentToolResult {
+        +bool ok
+        +str run_id
+        +str tool_call_id
+        +str tool_name
+        +dict data
+        +str plain_text
+        +str plain_text_zh
+        +str plain_text_en
+        +str dashboard_url
+        +list~str~ warnings
+        +list~str~ next_actions
+        +str trace_url
+        +bool is_error
     }
 
-    class ImportanceLevel {
-        <<enumeration>>
-        DEBUG
-        NORMAL
-        IMPORTANT
-        CRITICAL
-    }
-
-    class DecisionEvidence {
-        +str evidence_id
-        +str source_event_type
-        +str description_zh
-        +str description_en
-        +dict raw_data
+    class UserFeedbackSignal {
+        +str feedback_id
+        +str run_id
+        +str span_id
+        +str decision_trace_id
+        +str signal_type
+        +str comment_zh
+        +str comment_en
+        +int rating
         +float timestamp
-        +to_bilingual() BilingualText
+        +bool processed
     }
 
-    class DecisionStage {
-        +str stage_id
-        +str name_zh
-        +str name_en
-        +int order
-        +list~DecisionEvidence~ evidence
-        +list~str~ discarded_options_zh
-        +list~str~ discarded_options_en
-        +float started_at
-        +float ended_at
-        +str conclusion_zh
-        +str conclusion_en
-        +add_evidence(DecisionEvidence) None
-        +set_conclusion(zh: str, en: str) None
+    class TraceEvent {
+        +str run_id
+        +str span_id
+        +str event_type
+        +dict payload
+        +str plain_text
+        +str importance
+        +dict decision_trace
+        +float timestamp
     }
 
     class DecisionTrace {
-        +str trace_id
         +str run_id
-        +str importance
-        +float started_at
-        +float ended_at
-        +list~DecisionStage~ stages
-        +BilingualText summary
-        +BilingualText user_facing_title
+        +str span_id
+        +DecisionStage stage
+        +str title_zh
+        +str title_en
+        +str what_happened_zh
+        +str what_happened_en
+        +str why_zh
+        +str why_en
+        +list~DecisionEvidence~ evidence
+        +list~DecisionEvidence~ discarded_evidence
+        +str decision_zh
+        +str decision_en
+        +str risk_level
+        +float confidence
+        +EventImportance importance
         +str avatar_state
-        +dict tags
-        +add_stage(DecisionStage) None
-        +to_dict() dict
-        +is_complete() bool
+        +datetime timestamp
     }
 
-    class RunInsight {
-        +str run_id
-        +str user_task
-        +list~DecisionTrace~ traces
-        +dict stats
-        +BilingualText overall_summary
-        +float overall_score
-        +list~str~ key_learnings_zh
-        +list~str~ key_learnings_en
-        +generate_summary() BilingualText
+    class DecisionEvidence {
+        +str evidence_type
+        +str title
+        +str summary_zh
+        +str summary_en
+        +str source
+        +float confidence
+        +bool selected
+        +str reason_zh
+        +str reason_en
     }
 
     class LearningEvidence {
         +str evidence_id
         +str run_id
-        +str skill_version_before
-        +str skill_version_after
+        +str skill_name
+        +str before_snippet
+        +str after_snippet
         +str diff_summary_zh
         +str diff_summary_en
-        +bool validation_passed
-        +float validation_score
-        +list~str~ improvements_zh
-        +list~str~ improvements_en
-        +float timestamp
-        +to_projection() dict
+        +str trigger_reason_zh
+        +str trigger_reason_en
+        +bool was_triggered
+        +float confidence_gain
+    }
+
+    class RunInsight {
+        +str run_id
+        +str task_summary_zh
+        +str task_summary_en
+        +str final_result_zh
+        +str final_result_en
+        +float quality_score
+        +float token_roi
+        +list~LearningEvidence~ learning_evidences
+        +bool learning_triggered
+        +str improvement_summary_zh
+        +str improvement_summary_en
+    }
+
+    class BilingualText {
+        +str zh
+        +str en
+        +get(locale) str
+    }
+
+    %% ===== Gateway 层 =====
+    class UnifiedToolRegistry {
+        -dict _handlers
+        -Any _orchestrator
+        +get_handler(name) Callable
+        +list_tools() list
+        -_make_result(ctx, tool_name, ok, data, plain_text, plain_text_zh, plain_text_en, dashboard_url) StableAgentToolResult
+        -_h_task_process(ctx, args) StableAgentToolResult
+        -_h_context_build(ctx, args) StableAgentToolResult
+        -_h_estimate_budget(ctx, args) StableAgentToolResult
+        -_h_memory_retrieve(ctx, args) StableAgentToolResult
+        -_h_memory_write(ctx, args) StableAgentToolResult
+        -_h_rag_retrieve(ctx, args) StableAgentToolResult
+        -_h_eval_evaluate(ctx, args) StableAgentToolResult
+        -_h_badcase_record(ctx, args) StableAgentToolResult
+        -_h_skillopt_status(ctx, args) StableAgentToolResult
+        -_h_skillopt_current(ctx, args) StableAgentToolResult
+        -_h_skillopt_epoch(ctx, args) StableAgentToolResult
+        -_h_skillopt_export(ctx, args) StableAgentToolResult
+        -_h_trace_get_run(ctx, args) StableAgentToolResult
+        -_h_approval_respond(ctx, args) StableAgentToolResult
+    }
+
+    class ToolRouter {
+        -UnifiedToolRegistry _registry
+        -SecurityPolicy _security_policy
+        -ApprovalManager _approval_manager
+        -RunStore _run_store
+        -EventStream _event_stream
+        -EventBus _event_bus
+        +route(tool_name, args) StableAgentToolResult
+        -_assess_risk(tool_name, args) str
+        -_make_event_dict(ctx, event_type, payload, plain_text) dict
+        -_publish_event(event_dict) None
+        -_append_to_store(run_id, event_dict) None
+    }
+
+    class JSONRPCHandler {
+        -UnifiedToolRegistry _registry
+        -ToolRouter _router
+        -ResponseAdapter _adapter
+        +handle(request) dict
+        -_handle_initialize(req_id) dict
+        -_handle_tools_list(req_id) dict
+        -_handle_tools_call(req_id, params) dict
+    }
+
+    class RunContext {
+        +str run_id
+        +str tool_call_id
+        +str trace_id
+        +str span_id
+        +str parent_span_id
+        +float started_at
+        +child_span() RunContext
+    }
+
+    %% ===== Observation 层 =====
+    class EventStream {
+        -dict _subscribers
+        +subscribe(run_id) Queue
+        +unsubscribe(run_id, queue) None
+        +publish(run_id, event) None
+        +publish_sync(run_id, event) None
+        +publish_global(event) None
+    }
+
+    class RunStore {
+        +append_event(run_id, event) None
+        +get_events(run_id) list
+        +get_run(run_id) dict
+    }
+
+    class DecisionTraceBuilder {
+        +build_from_event(event) DecisionTrace
+        +build_run_trace(run_id) list~DecisionTrace~
+    }
+
+    class RunInsightGenerator {
+        +generate(run_id, traces, learning_evidences) RunInsight
     }
 
     class DashboardProjection {
-        +str run_id
-        +list~dict~ stage_cards
-        +list~dict~ timeline_nodes
-        +dict learning_summary
-        +dict status_theater
-        +BilingualText current_narration
-        +to_json() dict
+        +project_traces(traces) list~dict~
+        +project_insight(insight) dict
+        +get_scene_for_stage(stage) str
     }
 
-    class I18nManager {
-        -str _current_lang
-        +set_lang(lang: str) None
-        +get_lang() str
-        +render(text: BilingualText) str
+    class DashboardSync {
+        +sync_trace(trace) None
+        +sync_insight(insight) None
+        +sync_feedback(feedback) None
     }
 
-    class ExplanationTemplates {
-        -dict~str,dict~ _templates
-        +get_template(event_type: str, lang: str) str
-        +register(event_type: str, zh: str, en: str) None
-    }
-
+    %% ===== Explanation 层 =====
     class DecisionNarrator {
-        -ExplanationTemplates _templates
-        -I18nManager _i18n
-        +narrate(event_dict: dict) DecisionTrace
-        +translate_stage(event_type: str) DecisionStage
-        +build_evidence(payload: dict, event_type: str) DecisionEvidence
+        -dict _stage_map
+        -dict _template_map
+        +narrate(event) DecisionTrace
+        +explain_why(trace) str
+        +summarize_discarded(trace) str
     }
 
     class StageExplainer {
-        -ExplanationTemplates _templates
-        +explain(stage: DecisionStage, lang: str) str
-        +explain_evidence(evidence: DecisionEvidence, lang: str) str
-        +explain_discarded(discarded: list, lang: str) str
+        +explain_stage(stage, context) BilingualText
+        +get_stage_i18n(stage) dict
     }
 
     class EvidenceSummarizer {
-        +summarize(evidences: list~DecisionEvidence~, lang: str) str
-        +rank_by_importance(evidences: list~DecisionEvidence~) list
-        +deduplicate(evidences: list~DecisionEvidence~) list
+        +summarize(evidence_list, max_items) BilingualText
+        +rank_by_confidence(evidence_list) list
     }
 
     class LearningExplainer {
-        -I18nManager _i18n
-        +explain_patch(diff: str, before_version: str, after_version: str) BilingualText
-        +explain_validation(passed: bool, score: float, failures: list) BilingualText
-        +summarize_epoch(evidences: list~LearningEvidence~) BilingualText
+        +explain_epoch(epoch_result) BilingualText
+        +explain_patch(patch, validation) BilingualText
+        +format_diff(before, after) dict
     }
 
     class UserFriendlyFormatter {
-        +format_trace(trace: DecisionTrace) dict
-        +format_insight(insight: RunInsight) dict
-        +format_learning(evidence: LearningEvidence) dict
-        +to_dashboard_projection(insight: RunInsight, learnings: list) DashboardProjection
+        +format_trace(trace, locale) str
+        +format_insight(insight, locale) str
+        +format_evidence(evidence, locale) str
     }
 
-    DecisionTrace "1" --> "*" DecisionStage : contains
-    DecisionStage "1" --> "*" DecisionEvidence : contains
-    RunInsight "1" --> "*" DecisionTrace : aggregates
+    class I18nManager {
+        +get(key, locale) str
+        +set_locale(locale) None
+        +translate_stage(stage, locale) str
+    }
+
+    %% ===== 关系 =====
+    ToolRouter --> UnifiedToolRegistry : uses
+    ToolRouter --> RunContext : creates
+    ToolRouter --> EventStream : publishes to
+    ToolRouter --> RunStore : appends to
+    JSONRPCHandler --> ToolRouter : routes through
+    JSONRPCHandler --> UnifiedToolRegistry : lists tools
+    UnifiedToolRegistry ..> StableAgentToolResult : returns
+    DecisionNarrator --> DecisionTrace : produces
+    DecisionNarrator --> StageExplainer : delegates
+    DecisionNarrator --> EvidenceSummarizer : delegates
+    DecisionTraceBuilder --> DecisionTrace : builds
+    DecisionTraceBuilder --> DecisionNarrator : uses
+    RunInsightGenerator --> RunInsight : produces
+    RunInsightGenerator --> LearningEvidence : collects
     DashboardProjection --> DecisionTrace : projects
-    DashboardProjection --> LearningEvidence : projects
-    LearningEvidence --> BilingualText : uses
-    DecisionTrace --> BilingualText : uses
-    DecisionStage --> BilingualText : uses
-    DecisionNarrator --> ExplanationTemplates : uses
-    DecisionNarrator --> I18nManager : uses
-    StageExplainer --> ExplanationTemplates : uses
-    LearningExplainer --> I18nManager : uses
-    UserFriendlyFormatter --> DashboardProjection : produces
+    DashboardProjection --> RunInsight : projects
+    DashboardSync --> DashboardProjection : syncs
+    LearningExplainer --> LearningEvidence : explains
+    UserFriendlyFormatter --> DecisionTrace : formats
+    UserFriendlyFormatter --> RunInsight : formats
+    UserFeedbackSignal --> DecisionTrace : references
+    UserFeedbackSignal --> LearningEvidence : triggers
+    StableAgentToolResult --> BilingualText : embeds
+    TraceEvent --> DecisionTrace : contains

@@ -119,6 +119,9 @@ class UnifiedToolRegistry:
         ok: bool = True,
         data: dict[str, Any] | None = None,
         plain_text: str = "",
+        plain_text_zh: str = "",
+        plain_text_en: str = "",
+        dashboard_url: str = "",
         warnings: list[str] | None = None,
         next_actions: list[str] | None = None,
         is_error: bool = False,
@@ -131,6 +134,9 @@ class UnifiedToolRegistry:
             ok: 执行是否成功。
             data: 结构化返回数据。
             plain_text: 人类可读结果文本。
+            plain_text_zh: 中文结果描述（未提供时回退到 plain_text）。
+            plain_text_en: 英文结果描述（未提供时回退到 plain_text）。
+            dashboard_url: Dashboard 链接（未提供时使用默认 /dashboard/{run_id}）。
             warnings: 警告信息列表。
             next_actions: 建议后续操作。
             is_error: 是否为错误返回。
@@ -145,6 +151,9 @@ class UnifiedToolRegistry:
             tool_name=tool_name,
             data=data or {},
             plain_text=plain_text,
+            plain_text_zh=plain_text_zh or plain_text,
+            plain_text_en=plain_text_en or plain_text,
+            dashboard_url=dashboard_url or f"/dashboard/{ctx.run_id}",
             warnings=warnings or [],
             next_actions=next_actions or [],
             trace_url=f"/runs/{ctx.run_id}",

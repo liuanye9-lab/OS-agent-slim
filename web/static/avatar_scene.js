@@ -1,6 +1,6 @@
 /**
- * StableAgent OS V5.5 — Canvas 语义角色动画
- * 7 个场景，每个 300x400 像素，绘制简单但语义明确的场景。
+ * StableAgent OS V5.6 — Canvas 语义角色动画
+ * 13 语义场景 + idle，每个 300x400 像素。
  */
 
 /** @type {string} */
@@ -20,6 +20,44 @@ let animTick = 0;
  * 每个场景都是 300x400
  */
 const SCENE_SIZE = { w: 300, h: 400 };
+
+// ---------------------------------------------------------------------------
+// 13 语义场景映射 —— 头像状态 → 场景/道具/标签
+// 每个场景包含：scene 场景名、prop 道具标识、label_zh/label_en 双语标签
+// 风格：克制、低饱和、玻璃拟态
+// ---------------------------------------------------------------------------
+
+/** @type {Object<string, {scene: string, prop: string, label_zh: string, label_en: string}>} */
+const AVATAR_SCENE_MAP = {
+    /** desk — 接收任务卡片 */
+    listening:      { scene: 'desk',             prop: 'task_card',       label_zh: '正在接收任务',               label_en: 'Receiving task' },
+    /** thinking_board — 放大镜审视需求 */
+    thinking:       { scene: 'thinking_board',   prop: 'magnifier',       label_zh: '正在理解你的需求',           label_en: 'Understanding your intent' },
+    /** memory_wall — 翻阅记忆卡片 */
+    reading_notes:  { scene: 'memory_wall',      prop: 'memory_cards',    label_zh: '正在找以前的经验',           label_en: 'Retrieving prior memory' },
+    /** library — 书架资料检索 */
+    searching_books:{ scene: 'library',          prop: 'bookshelf',       label_zh: '正在查找项目资料',           label_en: 'Searching project knowledge' },
+    /** budget_panel — 算盘计算成本 */
+    calculating:    { scene: 'budget_panel',     prop: 'abacus',          label_zh: '正在计算 token 成本',        label_en: 'Estimating token budget' },
+    /** map_table — 路线图规划 */
+    planning:       { scene: 'map_table',         prop: 'route_map',       label_zh: '正在规划执行步骤',           label_en: 'Planning execution steps' },
+    /** tool_bench — 扳手调用工具 */
+    tooling:        { scene: 'tool_bench',       prop: 'wrench',           label_zh: '正在调用工具',               label_en: 'Calling a tool' },
+    /** checkpoint — 安全头盔检查 */
+    safety_check:   { scene: 'checkpoint',       prop: 'helmet',           label_zh: '正在做安全检查',             label_en: 'Running safety check' },
+    /** approval_gate — 红牌等待确认 */
+    waiting_approval:{ scene: 'approval_gate',    prop: 'red_card',         label_zh: '等待你确认',                 label_en: 'Waiting for approval' },
+    /** exam_table — 评分表评估结果 */
+    grading:        { scene: 'exam_table',       prop: 'score_sheet',      label_zh: '正在评估结果',               label_en: 'Evaluating output' },
+    /** skill_book — 笔记本总结经验 */
+    learning:       { scene: 'skill_book',       prop: 'notebook',         label_zh: '正在总结经验',               label_en: 'Learning from this run' },
+    /** archive_cabinet — 归档 best_skill.md */
+    archiving:      { scene: 'archive_cabinet',  prop: 'best_skill_file',  label_zh: '正在更新 best_skill.md',     label_en: 'Updating best_skill.md' },
+    /** delivery_desk — 完成盖章 */
+    done:           { scene: 'delivery_desk',    prop: 'done_stamp',       label_zh: '任务完成',                   label_en: 'Task completed' },
+    /** error_board — 警告标识失败记录 */
+    failed:         { scene: 'error_board',      prop: 'warning_sign',     label_zh: '任务失败，正在记录原因',     label_en: 'Task failed, recording reason' },
+};
 
 /**
  * 7 个场景的绘制函数
@@ -688,36 +726,107 @@ function drawPencil(ctx, x, y, tick) {
 // ---------------------------------------------------------------------------
 
 /**
- * 设置当前场景
- * @param {string} sceneName - 场景名: memory_wall|bookshelf|calculator|map_table|tool_bench|exam_desk|archive_room|idle
+ * 设置当前场景（按 Canvas 场景名或 avatar 状态名）
+ * @param {string} sceneOrState - Canvas 场景名（如 memory_wall）或 avatar 状态名（如 reading_notes）
  */
-function setScene(sceneName) {
-    if (!SCENE_DRAWERS[sceneName]) {
-        sceneName = 'idle';
-    }
-    currentScene = sceneName;
-
-    // 更新场景标签
-    const sceneMap = {
-        idle: 'scene_idle',
-        memory_wall: 'scene_memory_wall',
-        bookshelf: 'scene_bookshelf',
-        calculator: 'scene_calculator',
-        map_table: 'scene_map_table',
-        tool_bench: 'scene_tool_bench',
-        exam_desk: 'scene_exam_desk',
-        archive_room: 'scene_archive_room',
-    };
-    const label = document.getElementById('avatar-scene-label');
-    if (label) {
-        const key = sceneMap[sceneName] || 'scene_idle';
-        const text = t(key);
-        if (currentLocale === 'both') {
-            label.innerHTML = text.replace(/\n/g, '<br>');
+function setScene(sceneOrState) {
+    // 先按 Canvas 场景名查找
+    if (!SCENE_DRAWERS[sceneOrState]) {
+        // 如果不是有效的场景名，尝试从 AVATAR_SCENE_MAP 映射
+        const sceneCfg = AVATAR_SCENE_MAP[sceneOrState];
+        if (sceneCfg) {
+            // 将语义场景可映射回 Canvas 场景
+            const canvasScene = _semanticToCanvas(sceneCfg.scene, sceneOrState);
+            sceneOrState = SCENE_DRAWERS[canvasScene] ? canvasScene : 'idle';
         } else {
-            label.textContent = text;
+            sceneOrState = 'idle';
         }
     }
+    currentScene = sceneOrState;
+
+    // 更新玻璃拟态场景标签（根据 currentScene 反查 AVATAR_SCENE_MAP）
+    const labelEl = document.getElementById('avatar-scene-label');
+    if (labelEl) {
+        const stateForLabel = _canvasToState(sceneOrState);
+        const sceneCfg = AVATAR_SCENE_MAP[stateForLabel];
+        if (sceneCfg) {
+            // 双语标签：克制、低饱和、玻璃拟态
+            labelEl.innerHTML = [
+                '<span class="avatar-label-zh">' + sceneCfg.label_zh + '</span>',
+                '<span class="avatar-label-en">' + sceneCfg.label_en + '</span>',
+            ].join('');
+            labelEl.style.display = 'flex';
+        } else if (sceneOrState === 'idle') {
+            labelEl.innerHTML = [
+                '<span class="avatar-label-zh">等待任务...</span>',
+                '<span class="avatar-label-en">Awaiting task...</span>',
+            ].join('');
+            labelEl.style.display = 'flex';
+        }
+    }
+}
+
+/**
+ * 按 avatar 状态名设置场景（直接入口）
+ * @param {string} avatarState - AVATAR_SCENE_MAP 中的 key，如 "thinking"
+ */
+function setSceneByState(avatarState) {
+    const cfg = AVATAR_SCENE_MAP[avatarState];
+    if (!cfg) {
+        setScene('idle');
+        return;
+    }
+    const canvasScene = _semanticToCanvas(cfg.scene, avatarState);
+    setScene(canvasScene);
+}
+
+// ---------------------------------------------------------------------------
+// 语义场景 → Canvas 场景映射（内部）
+// ---------------------------------------------------------------------------
+
+/**
+ * 将语义场景名映射到现有的 Canvas 场景绘制器
+ * @param {string} semanticScene - 语义场景名（如 desk, thinking_board）
+ * @param {string} avatarState - avatar 状态名（备用）
+ * @returns {string} Canvas 场景名
+ */
+function _semanticToCanvas(semanticScene, avatarState) {
+    const map = {
+        desk:             'idle',          // 办公桌 → idle 场景
+        thinking_board:   'idle',          // 思考板 → idle 场景（可扩展抽屉）
+        memory_wall:      'memory_wall',   // 记忆墙
+        library:           'bookshelf',      // 书架
+        budget_panel:     'calculator',    // 算盘
+        map_table:        'map_table',     // 路线图
+        tool_bench:       'tool_bench',    // 工具台
+        checkpoint:       'idle',          // 安全检查 → idle（可扩展）
+        approval_gate:    'idle',          // 审批门 → idle（可扩展）
+        exam_table:       'exam_desk',     // 考试台
+        skill_book:       'exam_desk',     // 技能书 → 复用考试台
+        archive_cabinet:  'archive_room',  // 档案柜
+        delivery_desk:    'archive_room',  // 交付台 → 复用档案柜
+        error_board:      'exam_desk',     // 错误板 → 复用考试台
+    };
+    return map[semanticScene] || 'idle';
+}
+
+/**
+ * Canvas 场景名 → avatar 状态名（用于标签显示）
+ * @param {string} canvasScene
+ * @returns {string}
+ */
+function _canvasToState(canvasScene) {
+    const map = {
+        memory_wall:    'reading_notes',
+        bookshelf:      'searching_books',
+        calculator:     'calculating',
+        map_table:      'planning',
+        tool_bench:     'tooling',
+        exam_desk:      'grading',
+        archive_room:   'archiving',
+        idle:           'listening',
+    };
+    return map[canvasScene] || 'listening';
 }
 
 /**
@@ -765,34 +874,34 @@ function stopAvatarLoop() {
 }
 
 // ---------------------------------------------------------------------------
-// 阶段 → 场景映射
+// 阶段 → avatar 状态映射（13 语义场景）
 // ---------------------------------------------------------------------------
 const STAGE_SCENE_MAP = {
-    task_intake: 'idle',
-    intent_parse: 'idle',
-    context_budget: 'calculator',
-    memory_retrieval: 'memory_wall',
-    rag_retrieval: 'bookshelf',
-    context_build: 'idle',
-    planning: 'map_table',
-    tool_call: 'tool_bench',
-    security_check: 'idle',
-    approval_waiting: 'idle',
-    execution: 'tool_bench',
-    evaluation: 'exam_desk',
-    badcase_record: 'exam_desk',
-    skill_learning: 'exam_desk',
-    skill_validation: 'exam_desk',
-    skill_export: 'archive_room',
-    completed: 'archive_room',
-    failed: 'exam_desk',
+    task_intake:          'listening',
+    intent_parse:         'thinking',
+    context_budget:       'calculating',
+    memory_retrieval:     'reading_notes',
+    rag_retrieval:        'searching_books',
+    context_build:        'thinking',
+    planning:             'planning',
+    tool_call:            'tooling',
+    security_check:       'safety_check',
+    approval_waiting:     'waiting_approval',
+    execution:            'tooling',
+    evaluation:           'grading',
+    badcase_record:       'failed',
+    skill_learning:       'learning',
+    skill_validation:     'grading',
+    skill_export:         'archiving',
+    completed:            'done',
+    failed:               'failed',
 };
 
 /**
- * 根据决策阶段自动切换场景
+ * 根据决策阶段自动切换场景（使用 13 语义场景）
  * @param {string} stage - DecisionStage
  */
 function setSceneByStage(stage) {
-    const scene = STAGE_SCENE_MAP[stage] || 'idle';
-    setScene(scene);
+    const avatarState = STAGE_SCENE_MAP[stage] || 'listening';
+    setSceneByState(avatarState);
 }

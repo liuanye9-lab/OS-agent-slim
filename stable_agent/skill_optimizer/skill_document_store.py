@@ -363,7 +363,8 @@ class SkillDocumentStore:
                         ):
                             max_major = major
                             max_minor = minor
-                except Exception:
+                except Exception as e:
+                    logger.debug("读取版本号失败，跳过: %s", e)
                     pass
 
         if max_major == 0 and max_minor == 0:

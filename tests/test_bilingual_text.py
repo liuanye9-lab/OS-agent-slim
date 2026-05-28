@@ -58,3 +58,13 @@ class TestI18nManager:
         i18n = I18nManager()
         assert i18n.t("label.importance_critical", "zh") == "关键"
         assert i18n.t("label.importance_critical", "en") == "Critical"
+
+    def test_i18n_translate_stage_chinese(self):
+        assert I18nManager.translate_stage("listening", "zh") == "正在接收任务"
+        assert I18nManager.translate_stage("done", "zh") == "任务完成"
+
+    def test_i18n_translate_stage_english(self):
+        assert I18nManager.translate_stage("thinking", "en") == "Understanding your intent"
+
+    def test_i18n_translate_stage_unknown_fallback(self):
+        assert I18nManager.translate_stage("unknown_stage", "zh") == "unknown_stage"

@@ -526,7 +526,8 @@ class SkillOptMCPTools:
                 best = self._engine.doc_store.load_best_skill()
                 if best is not None:
                     best_version = best.version
-            except Exception:
+            except Exception as e:
+                logger.warning("获取 skill 版本失败，使用默认值: %s", e)
                 pass
 
             # 尝试获取当前 skill 版本
@@ -534,7 +535,8 @@ class SkillOptMCPTools:
             try:
                 current = self._engine.doc_store.load_current_skill()
                 current_version = current.version
-            except Exception:
+            except Exception as e:
+                logger.warning("获取 skill 版本失败，使用默认值: %s", e)
                 pass
 
             return {

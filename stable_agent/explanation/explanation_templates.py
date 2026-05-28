@@ -205,6 +205,21 @@ TEMPLATES: dict[str, Template] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# 用户反馈标签 — 中英双语
+# ---------------------------------------------------------------------------
+
+FEEDBACK_LABELS: dict[str, dict[str, str]] = {
+    "aligned":             {"zh": "符合我的意图",       "en": "Aligned with intent"},
+    "partial":             {"zh": "部分符合",           "en": "Partially aligned"},
+    "off_track":           {"zh": "跑偏了",             "en": "Off track"},
+    "too_technical":       {"zh": "太技术化",           "en": "Too technical"},
+    "too_generic":         {"zh": "太空泛",             "en": "Too generic"},
+    "not_specific":        {"zh": "不够具体",           "en": "Not specific enough"},
+    "no_executable_plan":  {"zh": "没有给我可执行方案",  "en": "No executable plan"},
+}
+
+
 def get_template(event_type: str) -> Template:
     """获取指定事件类型的中英双语模板。
 

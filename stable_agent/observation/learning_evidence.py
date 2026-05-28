@@ -125,6 +125,49 @@ class LearningEvidence:
             ),
         }
 
+    def explain_no_learning(self, run_id: str = "") -> dict[str, Any]:
+        """当没有触发学习时，解释原因。
+
+        提供更具上下文的原因说明，包括具体为何本轮没有触发
+        技能文档的修改。
+
+        Args:
+            run_id: 运行标识（可选，用于个性化原因）。
+
+        Returns:
+            {
+                triggered: False,
+                reason_zh: str,
+                reason_en: str,
+            }
+        """
+        return {
+            "triggered": False,
+            "reason_zh": (
+                "当前任务缺少明确反馈，系统没有足够证据判断是否应该修改 skill 文档。"
+            ),
+            "reason_en": (
+                "The current task lacks explicit feedback. "
+                "The system doesn't have enough evidence to determine "
+                "whether skill docs should be modified."
+            ),
+        }
+
+    def format_diff(self, before: str, after: str) -> dict[str, str]:
+        """格式化 skill patch 的 before/after diff。
+
+        生成一个简单的 before/after 对比结构，供前端
+        学习面板渲染 patch diff 展示。
+
+        Args:
+            before: 修改前的 skill 文档内容。
+            after: 修改后的 skill 文档内容。
+
+        Returns:
+            {"before": str, "after": str}
+        """
+        return {"before": before, "after": after}
+
     # ------------------------------------------------------------------
     # 内部辅助
     # ------------------------------------------------------------------

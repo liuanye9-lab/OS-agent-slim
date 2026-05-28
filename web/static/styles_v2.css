@@ -794,6 +794,360 @@
 }
 
 /* --------------------------------------------------------------------------
+   Patch stats
+   -------------------------------------------------------------------------- */
+.learning-patch-stats {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--color-glass);
+    border: 1px solid var(--color-glass-border-subtle);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+}
+
+.patch-stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+
+.patch-stat-label {
+    font-size: 10px;
+    color: var(--color-text-tertiary);
+}
+
+.patch-stat-label.accepted {
+    color: var(--color-success);
+}
+
+.patch-stat-label.rejected {
+    color: var(--color-danger);
+}
+
+.patch-stat-value {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+/* --- Diff pair（before/after 对比） --- */
+.diff-pair {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.diff-before,
+.diff-after {
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    line-height: 1.4;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.diff-before {
+    background: rgba(255, 59, 48, 0.06);
+    border-left: 3px solid var(--color-danger);
+}
+
+.diff-after {
+    background: rgba(52, 199, 89, 0.06);
+    border-left: 3px solid var(--color-success);
+}
+
+.diff-label {
+    font-size: 9px;
+    font-weight: 700;
+    margin-bottom: 2px;
+    display: block;
+}
+
+.diff-before .diff-label {
+    color: var(--color-danger);
+}
+
+.diff-after .diff-label {
+    color: var(--color-success);
+}
+
+.diff-block {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    line-height: 1.5;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* --------------------------------------------------------------------------
+   Zone 6: 反馈区域
+   -------------------------------------------------------------------------- */
+.feedback-section {
+    background: var(--color-surface);
+    backdrop-filter: var(--blur);
+    -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--color-glass-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: 18px 22px;
+    flex-shrink: 0;
+    animation: feedback-slide-up 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes feedback-slide-up {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.feedback-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0 0 12px 0;
+}
+
+.feedback-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.fb-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 7px 16px;
+    border: 1px solid var(--color-glass-border);
+    border-radius: 20px;
+    background: var(--color-glass);
+    color: var(--color-text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    white-space: nowrap;
+}
+
+.fb-btn:hover {
+    background: var(--color-glass-hover);
+    border-color: var(--color-glass-border);
+    color: var(--color-text);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+
+.fb-btn:active {
+    transform: translateY(0);
+}
+
+.fb-btn.fb-selected {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: #fff;
+    box-shadow: 0 0 12px var(--color-accent-glow);
+}
+
+/* 不同反馈类型的颜色提示 */
+.fb-btn.fb-aligned:hover,
+.fb-btn.fb-aligned.fb-selected {
+    border-color: var(--color-success);
+}
+
+.fb-aligned.fb-selected {
+    background: var(--color-success);
+    box-shadow: 0 0 12px rgba(52, 199, 89, 0.4);
+}
+
+.fb-off-track.fb-selected,
+.fb-too-technical.fb-selected,
+.fb-too-generic.fb-selected,
+.fb-not-specific.fb-selected,
+.fb-no-plan.fb-selected {
+    background: var(--color-danger);
+    border-color: var(--color-danger);
+    box-shadow: 0 0 12px rgba(255, 59, 48, 0.4);
+}
+
+.fb-partial.fb-selected {
+    background: var(--color-warning);
+    border-color: var(--color-warning);
+    box-shadow: 0 0 12px rgba(255, 159, 10, 0.4);
+}
+
+/* --- 反馈评论区域 --- */
+.feedback-comment {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    animation: feedback-slide-up 0.3s ease;
+}
+
+.feedback-comment textarea {
+    width: 100%;
+    min-height: 80px;
+    padding: 10px 14px;
+    border: 1px solid var(--color-glass-border);
+    border-radius: var(--radius-md);
+    background: var(--color-glass);
+    color: var(--color-text);
+    font-size: 13px;
+    font-family: var(--font-sans);
+    resize: vertical;
+    outline: none;
+    transition: border-color var(--transition-fast);
+}
+
+.feedback-comment textarea:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px var(--color-accent-glow);
+}
+
+.feedback-comment textarea::placeholder {
+    color: var(--color-text-tertiary);
+}
+
+.feedback-comment-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.fb-btn.fb-submit-comment {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: #fff;
+}
+
+.fb-btn.fb-cancel {
+    background: transparent;
+    color: var(--color-text-tertiary);
+}
+
+/* --- 感谢信息 --- */
+.feedback-thanks {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--color-success);
+    font-weight: 500;
+    animation: feedback-slide-up 0.3s ease;
+}
+
+/* --------------------------------------------------------------------------
+   Zone 7: RunInsight 总结卡片
+   -------------------------------------------------------------------------- */
+.run-insight-card {
+    background: var(--color-surface);
+    backdrop-filter: var(--blur);
+    -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--color-glass-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    flex-shrink: 0;
+    animation: feedback-slide-up 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.run-insight-card .panel-label-v2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.run-insight-card.has-learning .panel-label-v2::after {
+    content: "🧠";
+    font-size: 16px;
+}
+
+.run-insight-card.skill-updated .panel-label-v2::after {
+    content: "✅";
+    font-size: 14px;
+}
+
+.insight-body {
+    padding: 12px 18px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.insight-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.insight-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+    min-width: 60px;
+}
+
+.insight-value {
+    font-size: 13px;
+    color: var(--color-text);
+    line-height: 1.5;
+    text-align: right;
+    word-break: break-word;
+}
+
+.insight-value.insight-failure {
+    color: var(--color-danger);
+}
+
+.insight-metrics {
+    display: flex;
+    gap: 12px;
+    padding: 8px 0;
+}
+
+.insight-metric {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 8px;
+    background: var(--color-glass);
+    border: 1px solid var(--color-glass-border-subtle);
+    border-radius: var(--radius-sm);
+}
+
+.metric-label-sm {
+    font-size: 10px;
+    color: var(--color-text-tertiary);
+    text-transform: uppercase;
+}
+
+.metric-value-sm {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--color-text);
+}
+
+/* --------------------------------------------------------------------------
    响应式
    -------------------------------------------------------------------------- */
 @media (max-width: 1200px) {
@@ -853,6 +1207,24 @@
         flex-wrap: wrap;
         gap: 12px;
         padding: 10px 14px;
+    }
+
+    .feedback-buttons {
+        gap: 6px;
+    }
+
+    .fb-btn {
+        padding: 5px 12px;
+        font-size: 11px;
+    }
+
+    .insight-metrics {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .insight-metric {
+        flex: 1 1 40%;
     }
 }
 

@@ -17,10 +17,11 @@
 from __future__ import annotations
 
 import time
+import uuid
 import warnings
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 
 # ============================================================================
@@ -150,6 +151,20 @@ class ApprovalStatus(StrEnum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+
+
+# ============================================================================
+# 类型别名
+# ============================================================================
+
+EventImportance = Literal["debug", "normal", "important", "critical"]
+"""事件重要性等级。
+
+- debug: 调试级别，仅开发/调试时关注
+- normal: 普通级别，常规事件
+- important: 重要级别，需重点关注
+- critical: 关键级别，影响决策或安全
+"""
 
 
 # ============================================================================
@@ -674,6 +689,9 @@ class StableAgentToolResult:
         tool_name: 工具完整名称（如 "stableagent.memory.retrieve"）。
         data: 结构化返回数据。
         plain_text: 人类可读的纯文本结果。
+        plain_text_zh: 中文结果描述。
+        plain_text_en: 英文结果描述。
+        dashboard_url: Dashboard 链接。
         warnings: 执行过程中产生的警告信息列表。
         next_actions: 建议的后续操作列表。
         trace_url: 可选的 trace 查看 URL。
@@ -686,7 +704,76 @@ class StableAgentToolResult:
     tool_name: str = ""
     data: dict = field(default_factory=dict)
     plain_text: str = ""
+    plain_text_zh: str = field(default="")
+    plain_text_en: str = field(default="")
+    dashboard_url: str = field(default="")
     warnings: list[str] = field(default_factory=list)
     next_actions: list[str] = field(default_factory=list)
     trace_url: str = ""
     is_error: bool = False
+
+
+# ============================================================================
+# V6 新增数据类
+# ============================================================================
+
+
+@dataclass
+class UserFeedbackSignal:
+    """用户反馈信号。
+
+    记录用户对系统输出的实时反馈，用于调整 Agent 行为策略。
+
+    Attributes:
+        feedback_id: 反馈唯一标识（UUID）。
+        run_id: 所属运行 ID。
+        signal_type: 信号类型。
+            - "aligned": 用户确认方向正确
+            - "partial": 部分认可，有调整建议
+            - "off_track": 方向偏离
+            - "too_technical": 内容过于技术化
+            - "too_generic": 内容过于泛化
+            - "not_specific": 不够具体
+            - "no_executable_plan": 缺少可执行计划
+        label_zh: 中文标签/描述。
+        label_en: 英文标签/描述。
+        comment: 用户附加评论。
+        timestamp: 反馈时间戳（time.time() 格式）。
+        processed: 是否已被系统处理。
+    """
+
+    feedback_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    run_id: str = ""
+    signal_type: str = ""
+    label_zh: str = ""
+    label_en: str = ""
+    comment: str = ""
+    timestamp: float = field(default_factory=time.time)
+    processed: bool = False
+
+
+@dataclass
+class TraceEvent:
+    """追踪事件。
+
+    记录一次运行中的关键事件，用于可观测性和决策审计。
+
+    Attributes:
+        run_id: 所属运行 ID。
+        span_id: 关联的 Span ID。
+        event_type: 事件类型标识字符串。
+        payload: 事件携带的数据负载。
+        plain_text: 人类可读的事件描述。
+        importance: 事件重要性等级。
+        decision_trace: 决策追踪数据，None 表示非决策事件。
+        timestamp: 事件发生时间戳（time.time() 格式）。
+    """
+
+    run_id: str = ""
+    span_id: str = ""
+    event_type: str = ""
+    payload: dict[str, Any] = field(default_factory=dict)
+    plain_text: str = ""
+    importance: EventImportance = "normal"
+    decision_trace: Optional[dict[str, Any]] = None
+    timestamp: float = field(default_factory=time.time)

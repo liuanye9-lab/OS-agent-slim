@@ -29,6 +29,9 @@
                 </div>
             </div>
             <div class="nav-right">
+                <button id="lang-toggle"
+                        onclick="window.i18n.setLocale(window.i18n.locale === 'zh' ? 'en' : 'zh')"
+                        data-i18n="lang_switch">切换到 English</button>
                 <div class="lang-switcher" id="lang-switcher">
                     <button class="lang-btn active" data-lang="zh" onclick="setLocale('zh')">中文</button>
                     <button class="lang-btn" data-lang="en" onclick="setLocale('en')">English</button>
@@ -110,9 +113,28 @@
                         <span class="learning-label" data-i18n="learning_triggered">是否学习</span>
                         <span class="learning-value" id="learning-triggered">—</span>
                     </div>
+                    <div class="learning-status-row" id="learning-rollout-section" style="display:none;">
+                        <span class="learning-label" data-i18n="learning_rollout">收集 Rollout</span>
+                        <span class="learning-value" id="learning-rollout-count">—</span>
+                    </div>
                     <div class="learning-status-row" id="learning-reason-row">
-                        <span class="learning-label" data-i18n="learning_reason">发现规律</span>
+                        <span class="learning-label" id="learning-reason-label" data-i18n="learning_reason">发现规律</span>
                         <span class="learning-value" id="learning-reason">—</span>
+                    </div>
+                    <div class="learning-patch-stats" id="learning-patch-stats" style="display:none;">
+                        <span class="learning-label" data-i18n="learning_patches">Patch 统计</span>
+                        <span class="patch-stat-item">
+                            <span class="patch-stat-label" data-i18n="patch_total">总计</span>
+                            <span class="patch-stat-value" id="learning-patch-total">—</span>
+                        </span>
+                        <span class="patch-stat-item">
+                            <span class="patch-stat-label accepted" data-i18n="patch_accepted">通过</span>
+                            <span class="patch-stat-value" id="learning-patch-accepted">—</span>
+                        </span>
+                        <span class="patch-stat-item">
+                            <span class="patch-stat-label rejected" data-i18n="patch_rejected">拒绝</span>
+                            <span class="patch-stat-value" id="learning-patch-rejected">—</span>
+                        </span>
                     </div>
                     <div class="learning-diff" id="learning-diff">
                         <span class="learning-label" data-i18n="learning_diff">Patch Diff</span>
@@ -167,6 +189,79 @@
                 <span class="metric-value" id="memory-value">—</span>
             </div>
         </footer>
+
+        <!-- ============================================================= -->
+        <!-- Zone 6: 任务完成反馈区域 -->
+        <!-- ============================================================= -->
+        <div class="feedback-section" id="feedback-section" style="display:none;">
+            <h3 class="feedback-title" data-i18n="feedback_title">任务完成，你觉得怎么样？</h3>
+            <div class="feedback-buttons" id="feedback-buttons">
+                <button class="fb-btn fb-aligned"          onclick="submitFeedback('aligned')"           data-i18n="feedback_aligned">符合我的意图</button>
+                <button class="fb-btn fb-partial"          onclick="submitFeedback('partial')"          data-i18n="feedback_partial">部分符合</button>
+                <button class="fb-btn fb-off-track"        onclick="submitFeedback('off_track')"        data-i18n="feedback_off_track">跑偏了</button>
+                <button class="fb-btn fb-too-technical"    onclick="submitFeedback('too_technical')"    data-i18n="feedback_too_technical">太技术化</button>
+                <button class="fb-btn fb-too-generic"      onclick="submitFeedback('too_generic')"      data-i18n="feedback_too_generic">太空泛</button>
+                <button class="fb-btn fb-not-specific"     onclick="submitFeedback('not_specific')"     data-i18n="feedback_not_specific">不够具体</button>
+                <button class="fb-btn fb-no-plan"          onclick="submitFeedback('no_executable_plan')" data-i18n="feedback_no_plan">没有可执行方案</button>
+            </div>
+            <div class="feedback-comment" id="feedback-comment" style="display:none;">
+                <textarea id="fb-comment-input" placeholder="可以告诉我们哪里需要改进..." data-i18n-placeholder="feedback_placeholder"></textarea>
+                <div class="feedback-comment-actions">
+                    <button class="fb-btn fb-submit-comment" onclick="submitFeedbackWithComment()" data-i18n="feedback_submit">提交反馈</button>
+                    <button class="fb-btn fb-cancel" onclick="cancelFeedbackComment()" data-i18n="feedback_cancel">取消</button>
+                </div>
+            </div>
+            <div class="feedback-thanks" id="feedback-thanks" style="display:none;">
+                <span data-i18n="feedback_thanks">感谢反馈！这将帮助我更好地优化。</span>
+            </div>
+        </div>
+
+        <!-- ============================================================= -->
+        <!-- Zone 7: RunInsight 总结卡片 -->
+        <!-- ============================================================= -->
+        <div class="run-insight-card" id="run-insight-card" style="display:none;">
+            <div class="panel-label-v2" data-i18n="panel_run_insight">运行总结</div>
+            <div class="insight-body">
+                <div class="insight-row">
+                    <span class="insight-label" data-i18n="insight_summary">任务摘要</span>
+                    <span class="insight-value" id="insight-summary">—</span>
+                </div>
+                <div class="insight-row">
+                    <span class="insight-label" data-i18n="insight_result">最终结果</span>
+                    <span class="insight-value" id="insight-result">—</span>
+                </div>
+                <div class="insight-metrics">
+                    <div class="insight-metric">
+                        <span class="metric-label-sm" data-i18n="insight_quality">质量评分</span>
+                        <span class="metric-value-sm" id="insight-quality">—</span>
+                    </div>
+                    <div class="insight-metric">
+                        <span class="metric-label-sm" data-i18n="insight_intent">意图对齐</span>
+                        <span class="metric-value-sm" id="insight-intent">—</span>
+                    </div>
+                    <div class="insight-metric">
+                        <span class="metric-label-sm" data-i18n="insight_roi">Token ROI</span>
+                        <span class="metric-value-sm" id="insight-roi">—</span>
+                    </div>
+                    <div class="insight-metric">
+                        <span class="metric-label-sm" data-i18n="insight_memory">记忆命中</span>
+                        <span class="metric-value-sm" id="insight-memory">—</span>
+                    </div>
+                </div>
+                <div class="insight-row" id="insight-improvement-row" style="display:none;">
+                    <span class="insight-label" data-i18n="insight_improvement">改进建议</span>
+                    <span class="insight-value" id="insight-improvement">—</span>
+                </div>
+                <div class="insight-row" id="insight-failure-row" style="display:none;">
+                    <span class="insight-label" data-i18n="insight_failure">失败原因</span>
+                    <span class="insight-value insight-failure" id="insight-failure">—</span>
+                </div>
+                <div class="insight-row" id="insight-next-rule-row" style="display:none;">
+                    <span class="insight-label" data-i18n="insight_next_rule">下次注意</span>
+                    <span class="insight-value" id="insight-next-rule">—</span>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- ================================================================= -->

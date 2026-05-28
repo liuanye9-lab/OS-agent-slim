@@ -12,6 +12,12 @@ let currentRunId = null;
 /** @type {boolean} */
 let dashboardInitialized = false;
 
+/** @type {string | null} */
+window._currentRunId = null;
+
+/** @type {string | null} */
+window._pendingFeedback = null;
+
 /**
  * 初始化 Dashboard V2
  */
@@ -50,6 +56,7 @@ function loadRunFromQuery() {
     }
 
     if (currentRunId) {
+        window._currentRunId = currentRunId;
         connectWebSocketV2(currentRunId);
         updateRunStatus('running');
     } else {
@@ -66,6 +73,7 @@ function checkPlaceholder() {
     const metaEl = document.querySelector('meta[name="run-id"]');
     if (metaEl && metaEl.content && metaEl.content !== 'RUN_ID_PLACEHOLDER') {
         currentRunId = metaEl.content;
+        window._currentRunId = currentRunId;
         connectWebSocketV2(currentRunId);
         updateRunStatus('running');
     } else {
@@ -121,6 +129,18 @@ function handleEvent(msg) {
     if (msg.type === 'trace' && msg.data) {
         data = msg.data;
     }
+    if (msg.type === 'user_feedback' && msg.data) {
+        // 用户反馈事件 — 更新学习面板
+        if (msg.data.learning_evidence) {
+            updateLearningPanel(msg.data.learning_evidence);
+        }
+        return;
+    }
+    if (msg.type === 'run_insight' && msg.data) {
+        // RunInsight 总结事件
+        updateRunInsightCard(msg.data);
+        return;
+    }
 
     // 根据数据类型分发
     if (data.stage) {
@@ -138,7 +158,8 @@ function handleEvent(msg) {
     }
 
     if (data.quality_score !== undefined && data.intent_alignment_score !== undefined) {
-        // RunInsight 数据
+        // RunInsight 数据（内联在 DecisionTrace 中）
+        updateRunInsightCard(data);
         updateStatusBar(data);
     }
 }
@@ -301,6 +322,11 @@ function updateRunStatus(status) {
             avatarText.textContent = t('avatar_waiting');
         }
     }
+
+    // 任务完成/失败时显示反馈区域
+    if (status === 'completed' || status === 'error') {
+        showFeedbackSection();
+    }
 }
 
 /**
@@ -333,3 +359,225 @@ window.addEventListener('localechange', (event) => {
         }
     });
 });
+
+// ---------------------------------------------------------------------------
+// 用户反馈功能
+// ---------------------------------------------------------------------------
+
+/**
+ * 显示反馈区域
+ */
+function showFeedbackSection() {
+    const section = document.getElementById('feedback-section');
+    if (section) {
+        section.style.display = '';
+    }
+}
+
+/**
+ * 隐藏反馈区域
+ */
+function hideFeedbackSection() {
+    const section = document.getElementById('feedback-section');
+    if (section) {
+        section.style.display = 'none';
+    }
+}
+
+/**
+ * 提交反馈
+ * @param {string} type - 反馈类型（FEEDBACK_TYPES 之一）
+ */
+function submitFeedback(type) {
+    // off_track 需要额外输入评论
+    if (type === 'off_track' || type === 'not_specific' || type === 'no_executable_plan') {
+        document.getElementById('feedback-comment').style.display = '';
+        window._pendingFeedback = type;
+        // 聚焦到评论输入框
+        var input = document.getElementById('fb-comment-input');
+        if (input) { setTimeout(function () { input.focus(); }, 100); }
+        return;
+    }
+    sendFeedback(type, '');
+}
+
+/**
+ * 带评论提交反馈
+ */
+function submitFeedbackWithComment() {
+    const commentInput = document.getElementById('fb-comment-input');
+    const comment = commentInput ? commentInput.value : '';
+    const type = window._pendingFeedback || 'off_track';
+    sendFeedback(type, comment);
+    // 隐藏评论区域
+    document.getElementById('feedback-comment').style.display = 'none';
+    if (commentInput) { commentInput.value = ''; }
+}
+
+/**
+ * 取消反馈评论
+ */
+function cancelFeedbackComment() {
+    document.getElementById('feedback-comment').style.display = 'none';
+    var input = document.getElementById('fb-comment-input');
+    if (input) { input.value = ''; }
+    window._pendingFeedback = null;
+}
+
+/**
+ * 通过 fetch 发送反馈到 /api/feedback
+ * @param {string} type - 反馈类型
+ * @param {string} comment - 可选评论
+ */
+function sendFeedback(type, comment) {
+    const fb = {
+        run_id: window._currentRunId || currentRunId || '',
+        signal_type: type,
+        comment: comment,
+    };
+
+    // 按钮视觉反馈
+    highlightFeedbackButton(type);
+
+    // 通过 fetch 发送
+    fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fb)
+    }).then(function (r) { return r.json(); }).then(function (data) {
+        if (data.ok) {
+            // 显示感谢信息
+            showFeedbackThanks();
+            // 如果后端返回了 learning_evidence，更新面板
+            if (data.learning_evidence) {
+                updateLearningPanel(data.learning_evidence);
+            }
+        }
+    }).catch(function (err) {
+        console.error('[Dashboard V2] Feedback error:', err);
+    });
+}
+
+/**
+ * 高亮被点击的反馈按钮
+ * @param {string} type
+ */
+function highlightFeedbackButton(type) {
+    // 先移除所有高亮
+    var buttons = document.querySelectorAll('.feedback-buttons .fb-btn');
+    buttons.forEach(function (btn) {
+        btn.classList.remove('fb-selected');
+    });
+    // 高亮当前
+    var activeBtn = document.querySelector('.fb-btn.fb-' + type.replace(/_/g, '-'));
+    if (activeBtn) {
+        activeBtn.classList.add('fb-selected');
+    }
+}
+
+/**
+ * 显示感谢信息并渐隐反馈区域
+ */
+function showFeedbackThanks() {
+    var thanks = document.getElementById('feedback-thanks');
+    var buttons = document.getElementById('feedback-buttons');
+    if (thanks) { thanks.style.display = ''; }
+    if (buttons) { buttons.style.opacity = '0.4'; }
+}
+
+// ---------------------------------------------------------------------------
+// RunInsight 总结卡片
+// ---------------------------------------------------------------------------
+
+/**
+ * 更新 RunInsight 总结卡片
+ * @param {Object} insight - RunInsight 数据
+ */
+function updateRunInsightCard(insight) {
+    const card = document.getElementById('run-insight-card');
+    if (!card) return;
+    card.style.display = '';
+
+    // 任务摘要
+    const summaryEl = document.getElementById('insight-summary');
+    if (summaryEl) {
+        summaryEl.textContent = insight.task_summary_zh || insight.task_summary_en || '—';
+    }
+
+    // 最终结果
+    const resultEl = document.getElementById('insight-result');
+    if (resultEl) {
+        resultEl.textContent = insight.final_result_zh || insight.final_result_en || '—';
+    }
+
+    // 质量评分
+    const qualityEl = document.getElementById('insight-quality');
+    if (qualityEl && insight.quality_score != null) {
+        qualityEl.textContent = insight.quality_score.toFixed(2);
+    }
+
+    // 意图对齐
+    const intentEl = document.getElementById('insight-intent');
+    if (intentEl && insight.intent_alignment_score != null) {
+        intentEl.textContent = insight.intent_alignment_score.toFixed(2);
+    }
+
+    // Token ROI
+    const roiEl = document.getElementById('insight-roi');
+    if (roiEl && insight.token_roi != null) {
+        roiEl.textContent = insight.token_roi.toFixed(2);
+    }
+
+    // 记忆命中率
+    const memoryEl = document.getElementById('insight-memory');
+    if (memoryEl && insight.memory_hit_rate != null) {
+        memoryEl.textContent = (insight.memory_hit_rate * 100).toFixed(0) + '%';
+    }
+
+    // 改进建议
+    const improvementRow = document.getElementById('insight-improvement-row');
+    const improvementEl = document.getElementById('insight-improvement');
+    if (improvementRow && improvementEl) {
+        const improvement = insight.improvement_summary_zh || insight.improvement_summary_en || '';
+        if (improvement) {
+            improvementRow.style.display = '';
+            improvementEl.textContent = improvement;
+        } else {
+            improvementRow.style.display = 'none';
+        }
+    }
+
+    // 失败原因
+    const failureRow = document.getElementById('insight-failure-row');
+    const failureEl = document.getElementById('insight-failure');
+    if (failureRow && failureEl) {
+        const failure = insight.failure_reason_zh || insight.failure_reason_en || '';
+        if (failure) {
+            failureRow.style.display = '';
+            failureEl.textContent = failure;
+        } else {
+            failureRow.style.display = 'none';
+        }
+    }
+
+    // 下次注意
+    const nextRuleRow = document.getElementById('insight-next-rule-row');
+    const nextRuleEl = document.getElementById('insight-next-rule');
+    if (nextRuleRow && nextRuleEl) {
+        const nextRule = insight.next_time_rule_zh || insight.next_time_rule_en || '';
+        if (nextRule) {
+            nextRuleRow.style.display = '';
+            nextRuleEl.textContent = nextRule;
+        } else {
+            nextRuleRow.style.display = 'none';
+        }
+    }
+
+    // 如果触发了学习，在卡片中标注
+    if (insight.learning_triggered) {
+        card.classList.add('has-learning');
+    }
+    if (insight.skill_updated) {
+        card.classList.add('skill-updated');
+    }
+}

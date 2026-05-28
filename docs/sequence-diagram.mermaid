@@ -1,48 +1,33 @@
 sequenceDiagram
     participant Client as MCP Client
-    participant Gateway as MCPGateway
+    participant Handler as JSONRPCHandler
     participant Router as ToolRouter
-    participant Builder as DecisionTraceBuilder
+    participant Registry as UnifiedToolRegistry
+    participant Stream as EventStream
     participant Narrator as DecisionNarrator
-    participant Projection as DashboardProjection
-    participant Adapter as ResponseAdapter
-    participant Frontend as Dashboard V2
+    participant Builder as DecisionTraceBuilder
+    participant Proj as DashboardProjection
+    participant Sync as DashboardSync
+    participant WS as WebSocket→Dashboard
 
-    Client->>Gateway: POST /mcp (tools/call)
-    Gateway->>Router: route(tool_name, args)
+    Client->>Handler: tools/call {name, arguments}
+    Handler->>Router: route(tool_name, args)
+    Router->>Router: RunContext() 创建上下文
+    Router->>Router: 风险评估
+    Router->>Stream: publish_sync("mcp.call.received")
+    Router->>Registry: get_handler(tool_name)
+    Registry->>Registry: handler(ctx, args)
+    Registry->>Registry: _make_result(ctx, ..., plain_text_zh, plain_text_en, dashboard_url)
+    Registry-->>Router: StableAgentToolResult
+    Router->>Stream: publish_sync("tool.completed")
+    Router-->>Handler: result
 
-    Note over Router: 1. Create RunContext
-    Router->>Router: 2. Lookup tool definition
-    Router->>Router: 3. Assess importance from schema
+    Note over Stream,Narrator: 异步：事件→DecisionTrace
 
-    Router->>Router: 4. Publish mcp.call.received
-    Note over Router: event.importance = "important"
-
-    Router->>Builder: 5. build_trace(event_dict)
-    Builder->>Narrator: narrate(event_dict)
-    Narrator->>Narrator: match template by event_type
-    Narrator->>Narrator: build DecisionStage + Evidence
-    Narrator-->>Builder: DecisionTrace (partial)
-    Builder-->>Router: DecisionTrace
-
-    Router->>Router: 6-9. Risk check → Execute handler
-
-    Router->>Builder: 10. complete_trace(trace, result)
-    Builder->>Narrator: add conclusion to stage
-    Builder-->>Router: DecisionTrace (complete)
-
-    Router->>Router: Add trace to event_dict
-
-    Router->>Adapter: to_mcp_content(result, decision_trace)
-    Adapter->>Adapter: Add plain_text_zh/en, dashboard_url
-    Adapter-->>Router: MCP response
-
-    Router-->>Gateway: StableAgentToolResult
-    Gateway-->>Client: JSON-RPC response
-
-    Note over Router: Async: publish event via EventStream
-    Router->>Projection: project_for_dashboard(trace)
-    Projection->>Projection: format stage_cards, timeline_nodes
-    Projection-->>Frontend: SSE event (dashboard_projection)
-
-    Frontend->>Frontend: Render decision cards + timeline
+    Stream->>Narrator: narrate(event_dict)
+    Narrator->>Narrator: explain_why() / summarize_discarded()
+    Narrator-->>Builder: DecisionTrace
+    Builder->>Proj: project_traces(traces)
+    Proj->>Sync: sync_trace(projected)
+    Sync->>WS: WebSocket push
+    WS-->>Client: Dashboard V2 更新

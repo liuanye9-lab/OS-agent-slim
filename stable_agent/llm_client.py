@@ -12,11 +12,14 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from abc import ABC, abstractmethod
 from typing import Optional
 
 from stable_agent.token_meter import TokenMeter
+
+logger = logging.getLogger(__name__)
 
 
 class BaseLLMClient(ABC):
@@ -248,8 +251,9 @@ class OpenAICompatibleClient(BaseLLMClient):
         # 真实 API 调用
         try:
             return self._call_api(prompt, system_prompt, max_tokens, temperature, **kwargs)
-        except Exception:
+        except Exception as e:
             # API 调用失败时优雅降级到 mock
+            logger.warning("API 调用失败，回退到 mock: %s", e)
             return self._mock_fallback.complete(
                 prompt=prompt,
                 system_prompt=system_prompt,

@@ -357,6 +357,110 @@ class DecisionNarrator:
         return discarded
 
     # ------------------------------------------------------------------
+    # V5.5 新增方法 — explain_why + summarize_discarded
+    # ------------------------------------------------------------------
+
+    def explain_why(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        locale: str = "zh",
+    ) -> str:
+        """解释为什么做了这个决定。
+
+        根据事件类型返回预设的、用户可理解的原因说明，
+        帮助用户理解 Agent 决策背后的逻辑。
+
+        Args:
+            event_type: 事件类型字符串。
+            payload: 事件携带的原始数据（保留扩展位）。
+            locale: 输出语言，"zh" 或 "en"。
+
+        Returns:
+            对应语言的解释文本。
+        """
+        explanations: dict[str, dict[str, str]] = {
+            "context.budgeted": {
+                "zh": "根据任务复杂度分配 token 预算，确保在有限上下文窗口中高效执行",
+                "en": "Allocated token budget based on task complexity for efficient execution",
+            },
+            "memory.retrieved": {
+                "zh": "从历史经验中检索相关记忆，避免重复犯错",
+                "en": "Retrieved relevant memories to avoid repeating past mistakes",
+            },
+            "context.compressed": {
+                "zh": "上下文接近预算上限，压缩非关键信息以保留核心任务空间",
+                "en": "Context approaching budget limit, compressing non-critical info",
+            },
+            "tool.call.completed": {
+                "zh": "工具调用成功完成，结果已纳入当前上下文",
+                "en": "Tool call completed successfully, result integrated into context",
+            },
+            "approval.required": {
+                "zh": "检测到高风险操作，需要人工确认以确保安全",
+                "en": "High-risk operation detected, human approval required",
+            },
+            "eval.completed": {
+                "zh": "评估输出质量，作为后续优化和改进的依据",
+                "en": "Evaluated output quality for future optimization",
+            },
+            "task.completed": {
+                "zh": "所有步骤执行完毕，任务目标已达成",
+                "en": "All steps completed, task goal achieved",
+            },
+            "task.failed": {
+                "zh": "任务执行失败，记录原因以便分析和改进",
+                "en": "Task failed, recording reason for analysis",
+            },
+        }
+        info: dict[str, str] = explanations.get(event_type, {
+            "zh": "系统根据预设规则自动做出此决策",
+            "en": "System made this decision based on preset rules",
+        })
+        return info.get(locale, info["zh"])
+
+    def summarize_discarded(
+        self,
+        payload: dict[str, Any],
+        locale: str = "zh",
+    ) -> list[dict[str, Any]]:
+        """总结被丢弃的上下文/证据及其原因。
+
+        从 payload 中提取 discarded 列表，生成简洁的摘要字典列表，
+        用于前端展示被过滤掉的信息及原因。
+
+        Args:
+            payload: 事件数据，需包含 "discarded" 键。
+            locale: 输出语言（保留扩展位，目前 reason 已预设双语）。
+
+        Returns:
+            清理后的丢弃项字典列表，每项包含 evidence_type, title,
+            summary_zh, summary_en, confidence, selected=False,
+            reason_zh, reason_en。
+        """
+        discarded: list[dict[str, Any]] = payload.get("discarded", [])
+        if not discarded:
+            return []
+
+        result: list[dict[str, Any]] = []
+        for item in discarded:
+            result.append({
+                "evidence_type": item.get("type", "unknown"),
+                "title": item.get("title", ""),
+                "summary_zh": item.get(
+                    "reason_zh", "因预算或相关性限制被丢弃"
+                ),
+                "summary_en": item.get(
+                    "reason_en", "Discarded due to budget or relevance constraint"
+                ),
+                "confidence": item.get("confidence", 0.0),
+                "selected": False,
+                "reason_zh": item.get("reason_zh", ""),
+                "reason_en": item.get("reason_en", ""),
+            })
+        return result
+
+    # ------------------------------------------------------------------
     # 内部辅助方法
     # ------------------------------------------------------------------
 
