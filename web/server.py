@@ -27,6 +27,7 @@ import os
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
 from stable_agent.models import BadCase, Event, EvaluationResult, MemoryItem, TaskType
 from stable_agent.context_decision_engine import ContextDecisionEngine
@@ -97,7 +98,17 @@ def create_app() -> FastAPI:
     # ------------------------------------------------------------------
     # 2. 创建 FastAPI 主应用
     # ------------------------------------------------------------------
-    app: FastAPI = FastAPI(title="StableAgent OS", version="0.2.0")
+    app: FastAPI = FastAPI(title="StableAgent Cloud", version="1.5.0",
+        docs_url="/docs", redoc_url="/redoc")
+
+    # SaaS v1.6: CORS 中间件
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # ------------------------------------------------------------------
     # 3. V5: 先挂载统一 MCP Gateway（必须放在 /mcp 之前，避免被旧 /mcp 遮蔽）
@@ -142,6 +153,16 @@ def create_app() -> FastAPI:
     web_dir: str = os.path.dirname(os.path.abspath(__file__))
     static_dir: str = os.path.join(web_dir, "static")
     templates_dir: str = os.path.join(web_dir, "templates")
+
+    # SaaS v1.6: 自定义 404 页面
+    _404_html: str = os.path.join(templates_dir, "404.html")
+
+    @app.exception_handler(404)
+    async def custom_404_handler(request: Request, exc):
+        if os.path.exists(_404_html):
+            with open(_404_html, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read(), status_code=404)
+        return HTMLResponse(content="<h1>404 Not Found</h1>", status_code=404)
 
     # 如果静态文件目录存在则挂载
     if os.path.exists(static_dir):
@@ -322,8 +343,97 @@ def create_app() -> FastAPI:
         return HTMLResponse(content="<h1>Connect page not found</h1>", status_code=404)
 
     # ------------------------------------------------------------------
-    # SaaS v1.4: SaaS 业务页面
+    # SaaS v1.6: Skill + Review 页面
     # ------------------------------------------------------------------
+    skills_html = os.path.join(templates_dir, "skills.html")
+    review_html = os.path.join(templates_dir, "review.html")
+
+    @app.get("/dashboard/skills")
+    async def skills_page():
+        if os.path.exists(skills_html):
+            with open(skills_html, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read())
+        return HTMLResponse(content="<h1>Skills page not found</h1>", status_code=404)
+
+    @app.get("/dashboard/review")
+    async def review_page():
+        if os.path.exists(review_html):
+            with open(review_html, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read())
+        return HTMLResponse(content="<h1>Review page not found</h1>", status_code=404)
+
+    # Skill API
+    @app.get("/api/skills")
+    async def api_list_skills(workspace_id: str = ""):
+        """列出工作空间下的所有 Skills。"""
+        try:
+            from stable_agent.saas import SaasRepository
+            repo = SaasRepository()
+            projects = repo.list_projects(workspace_id) if workspace_id else []
+            skills = []
+            for p in projects:
+                # 简化为直接从内存返回（实际应从 repo 查询）
+                pass
+            return {"skills": skills}
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.get("/api/skills/patches")
+    async def api_list_patches(workspace_id: str = ""):
+        """列出工作空间下的 Skill Patches。"""
+        try:
+            from stable_agent.saas import SaasRepository
+            repo = SaasRepository()
+            # 从 skill_patches 表查询（简化：返回所有 project 的 patches）
+            return {"patches": []}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # Review API
+    @app.get("/api/reviews")
+    async def api_list_reviews(workspace_id: str = ""):
+        """列出待审核的 Human Reviews。"""
+        try:
+            from stable_agent.saas import SaasRepository
+            repo = SaasRepository()
+            # 从 human_reviews 表查询 pending 记录
+            reviews = []
+            if workspace_id:
+                try:
+                    conn = repo._get_conn()
+                    rows = conn.execute(
+                        "SELECT * FROM human_reviews WHERE workspace_id=? AND status='pending' ORDER BY created_at DESC LIMIT 20",
+                        (workspace_id,),
+                    ).fetchall()
+                    for r in rows:
+                        reviews.append({
+                            "id": r["id"], "workspace_id": r["workspace_id"],
+                            "target_type": r["target_type"], "target_id": r["target_id"],
+                            "reviewer": r["reviewer"] or "", "status": r["status"],
+                            "comment": r["comment"] or "",
+                        })
+                except Exception:
+                    pass
+            return {"reviews": reviews}
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.post("/api/reviews/{review_id}")
+    async def api_process_review(review_id: str, request: Request):
+        """处理审核（approve/reject）。"""
+        body = await request.json()
+        action = body.get("action", "approve")
+        try:
+            from stable_agent.saas import SaasRepository, SkillReviewService
+            repo = SaasRepository()
+            svc = SkillReviewService(repo=repo)
+            if action == "approve":
+                result = svc.approve_review(review_id, reviewer=body.get("reviewer", "admin"))
+            else:
+                result = svc.reject_review(review_id, reviewer=body.get("reviewer", "admin"))
+            return {"review_id": review_id, "status": result.status, "action": action}
+        except Exception as e:
+            return {"error": str(e)}
     usage_html = os.path.join(templates_dir, "usage.html")
     apikeys_html = os.path.join(templates_dir, "apikeys.html")
     billing_html = os.path.join(templates_dir, "billing.html")

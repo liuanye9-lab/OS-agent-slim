@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StableAgent Cloud — Skill Library</title>
+<link rel="stylesheet" href="/static/styles_v2.css"><link rel="stylesheet" href="/static/liquid_glass.css">
+</head>
+<body class="liquid-bg">
+<div style="max-width:1000px;margin:0 auto;padding:20px;">
+  <div class="glass-card" style="padding:12px 20px;margin-bottom:16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+    <a href="/" style="font-weight:700;font-size:1.1rem;text-decoration:none;color:var(--text-primary);">☁️ StableAgent Cloud</a>
+    <span style="flex:1;"></span>
+    <a href="/dashboard/v3" class="btn-glass" style="text-decoration:none;padding:6px 14px;">📊 Dashboard</a>
+    <a href="/dashboard/usage" class="btn-glass" style="text-decoration:none;padding:6px 14px;">📈 用量</a>
+    <a href="/dashboard/skills" class="btn-glass" style="text-decoration:none;padding:6px 14px;background:var(--accent);color:#fff;">🧠 Skills</a>
+    <a href="/dashboard/review" class="btn-glass" style="text-decoration:none;padding:6px 14px;">✅ 审核</a>
+    <select id="ws-selector" onchange="loadSkills()" style="padding:6px 12px;border-radius:8px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);"><option value="">选择工作空间</option></select>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+    <div class="glass-card" style="padding:16px;">
+      <div style="font-weight:600;margin-bottom:8px;">📚 Skill 列表</div>
+      <div id="skill-list" style="max-height:500px;overflow-y:auto;"></div>
+    </div>
+    <div class="glass-card" style="padding:16px;">
+      <div style="font-weight:600;margin-bottom:8px;">🔧 Skill 补丁</div>
+      <div id="patch-list" style="max-height:500px;overflow-y:auto;"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+async function loadWorkspaces() {
+  const r = await fetch('/api/workspaces'); const d = await r.json();
+  const sel = document.getElementById('ws-selector');
+  (d.workspaces||[]).forEach(w => sel.innerHTML += `<option value="${w.id}">${w.name}</option>`);
+}
+async function loadSkills() {
+  const wsId = document.getElementById('ws-selector').value;
+  if (!wsId) return;
+  const r = await fetch('/api/skills?workspace_id=' + wsId);
+  const d = await r.json();
+  const skills = d.skills || [];
+  let html = '';
+  skills.forEach(s => {
+    html += `<div class="glass-card" style="padding:10px 12px;margin-bottom:6px;">
+      <div style="font-weight:600;">${s.name} <span style="font-size:0.75rem;color:var(--text-muted);">${s.version}</span></div>
+      <div style="font-size:0.8rem;color:var(--text-muted);">Score: ${(s.score*100).toFixed(0)}%</div></div>`;
+  });
+  document.getElementById('skill-list').innerHTML = html || '<div style="color:var(--text-muted);text-align:center;">暂无 Skill</div>';
+  // 加载补丁
+  const pr = await fetch('/api/skills/patches?workspace_id=' + wsId);
+  const pd = await pr.json();
+  const patches = pd.patches || [];
+  const statusLabel = {candidate:'⚪ 候选',validating:'🔄 验证中',validation_passed:'✅ 已验证',waiting_review:'⏳ 待审核',approved:'✅ 已批准',rejected:'❌ 已拒绝',exported:'📤 已导出'};
+  let ph = '';
+  patches.forEach(p => {
+    ph += `<div class="glass-card" style="padding:8px 12px;margin-bottom:6px;font-size:0.85rem;">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;">
+        <span>${p.patch_type||'prompt'}: ${(p.patch_diff||'').slice(0,60)}...</span>
+        <span>Score: ${p.old_score}→${p.new_score} ${p.delta>0?'+'+(p.delta).toFixed(2):(p.delta).toFixed(2)}</span>
+      </div>
+      <span style="color:var(--text-muted);">${statusLabel[p.status]||p.status}</span></div>`;
+  });
+  document.getElementById('patch-list').innerHTML = ph || '<div style="color:var(--text-muted);text-align:center;">暂无补丁</div>';
+}
+loadWorkspaces();
+</script>
+</body>
+</html>

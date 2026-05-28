@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - JWT_SECRET=${JWT_SECRET:-stableagent-dev-secret}
+      - SAAS_MODE=${SAAS_MODE:-local}
+    volumes:
+      - ./data:/app/data
+      - ./skills:/app/skills
+    restart: unless-stopped
