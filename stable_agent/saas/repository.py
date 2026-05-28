@@ -58,6 +58,9 @@ class SaasRepository:
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
+        # SaaS v1.3: 自动初始化（幂等），确保所有 API 路由可用
+        self.init_db()
+
     def _get_conn(self) -> sqlite3.Connection:
         if self.conn is None:
             self.conn = sqlite3.connect(self.db_path)

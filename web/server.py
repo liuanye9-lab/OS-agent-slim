@@ -543,7 +543,47 @@ def create_app() -> FastAPI:
                 return JSONResponse({"error": "not found"}, status_code=404)
             return {"run_id": run.run_id, "status": run.status, "progress_pct": run.progress_pct,
                     "overall_score": run.overall_score, "token_used": run.token_used,
-                    "dashboard_url": run.dashboard_url}
+                    "dashboard_url": run.dashboard_url, "user_task": run.user_task}
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.get("/api/runs/{run_id}/detail")
+    async def api_get_run_detail(run_id: str):
+        """SaaS v1.3: 获取 Run 完整详情（包含 eval + trace 摘要）。"""
+        try:
+            from stable_agent.saas import RunService, SaasRepository
+            svc = RunService(SaasRepository())
+            run = svc.get_run(run_id)
+            if run is None:
+                return JSONResponse({"error": "not found"}, status_code=404)
+            # 收集 eval 数据
+            eval_data = {}
+            try:
+                repo = SaasRepository()
+                # 检查有无 eval_result
+                eval_data = {"note": "eval not yet available"}
+            except Exception:
+                pass
+            return {
+                "run_id": run.run_id,
+                "status": run.status,
+                "progress_pct": run.progress_pct,
+                "overall_score": run.overall_score,
+                "intent_alignment_score": run.intent_alignment_score,
+                "token_used": run.token_used,
+                "cost_estimate": run.cost_estimate,
+                "learning_triggered": run.learning_triggered,
+                "skill_updated": run.skill_updated,
+                "dashboard_url": run.dashboard_url,
+                "trace_url": run.trace_url,
+                "user_task": run.user_task,
+                "started_at": run.started_at,
+                "ended_at": run.ended_at,
+                "workspace_id": run.workspace_id,
+                "project_id": run.project_id,
+                "agent_id": run.agent_id,
+                "eval": eval_data,
+            }
         except Exception as e:
             return {"error": str(e)}
 

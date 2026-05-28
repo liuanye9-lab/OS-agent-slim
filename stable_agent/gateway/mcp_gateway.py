@@ -108,6 +108,9 @@ class MCPGateway:
                     sc["dashboard_url"] = trace_url
                     sc["current_stage"] = stage_name
 
+                    # SaaS v1.3: 记录用量 & 审计
+                    _record_saas_usage_and_audit(body, result)
+
             # V6.5: 递归序列化所有 dataclass → dict，防止 JSON 序列化错误
             result = self._serialize_dataclasses(result)
             return JSONResponse(content=result)
@@ -154,3 +157,46 @@ class MCPGateway:
         if isinstance(obj, (list, tuple)):
             return [MCPGateway._serialize_dataclasses(v) for v in obj]
         return obj
+
+
+# ===================================================================
+# SaaS v1.3: 用量 & 审计辅助函数
+# ===================================================================
+
+def _record_saas_usage_and_audit(body: dict, result: dict) -> None:
+    """记录每次 tools/call 的用量和审计事件（非阻塞，静默失败）。"""
+    try:
+        tool_name = body.get("params", {}).get("name", "")
+        arguments = body.get("params", {}).get("arguments", {})
+        sc = result.get("result", {}).get("structuredContent", {})
+
+        ws_id = str(arguments.get("workspace_id", "") or sc.get("workspace_id", "") or "").strip()
+        proj_id = str(arguments.get("project_id", "") or sc.get("project_id", "") or "").strip()
+        run_id = sc.get("run_id", "")
+
+        if not ws_id:
+            return  # local mode, skip
+
+        # Usage
+        try:
+            from stable_agent.saas import UsageCounter, SaasRepository
+            uc = UsageCounter(SaasRepository())
+            uc.record_mcp_tool_called(ws_id, proj_id, run_id or "", tool_name=tool_name)
+        except Exception:
+            import logging
+            logging.getLogger("mcp_gateway").debug("UsageCounter record failed for tool: %s", tool_name)
+
+        # Audit
+        try:
+            from stable_agent.saas import AuditLogger, SaasRepository
+            audit = AuditLogger(SaasRepository())
+            risk = result.get("result", {}).get("structuredContent", {}).get("risk_level", "low")
+            if risk in ("high", "critical"):
+                audit.log("mcp_tool_called", workspace_id=ws_id, project_id=proj_id,
+                          target=f"tool:{tool_name}", details={"run_id": run_id, "risk": risk})
+        except Exception:
+            import logging
+            logging.getLogger("mcp_gateway").debug("AuditLogger record failed for tool: %s", tool_name)
+    except Exception:
+        import logging
+        logging.getLogger("mcp_gateway").debug("_record_saas_usage_and_audit failed")

@@ -98,9 +98,19 @@ class ToolRouter:
         """
         # 1. 创建 RunContext. Allow callers such as /os-agent to pre-allocate
         # a run_id so the dashboard can subscribe before the tool finishes.
+        # SaaS v1.3: 从参数中提取 project_id/workspace_id/agent_id 并注入上下文
+        ws_id = str(args.get("workspace_id", "") or "").strip()
+        proj_id = str(args.get("project_id", "") or "").strip()
+        agent_id = str(args.get("agent_id", "") or "").strip()
+        saas_mode = "saas" if (ws_id and proj_id) else "local"
+
         ctx = RunContext.create(
             task_input=args.get("task_input") if isinstance(args.get("task_input"), str) else None,
             run_id=args.get("run_id") if isinstance(args.get("run_id"), str) else None,
+            workspace_id=ws_id,
+            project_id=proj_id,
+            agent_id=agent_id,
+            mode=saas_mode,
         )
 
         # 2. 查找工具定义
