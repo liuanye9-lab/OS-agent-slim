@@ -1,4 +1,5 @@
 """MCP Server — 将 StableAgent 核心能力暴露为 REST API。
+# frozen: V5.6 — 仅允许崩溃级 bug fix，严禁新增业务路由/工具
 
 本模块是 StableAgent OS 的 HTTP 集成层，通过 FastAPI 将上下文构建、
 记忆检索、预算估算、输出评估等核心能力暴露为标准化 REST 端点，

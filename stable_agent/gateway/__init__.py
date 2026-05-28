@@ -1,3 +1,4 @@
+# V5 is the ONLY active MCP entry point. All new tools MUST be registered via UnifiedToolRegistry.
 """V5 Gateway 层 — 统一 MCP 工具调用入口。
 
 本包提供 V5 的核心抽象：
@@ -8,6 +9,11 @@
 """
 
 from __future__ import annotations
+
+# 版本断言：gateway 必须为 V5 唯一入口
+assert __name__ == "stable_agent.gateway", (
+    "V5 gateway 是唯一活跃的 MCP 入口点，不得通过其他路径导入。"
+)
 
 from stable_agent.gateway.run_context import RunContext
 from stable_agent.gateway.tool_schemas import (

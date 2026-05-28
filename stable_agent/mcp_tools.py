@@ -1,4 +1,5 @@
 """StableAgent OS MCP 工具注册与调用层模块。
+# frozen: V5.6 — 仅允许崩溃级 bug fix，严禁新增业务路由/工具
 
 本模块提供与 REST API 解耦的 MCP 工具定义层，管理所有
 StableAgent MCP 工具的定义和调用。每个工具返回统一结构：

@@ -1,14 +1,10 @@
 """StableAgent OS — 稳定型 AI Agent 操作系统。
 
-本包提供 StableAgent OS 的核心基础设施，包括：
-- 共享数据模型（models）
-- 工作流引擎
-- 记忆与检索系统
-- 评估与学习系统
-- EventBus 事件总线
-- SQLite 持久化存储（storage）
-- Token 计量与成本估算（token_meter）
+MCP 版本边界：V3/V4 已冻结（仅 bug fix），V5 gateway 是唯一活跃入口。
 """
+
+MCP_VERSION: str = "5.6.0"
+ACTIVE_MCP_ENTRY: str = "stable_agent.gateway"
 
 from stable_agent.models import (
     ApprovalRequest,
@@ -36,6 +32,9 @@ from stable_agent.models import (
 )
 
 __all__ = [
+    # MCP 版本边界
+    "MCP_VERSION",
+    "ACTIVE_MCP_ENTRY",
     # 枚举
     "TaskType",
     "WorkflowState",
