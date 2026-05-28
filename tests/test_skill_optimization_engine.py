@@ -199,17 +199,21 @@ class TestRunEpoch:
 
 
 class TestExportBestSkill:
-    """测试 export_best_skill 方法。"""
+    """测试 export_best_skill 方法（V6-Professional: 需传 validation + human_review）。"""
 
     def test_export_best_skill_returns_path(self, engine):
         """导出应返回文件路径。"""
-        path = engine.export_best_skill()
+        path = engine.export_best_skill(
+            validation_passed=True, old_score=0.1, new_score=0.9, human_reviewed=True,
+        )
         assert path is not None
         assert os.path.exists(path)
 
     def test_export_best_skill_file_has_content(self, engine):
         """导出文件应有内容。"""
-        path = engine.export_best_skill()
+        path = engine.export_best_skill(
+            validation_passed=True, old_score=0.1, new_score=0.9, human_reviewed=True,
+        )
         assert path is not None
         content = Path(path).read_text(encoding="utf-8")
         assert len(content) > 0

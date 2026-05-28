@@ -349,14 +349,38 @@ class SkillOptimizationEngine:
     # 导出
     # ------------------------------------------------------------------
 
-    def export_best_skill(self) -> str | None:
-        """导出 best_skill.md 的路径。
+    def export_best_skill(
+        self,
+        validation_passed: bool = False,
+        old_score: float = 0.0,
+        new_score: float = 0.0,
+        human_reviewed: bool = False,
+    ) -> str | None:
+        """导出 best_skill.md 的路径（V6-Professional）。
+
+        V6-Professional: 强制检查 Validation Gate + Human Review 后才能导出。
+        如果任一条件不满足，记录拒绝原因并返回 None。
+
+        Args:
+            validation_passed: ValidationGate.validate() 是否返回 passed=True。
+            old_score: 旧 skill 的 baseline_score。
+            new_score: 新 skill 的 candidate_score。
+            human_reviewed: 是否通过人工确认。
 
         Returns:
-            导出文件的绝对路径，或 None（如果不存在）。
+            导出文件的绝对路径，或 None（如果门检查失败或导出出错）。
         """
         try:
-            return self.skill_exporter.export()
+            return self.skill_exporter.export(
+                target_path="skills/best_skill.md",
+                validation_passed=validation_passed,
+                old_score=old_score,
+                new_score=new_score,
+                human_reviewed=human_reviewed,
+            )
+        except PermissionError as e:
+            logger.warning("best_skill.md 导出被门检查拒绝: %s", e)
+            return None
         except Exception as e:
             logger.error("导出 best_skill 失败: %s", e)
             return None

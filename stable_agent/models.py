@@ -284,6 +284,11 @@ class EvaluationResult:
     token_roi: float = 0.0
     failure_reasons: list[str] = field(default_factory=list)
     improvement_rules: list[str] = field(default_factory=list)
+    # V6-Professional 新增字段
+    failure_attribution: dict[str, Any] = field(default_factory=dict)
+    """结构化失败归因。格式: {"failed_stage": "memory.retrieval", "reason": "无关记忆", "step_index": 3}"""
+    step_efficiency: float = 1.0
+    """步数效率，执行步数 / 预期步数，≤1.0 表示高效，>1.0 表示浪费步数"""
 
     def __post_init__(self) -> None:
         """验证所有评分在合法范围内。"""
@@ -401,6 +406,9 @@ class Workflow:
     current_state: WorkflowState = WorkflowState.INIT
     context_pack: dict[str, Any] = field(default_factory=dict)
     history: list[dict[str, Any]] = field(default_factory=list)
+    # V6-Professional: 层级规划
+    sub_steps: list[dict[str, Any]] = field(default_factory=list)
+    """子步骤列表。每项包含 {"step_id": "s1", "description": "...", "status": "pending|running|done|failed", "depends_on": ["s0"]}"""
 
     def transition_to(self, new_state: WorkflowState) -> None:
         """执行状态迁移，并记录到 history。
@@ -446,10 +454,15 @@ class SandboxResult:
 
 @dataclass
 class BadCase:
-    """负面案例。
+    """负面案例（V6-Professional 增强）。
 
     记录一次评估不合格的任务执行，用于后续的反思学习和 Prompt 优化。
     仅当 overall_score 低于阈值时创建。
+
+    V6-Professional 新增:
+        id: 唯一案例标识。
+        tags: 标签（如 "memory", "eval", "skillopt"）。
+        source_run_id: 来源 run_id，用于回溯溯源。
 
     Attributes:
         task_type: 任务类型。
@@ -466,6 +479,10 @@ class BadCase:
     evaluation: EvaluationResult
     timestamp: float = field(default_factory=time.time)
     failure_reason: str = ""
+    # V6-Professional 新增
+    id: str = field(default_factory=lambda: f"bc_{uuid.uuid4().hex[:12]}")
+    tags: list[str] = field(default_factory=list)
+    source_run_id: str = ""
 
 
 # ============================================================================

@@ -894,3 +894,31 @@ class BadCaseManager:
         if reasons:
             return "；".join(reasons)
         return f"{task.value} 任务综合评分不达标 ({evaluation.overall_score:.2f})"
+
+    @staticmethod
+    def convert_to_regression_case(bad_case: BadCase) -> dict[str, Any]:
+        """将 BadCase 转为可用于 ValidationGate 的 regression case。
+
+        V6-Professional 新增：失败案例必须可被复测，形成 regression_cases.jsonl。
+
+        Args:
+            bad_case: BadCase 实例。
+
+        Returns:
+            标准 regression case 字典，含 id / task_input / expected_behavior /
+            failure_mode / source_run_id / tags / created_at。
+        """
+        failure_attribution = bad_case.evaluation.failure_attribution
+        failure_mode = failure_attribution.get("failed_stage", "unknown")
+        reason = failure_attribution.get("reason", bad_case.failure_reason)
+
+        return {
+            "id": bad_case.id,
+            "task_input": bad_case.input_context,
+            "expected_behavior": f"应当避免 {failure_mode} 阶段的失败：{reason}",
+            "failure_mode": failure_mode,
+            "source_run_id": bad_case.source_run_id,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(bad_case.timestamp)),
+            "tags": bad_case.tags or ["eval", "skillopt"],
+            "overall_score": bad_case.evaluation.overall_score,
+        }
