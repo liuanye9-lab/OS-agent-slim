@@ -333,6 +333,14 @@ def create_app() -> FastAPI:
     # ------------------------------------------------------------------
 
     connect_html_path: str = os.path.join(templates_dir, "connect.html")
+    login_html_path: str = os.path.join(templates_dir, "login.html")
+
+    @app.get("/login")
+    async def login_page():
+        if os.path.exists(login_html_path):
+            with open(login_html_path, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read())
+        return HTMLResponse(content="<h1>Login page not found</h1>", status_code=404)
 
     @app.get("/connect")
     async def connect_page():

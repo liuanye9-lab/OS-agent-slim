@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StableAgent Cloud — 登录</title>
+<link rel="stylesheet" href="/static/styles_v2.css"><link rel="stylesheet" href="/static/liquid_glass.css">
+</head>
+<body class="liquid-bg">
+<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;">
+<div class="glass-card" style="width:100%;max-width:400px;padding:36px;">
+  <div style="text-align:center;margin-bottom:24px;">
+    <div style="font-size:2rem;font-weight:800;">☁️ StableAgent Cloud</div>
+    <div style="color:var(--text-muted);font-size:0.9rem;margin-top:4px;">让 AI Agent 越用越好</div>
+  </div>
+
+  <div style="display:flex;margin-bottom:20px;border-bottom:2px solid var(--glass-border);">
+    <button id="tab-login" onclick="switchTab('login')" class="tab-btn" style="flex:1;padding:10px;background:var(--accent);color:#fff;border:none;border-radius:8px 8px 0 0;font-weight:600;cursor:pointer;">登录</button>
+    <button id="tab-register" onclick="switchTab('register')" class="tab-btn" style="flex:1;padding:10px;background:transparent;color:var(--text-muted);border:none;border-radius:8px 8px 0 0;font-weight:600;cursor:pointer;">注册</button>
+  </div>
+
+  <!-- 登录表单 -->
+  <div id="form-login">
+    <input id="login-email" type="email" placeholder="邮箱" style="width:100%;padding:10px 14px;margin-bottom:10px;border-radius:8px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);box-sizing:border-box;">
+    <input id="login-pass" type="password" placeholder="密码" style="width:100%;padding:10px 14px;margin-bottom:16px;border-radius:8px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);box-sizing:border-box;">
+    <button onclick="doLogin()" style="width:100%;padding:12px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;">登录</button>
+    <div id="login-msg" style="margin-top:8px;text-align:center;font-size:0.85rem;"></div>
+  </div>
+
+  <!-- 注册表单 -->
+  <div id="form-register" style="display:none;">
+    <input id="reg-name" type="text" placeholder="用户名" style="width:100%;padding:10px 14px;margin-bottom:10px;border-radius:8px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);box-sizing:border-box;">
+    <input id="reg-email" type="email" placeholder="邮箱" style="width:100%;padding:10px 14px;margin-bottom:10px;border-radius:8px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);box-sizing:border-box;">
+    <input id="reg-pass" type="password" placeholder="密码" style="width:100%;padding:10px 14px;margin-bottom:16px;border-radius:8px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);box-sizing:border-box;">
+    <button onclick="doRegister()" style="width:100%;padding:12px;background:#10b981;color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;">注册</button>
+    <div id="reg-msg" style="margin-top:8px;text-align:center;font-size:0.85rem;"></div>
+  </div>
+
+  <div style="text-align:center;margin-top:16px;font-size:0.8rem;color:var(--text-muted);">
+    注册即表示同意服务条款 | <a href="/" style="color:var(--accent);">返回首页</a>
+  </div>
+</div></div>
+
+<script>
+let _tab = 'login';
+function switchTab(tab) {
+  _tab = tab;
+  document.getElementById('form-login').style.display = tab === 'login' ? 'block' : 'none';
+  document.getElementById('form-register').style.display = tab === 'register' ? 'block' : 'none';
+  document.getElementById('tab-login').style.background = tab === 'login' ? 'var(--accent)' : 'transparent';
+  document.getElementById('tab-login').style.color = tab === 'login' ? '#fff' : 'var(--text-muted)';
+  document.getElementById('tab-register').style.background = tab === 'register' ? '#10b981' : 'transparent';
+  document.getElementById('tab-register').style.color = tab === 'register' ? '#fff' : 'var(--text-muted)';
+}
+async function doLogin() {
+  const email = document.getElementById('login-email').value, pass = document.getElementById('login-pass').value;
+  try {
+    const r = await fetch('/api/auth/login', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pass})});
+    if (r.ok) { const d = await r.json(); localStorage.setItem('saas_token', d.token); window.location.href='/dashboard/v3'; }
+    else { document.getElementById('login-msg').innerHTML = '<span style="color:#ef4444;">邮箱或密码错误</span>'; }
+  } catch(e) { document.getElementById('login-msg').innerHTML = '<span style="color:#ef4444;">网络错误</span>'; }
+}
+async function doRegister() {
+  const name = document.getElementById('reg-name').value, email = document.getElementById('reg-email').value, pass = document.getElementById('reg-pass').value;
+  try {
+    const r = await fetch('/api/auth/register', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,email,password:pass})});
+    if (r.ok) { const d = await r.json(); localStorage.setItem('saas_token', d.token); alert('注册成功！'); switchTab('login'); }
+    else { const d = await r.json(); document.getElementById('reg-msg').innerHTML = '<span style="color:#ef4444;">'+(d.error||'注册失败')+'</span>'; }
+  } catch(e) { document.getElementById('reg-msg').innerHTML = '<span style="color:#ef4444;">网络错误</span>'; }
+}
+</script>
+</body>
+</html>
