@@ -12,7 +12,9 @@
 
 from __future__ import annotations
 
+import dataclasses
 import time
+from enum import Enum
 from typing import Any, Callable, TYPE_CHECKING
 
 from stable_agent.gateway.run_context import RunContext
@@ -161,6 +163,18 @@ class UnifiedToolRegistry:
             is_error=is_error,
         )
 
+    def _json_safe(self, value: Any) -> Any:
+        """Return a recursively JSON-serializable representation."""
+        if dataclasses.is_dataclass(value):
+            return self._json_safe(dataclasses.asdict(value))
+        if isinstance(value, Enum):
+            return value.value
+        if isinstance(value, dict):
+            return {str(k): self._json_safe(v) for k, v in value.items()}
+        if isinstance(value, list | tuple | set):
+            return [self._json_safe(v) for v in value]
+        return value
+
     # ------------------------------------------------------------------
     # Handler 实现 —— 14 个工具
     # ------------------------------------------------------------------
@@ -192,7 +206,7 @@ class UnifiedToolRegistry:
             return self._make_result(
                 ctx, tool_name,
                 ok=True,
-                data=result,
+                data=self._json_safe(result),
                 plain_text=f"任务处理完成：{task_input[:80]}",
                 next_actions=["查看结果详情", "评估输出质量"],
             )
@@ -879,22 +893,21 @@ class UnifiedToolRegistry:
             stage = tracker.get_stage("mcp_received")
             ctx.current_stage = stage.label_zh
             ctx.progress_pct = stage.pct
+            ctx.status_text_zh = stage.status_text_zh
+            ctx.status_text_en = stage.status_text_en
 
             # 阶段 2: 执行任务
             raw_result: Any = self._orchestrator.process_task(task_input)
-            # 确保可 JSON 序列化
-            import dataclasses
-            if dataclasses.is_dataclass(raw_result):
-                result = dataclasses.asdict(raw_result)  # type: ignore[arg-type]
-            elif isinstance(raw_result, dict):
-                result = raw_result
-            else:
-                result = {"output": str(raw_result)}
+            result = self._json_safe(raw_result)
+            if not isinstance(result, dict):
+                result = {"output": str(result)}
 
             # 阶段 3: 完成
             stage = tracker.get_stage("completed")
             ctx.current_stage = stage.label_zh
             ctx.progress_pct = stage.pct
+            ctx.status_text_zh = stage.status_text_zh
+            ctx.status_text_en = stage.status_text_en
 
             return self._make_result(
                 ctx, tool_name,

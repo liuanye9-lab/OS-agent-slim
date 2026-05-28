@@ -55,7 +55,7 @@
   // ====== WebSocket ======
   function connectWs(runId) {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = proto + '://' + location.host + '/ws/runs/' + runId;
+    const url = proto + '://' + location.host + '/dashboard-sync/ws/runs/' + runId;
     ws = new WebSocket(url);
 
     ws.onopen = () => {

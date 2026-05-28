@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import dataclasses
 from typing import Any, TYPE_CHECKING
 
 from fastapi import FastAPI, Request
@@ -107,6 +108,8 @@ class MCPGateway:
                     sc["dashboard_url"] = trace_url
                     sc["current_stage"] = stage_name
 
+            # V6.5: 递归序列化所有 dataclass → dict，防止 JSON 序列化错误
+            result = self._serialize_dataclasses(result)
             return JSONResponse(content=result)
 
         @app.get("/mcp")
@@ -140,3 +143,14 @@ class MCPGateway:
             )
 
         return app
+
+    @staticmethod
+    def _serialize_dataclasses(obj: Any) -> Any:
+        """递归将 dataclass 实例转为 dict，确保 JSON 可序列化。"""
+        if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+            return {f.name: MCPGateway._serialize_dataclasses(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
+        if isinstance(obj, dict):
+            return {k: MCPGateway._serialize_dataclasses(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [MCPGateway._serialize_dataclasses(v) for v in obj]
+        return obj

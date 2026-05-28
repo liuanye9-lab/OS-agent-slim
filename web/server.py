@@ -108,6 +108,7 @@ def create_app() -> FastAPI:
 
         # 创建 Gateway
         gateway: MCPGateway = MCPGateway(orchestrator=orchestrator)
+        gateway_run_store = gateway.run_store
         v5_app = gateway.create_fastapi_app()
         app.mount("/mcp/v5", v5_app)
 
@@ -116,6 +117,7 @@ def create_app() -> FastAPI:
         sync_app = dash_sync.create_app()
         app.mount("/dashboard-sync", sync_app)
     except Exception as e:
+        gateway_run_store = None
         import logging
         logging.getLogger("uvicorn").warning(f"V5 MCP Gateway mount skipped: {e}")
 
@@ -379,8 +381,9 @@ def create_app() -> FastAPI:
     async def get_run_events(run_id: str):
         """获取指定 run_id 的所有历史事件（支持 Dashboard 刷新后回放）。"""
         try:
-            from stable_agent.observation.run_store import RunStore
-            store = RunStore()
+            store = gateway_run_store
+            if store is None:
+                return []
             events = store.get_events(run_id)
             import dataclasses
             result = []
@@ -401,8 +404,9 @@ def create_app() -> FastAPI:
     async def get_run_summary(run_id: str):
         """获取指定 run_id 的任务总结。"""
         try:
-            from stable_agent.observation.run_store import RunStore
-            store = RunStore()
+            store = gateway_run_store
+            if store is None:
+                return {"run_id": run_id, "error": "gateway run store unavailable"}
             return store.get_run_summary(run_id)
         except Exception as e:
             import logging

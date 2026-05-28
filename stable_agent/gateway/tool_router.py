@@ -96,8 +96,12 @@ class ToolRouter:
         Raises:
             不抛出异常 —— 所有错误均包装为 StableAgentToolResult(is_error=True)。
         """
-        # 1. 创建 RunContext
-        ctx = RunContext()
+        # 1. 创建 RunContext. Allow callers such as /os-agent to pre-allocate
+        # a run_id so the dashboard can subscribe before the tool finishes.
+        ctx = RunContext.create(
+            task_input=args.get("task_input") if isinstance(args.get("task_input"), str) else None,
+            run_id=args.get("run_id") if isinstance(args.get("run_id"), str) else None,
+        )
 
         # 2. 查找工具定义
         tool_def: dict[str, Any] | None = get_tool_by_name(tool_name)
@@ -119,6 +123,7 @@ class ToolRouter:
             plain_text=f"收到工具调用：{tool_name}",
         )
         self._publish_event(received_event)
+        self._append_to_store(ctx.run_id, received_event)
 
         # 4. 风险评估
         risk_level: str = get_risk_level(tool_name)
@@ -179,6 +184,7 @@ class ToolRouter:
             plain_text=f"工具 {tool_name} 风险评估完成：{risk_level}",
         )
         self._publish_event(risk_checked_event)
+        self._append_to_store(ctx.run_id, risk_checked_event)
 
         # 6. 查找 handler
         handler = self._registry.get_handler(tool_name)
@@ -208,6 +214,7 @@ class ToolRouter:
             plain_text=f"开始执行工具：{tool_name}",
         )
         self._publish_event(started_event)
+        self._append_to_store(ctx.run_id, started_event)
 
         # 8. 执行 handler
         try:
@@ -223,7 +230,7 @@ class ToolRouter:
             self._append_to_store(ctx.run_id, completed_event)
 
             # 如果任务完成，发布 task.completed
-            if tool_name == "stableagent.task.process" and result.ok:
+            if tool_name in {"stableagent.task.process", "stableagent.task.os_agent"} and result.ok:
                 task_completed_event: dict[str, Any] = self._make_event_dict(
                     ctx, "task.completed",
                     payload={"tool_name": tool_name, "run_id": ctx.run_id},
@@ -231,6 +238,8 @@ class ToolRouter:
                 )
                 self._publish_event(task_completed_event)
                 self._append_to_store(ctx.run_id, task_completed_event)
+                if self._run_store is not None:
+                    self._run_store.mark_completed(ctx.run_id)
 
             return result
 
@@ -370,6 +379,10 @@ class ToolRouter:
             "avatar_state": get_avatar_state(event_type),
             "importance": self._get_importance(event_type),
             "stage": self._get_stage(event_type),
+            "current_stage": ctx.current_stage,
+            "progress_pct": ctx.progress_pct,
+            "status_text_zh": ctx.status_text_zh,
+            "status_text_en": ctx.status_text_en,
         }
 
     def _publish_event(self, event_dict: dict[str, Any]) -> None:
