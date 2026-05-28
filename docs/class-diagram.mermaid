@@ -1,215 +1,158 @@
 classDiagram
-    %% ── V5 新增数据模型 (models.py) ──
-    class RunContext {
-        +str run_id
-        +str tool_call_id
-        +str trace_id
-        +str span_id
-        +Optional~str~ parent_span_id
-        +str avatar_state
+    class BilingualText {
+        +str zh
+        +str en
+        +str mode
+        +__init__(zh: str, en: str)
+        +get(lang: str) str
+        +to_dict() dict
     }
 
-    class StableAgentToolResult {
-        +bool ok
-        +str run_id
-        +str tool_call_id
-        +str tool_name
-        +Optional~Any~ data
-        +str plain_text
-        +list~str~ warnings
-        +list~str~ next_actions
-        +str trace_url
-        +bool is_error
+    class ImportanceLevel {
+        <<enumeration>>
+        DEBUG
+        NORMAL
+        IMPORTANT
+        CRITICAL
     }
 
-    %% ── V4 已有模型 (复用) ──
-    class Event {
+    class DecisionEvidence {
+        +str evidence_id
+        +str source_event_type
+        +str description_zh
+        +str description_en
+        +dict raw_data
         +float timestamp
-        +str type
-        +dict payload
+        +to_bilingual() BilingualText
     }
 
-    class TraceSpan {
-        +str span_id
-        +str run_id
-        +Optional~str~ parent_span_id
-        +str name
-        +str type
-        +str status
+    class DecisionStage {
+        +str stage_id
+        +str name_zh
+        +str name_en
+        +int order
+        +list~DecisionEvidence~ evidence
+        +list~str~ discarded_options_zh
+        +list~str~ discarded_options_en
         +float started_at
-        +Optional~float~ ended_at
-        +Optional~int~ latency_ms
+        +float ended_at
+        +str conclusion_zh
+        +str conclusion_en
+        +add_evidence(DecisionEvidence) None
+        +set_conclusion(zh: str, en: str) None
     }
 
-    class ApprovalRequest {
-        +str request_id
+    class DecisionTrace {
+        +str trace_id
         +str run_id
-        +str action
-        +str risk
-        +str reason
-        +str status
-        +float created_at
-        +Optional~float~ resolved_at
+        +str importance
+        +float started_at
+        +float ended_at
+        +list~DecisionStage~ stages
+        +BilingualText summary
+        +BilingualText user_facing_title
+        +str avatar_state
+        +dict tags
+        +add_stage(DecisionStage) None
+        +to_dict() dict
+        +is_complete() bool
     }
 
-    class RunRecord {
+    class RunInsight {
         +str run_id
         +str user_task
-        +TaskType task_type
-        +str status
-        +float started_at
-        +Optional~float~ ended_at
+        +list~DecisionTrace~ traces
+        +dict stats
+        +BilingualText overall_summary
+        +float overall_score
+        +list~str~ key_learnings_zh
+        +list~str~ key_learnings_en
+        +generate_summary() BilingualText
     }
 
-    %% ── gateway/ 包 ──
-    class MCPGateway {
-        -ToolRouter _router
-        -JSONRPCHandler _jsonrpc
-        -ResponseAdapter _adapter
-        -RunStore _run_store
-        -EventStream _event_stream
-        +handle_jsonrpc(request) StreamingResponse
-        +handle_sse(run_id) StreamingResponse
-        +handle_ws(run_id, websocket) None
+    class LearningEvidence {
+        +str evidence_id
+        +str run_id
+        +str skill_version_before
+        +str skill_version_after
+        +str diff_summary_zh
+        +str diff_summary_en
+        +bool validation_passed
+        +float validation_score
+        +list~str~ improvements_zh
+        +list~str~ improvements_en
+        +float timestamp
+        +to_projection() dict
     }
 
-    class JSONRPCHandler {
-        -ToolRouter _router
-        -RunStore _run_store
-        +parse_message(body) dict
-        +handle_initialize(params) dict
-        +handle_tools_list() dict
-        +handle_tools_call(params) dict
-        -_generate_run_context() RunContext
+    class DashboardProjection {
+        +str run_id
+        +list~dict~ stage_cards
+        +list~dict~ timeline_nodes
+        +dict learning_summary
+        +dict status_theater
+        +BilingualText current_narration
+        +to_json() dict
     }
 
-    class ToolRouter {
-        -UnifiedToolRegistry _registry
-        -SecurityPolicy _security
-        -ApprovalManager _approval
-        -EventBus _event_bus
-        +route(ctx, tool_name, args) StableAgentToolResult
-        -_check_approval(ctx, tool_name, args) None
-        -_publish_trace(event_type, ctx, payload) None
+    class I18nManager {
+        -str _current_lang
+        +set_lang(lang: str) None
+        +get_lang() str
+        +render(text: BilingualText) str
     }
 
-    class UnifiedToolRegistry {
-        -dict _tools
-        +register(name, handler, schema) None
-        +lookup(name) ToolHandler
-        +call(ctx, name, args) StableAgentToolResult
-        +list_tools() list
-        -_register_all() None
+    class ExplanationTemplates {
+        -dict~str,dict~ _templates
+        +get_template(event_type: str, lang: str) str
+        +register(event_type: str, zh: str, en: str) None
     }
 
-    class ResponseAdapter {
-        +to_mcp_content(result) list~dict~
-        +to_jsonrpc_error(code, message) dict
-        +to_jsonrpc_result(id, result) dict
+    class DecisionNarrator {
+        -ExplanationTemplates _templates
+        -I18nManager _i18n
+        +narrate(event_dict: dict) DecisionTrace
+        +translate_stage(event_type: str) DecisionStage
+        +build_evidence(payload: dict, event_type: str) DecisionEvidence
     }
 
-    %% ── observation/ 包 ──
-    class RunStore {
-        -dict _runs
-        -dict _events
-        -TraceStorage _storage
-        +create_run(run_id, user_task) RunRecord
-        +get_run(run_id) Optional~RunRecord~
-        +add_event(run_id, event) None
-        +get_events(run_id, limit) list~Event~
-        +update_run_status(run_id, status) None
+    class StageExplainer {
+        -ExplanationTemplates _templates
+        +explain(stage: DecisionStage, lang: str) str
+        +explain_evidence(evidence: DecisionEvidence, lang: str) str
+        +explain_discarded(discarded: list, lang: str) str
     }
 
-    class EventStream {
-        -EventBus _event_bus
-        -dict _subscriptions
-        +subscribe(run_id, callback) None
-        +unsubscribe(run_id, callback) None
-        +publish_to_run(run_id, event) None
-        -_on_event(event) None
+    class EvidenceSummarizer {
+        +summarize(evidences: list~DecisionEvidence~, lang: str) str
+        +rank_by_importance(evidences: list~DecisionEvidence~) list
+        +deduplicate(evidences: list~DecisionEvidence~) list
     }
 
-    class DashboardSync {
-        -EventStream _event_stream
-        -RunStore _run_store
-        -dict _ws_connections
-        +connect(run_id, websocket) None
-        +disconnect(run_id, websocket) None
-        +broadcast_to_run(run_id, message) None
-        -_on_run_event(run_id, event) None
+    class LearningExplainer {
+        -I18nManager _i18n
+        +explain_patch(diff: str, before_version: str, after_version: str) BilingualText
+        +explain_validation(passed: bool, score: float, failures: list) BilingualText
+        +summarize_epoch(evidences: list~LearningEvidence~) BilingualText
     }
 
-    %% ── V4 已有模块 ──
-    class EventBus {
-        -list _listeners
-        -list _events
-        -dict _spans
-        +subscribe(listener) None
-        +unsubscribe(listener) None
-        +publish(event) None
-        +publish_trace_event(type, ctx, payload) None
-        +get_events_by_run(run_id) list
-        +start_span(run_id, name, type) TraceSpan
-        +end_span(span, status, payload) None
+    class UserFriendlyFormatter {
+        +format_trace(trace: DecisionTrace) dict
+        +format_insight(insight: RunInsight) dict
+        +format_learning(evidence: LearningEvidence) dict
+        +to_dashboard_projection(insight: RunInsight, learnings: list) DashboardProjection
     }
 
-    class SecurityPolicy {
-        +classify_command(command) str
-        +classify_path(path) str
-        +should_require_approval(action, risk, command, path) bool
-    }
-
-    class ApprovalManager {
-        -dict _requests
-        +create_request(run_id, action, risk, reason) ApprovalRequest
-        +approve(request_id) ApprovalRequest
-        +reject(request_id, reason) ApprovalRequest
-        +list_pending() list
-        +has_pending_for_run(run_id) bool
-    }
-
-    class TraceStorage {
-        +save_event(event) None
-        +load_events(limit) list
-        +save_span(span) None
-        +load_spans(run_id, limit) list
-    }
-
-    %% ── 关系 ──
-    MCPGateway *-- JSONRPCHandler : composes
-    MCPGateway *-- ToolRouter : composes
-    MCPGateway *-- ResponseAdapter : composes
-    MCPGateway --> RunStore : uses
-    MCPGateway --> EventStream : uses
-
-    JSONRPCHandler --> ToolRouter : delegates
-    JSONRPCHandler --> RunStore : creates runs
-    JSONRPCHandler ..> RunContext : generates
-
-    ToolRouter *-- UnifiedToolRegistry : composes
-    ToolRouter --> SecurityPolicy : checks risk
-    ToolRouter --> ApprovalManager : creates approvals
-    ToolRouter --> EventBus : publishes traces
-    ToolRouter ..> StableAgentToolResult : returns
-
-    UnifiedToolRegistry ..> RunContext : receives
-    UnifiedToolRegistry ..> StableAgentToolResult : returns
-
-    ResponseAdapter ..> StableAgentToolResult : converts
-
-    EventStream --> EventBus : wraps
-    EventStream ..> Event : filters by run_id
-
-    RunStore --> TraceStorage : persists
-    RunStore ..> RunRecord : manages
-    RunStore ..> Event : indexes
-
-    DashboardSync --> EventStream : subscribes
-    DashboardSync --> RunStore : queries
-
-    EventBus --> TraceStorage : persists via
-    EventBus ..> Event : publishes
-    EventBus ..> TraceSpan : manages
-
-    SecurityPolicy ..> ApprovalRequest : informs
-    ApprovalManager ..> ApprovalRequest : manages
+    DecisionTrace "1" --> "*" DecisionStage : contains
+    DecisionStage "1" --> "*" DecisionEvidence : contains
+    RunInsight "1" --> "*" DecisionTrace : aggregates
+    DashboardProjection --> DecisionTrace : projects
+    DashboardProjection --> LearningEvidence : projects
+    LearningEvidence --> BilingualText : uses
+    DecisionTrace --> BilingualText : uses
+    DecisionStage --> BilingualText : uses
+    DecisionNarrator --> ExplanationTemplates : uses
+    DecisionNarrator --> I18nManager : uses
+    StageExplainer --> ExplanationTemplates : uses
+    LearningExplainer --> I18nManager : uses
+    UserFriendlyFormatter --> DashboardProjection : produces

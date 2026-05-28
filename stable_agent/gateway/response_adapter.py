@@ -69,6 +69,11 @@ class ResponseAdapter:
                 "warnings": result.warnings,
                 "next_actions": result.next_actions,
                 "trace_url": result.trace_url,
+                # V5.5 新增字段
+                "current_stage": result.data.get("stage", "execution"),
+                "plain_text_zh": result.plain_text,
+                "plain_text_en": result.data.get("plain_text_en", result.plain_text),
+                "dashboard_url": f"/runs/{result.run_id}",
             },
             "isError": result.is_error,
         }

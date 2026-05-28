@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StableAgent OS · V5.5 决策观察舱</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles_v2.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230071e3'/><text x='50%25' y='55%25' dominant-baseline='central' text-anchor='middle' fill='white' font-size='18' font-family='system-ui'>S</text></svg>">
+</head>
+<body>
+    <!-- ================================================================= -->
+    <!-- V5.5 Decision Observatory — 5 区布局 -->
+    <!-- ================================================================= -->
+    <div class="dashboard-v2" id="dashboard-v2">
+
+        <!-- ============================================================= -->
+        <!-- Zone 1: 顶部导航栏 -->
+        <!-- ============================================================= -->
+        <nav class="nav-bar-v2" id="nav-bar-v2">
+            <div class="nav-left">
+                <div class="nav-logo">S</div>
+                <h1 class="nav-title-v2" id="nav-task-name">StableAgent OS <span>· V5.5</span></h1>
+            </div>
+            <div class="nav-center">
+                <div class="run-status" id="run-status">
+                    <div class="status-dot-v2" id="status-dot-v2"></div>
+                    <span id="status-text-v2" data-i18n="status_idle">待命中</span>
+                </div>
+            </div>
+            <div class="nav-right">
+                <div class="lang-switcher" id="lang-switcher">
+                    <button class="lang-btn active" data-lang="zh" onclick="setLocale('zh')">中文</button>
+                    <button class="lang-btn" data-lang="en" onclick="setLocale('en')">English</button>
+                    <button class="lang-btn" data-lang="both" onclick="setLocale('both')">双语</button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- ============================================================= -->
+        <!-- Zone 2-5: 主体内容区 -->
+        <!-- ============================================================= -->
+        <div class="main-grid-v2">
+
+            <!-- ========================================================= -->
+            <!-- Zone 2: 左侧 — Agent 状态剧场 -->
+            <!-- ========================================================= -->
+            <aside class="avatar-panel-v2" id="avatar-panel">
+                <div class="panel-label-v2" data-i18n="panel_agent_theater">Agent 状态剧场</div>
+                <div class="avatar-stage" id="avatar-stage">
+                    <canvas id="avatar-canvas" width="300" height="400"></canvas>
+                </div>
+                <div class="avatar-scene-label" id="avatar-scene-label" data-i18n="scene_idle">待命中</div>
+                <div class="avatar-status-text" id="avatar-status-text" data-i18n="avatar_waiting">等待任务开始...</div>
+            </aside>
+
+            <!-- ========================================================= -->
+            <!-- Zone 3: 中间 — 决策卡片 + 时间线 -->
+            <!-- ========================================================= -->
+            <main class="decision-panel-v2">
+
+                <!-- 当前决策卡片 -->
+                <section class="decision-card" id="decision-card">
+                    <div class="card-header-v2">
+                        <span class="card-stage" id="card-stage" data-i18n="stage_idle">待命中</span>
+                        <span class="risk-badge risk-none" id="risk-badge">🟢 无风险</span>
+                    </div>
+                    <div class="card-body-v2">
+                        <div class="card-what" id="card-what">
+                            <span class="card-label" data-i18n="label_what">当前阶段</span>
+                            <span class="card-value" id="card-what-value">—</span>
+                        </div>
+                        <div class="card-why" id="card-why">
+                            <span class="card-label" data-i18n="label_why">为什么这样做</span>
+                            <span class="card-value" id="card-why-value">—</span>
+                        </div>
+                        <div class="card-evidence" id="card-evidence-section">
+                            <span class="card-label" data-i18n="label_evidence">依据</span>
+                            <div class="evidence-tags" id="evidence-tags"></div>
+                        </div>
+                        <div class="card-discarded" id="card-discarded-section">
+                            <span class="card-label" data-i18n="label_discarded">丢弃</span>
+                            <div class="discarded-tags" id="discarded-tags"></div>
+                        </div>
+                        <div class="card-next" id="card-next">
+                            <span class="card-label" data-i18n="label_next">下一步</span>
+                            <span class="card-value" id="card-next-value">—</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 决策时间线 -->
+                <section class="decision-timeline" id="decision-timeline">
+                    <div class="panel-label-v2" data-i18n="panel_timeline">决策时间线</div>
+                    <div class="timeline-list-v2" id="timeline-list-v2">
+                        <div class="timeline-empty-v2" id="timeline-empty-v2">
+                            <span data-i18n="timeline_waiting">等待决策事件...</span>
+                        </div>
+                    </div>
+                </section>
+            </main>
+
+            <!-- ========================================================= -->
+            <!-- Zone 4: 右侧 — 自我优化证据面板 -->
+            <!-- ========================================================= -->
+            <aside class="learning-panel-v2" id="learning-panel">
+                <div class="panel-label-v2" data-i18n="panel_learning">自我优化证据</div>
+                <div class="learning-content" id="learning-content">
+                    <div class="learning-status-row">
+                        <span class="learning-label" data-i18n="learning_triggered">是否学习</span>
+                        <span class="learning-value" id="learning-triggered">—</span>
+                    </div>
+                    <div class="learning-status-row" id="learning-reason-row">
+                        <span class="learning-label" data-i18n="learning_reason">发现规律</span>
+                        <span class="learning-value" id="learning-reason">—</span>
+                    </div>
+                    <div class="learning-diff" id="learning-diff">
+                        <span class="learning-label" data-i18n="learning_diff">Patch Diff</span>
+                        <div class="diff-content" id="diff-content">—</div>
+                    </div>
+                    <div class="learning-scores" id="learning-scores">
+                        <div class="score-item">
+                            <span class="score-label">Baseline</span>
+                            <span class="score-value" id="score-baseline">—</span>
+                        </div>
+                        <div class="score-arrow">→</div>
+                        <div class="score-item">
+                            <span class="score-label">Candidate</span>
+                            <span class="score-value" id="score-candidate">—</span>
+                        </div>
+                        <div class="score-item score-delta">
+                            <span class="score-label">Δ</span>
+                            <span class="score-value" id="score-delta">—</span>
+                        </div>
+                    </div>
+                    <div class="learning-verdict" id="learning-verdict">
+                        <span class="verdict-badge" id="verdict-badge" data-i18n="verdict_pending">等待中</span>
+                    </div>
+                </div>
+                <div class="learning-empty" id="learning-empty">
+                    <span data-i18n="learning_no_data">暂无学习数据</span>
+                </div>
+            </aside>
+        </div>
+
+        <!-- ============================================================= -->
+        <!-- Zone 5: 底部状态栏 -->
+        <!-- ============================================================= -->
+        <footer class="status-bar-v2" id="status-bar-v2">
+            <div class="status-metric" id="token-metric">
+                <span class="metric-label" data-i18n="metric_token">Token</span>
+                <div class="metric-bar">
+                    <div class="metric-bar-fill" id="token-bar-fill-v2" style="width: 0%;"></div>
+                </div>
+                <span class="metric-value" id="token-value">0 / 0 (0%)</span>
+            </div>
+            <div class="status-metric" id="quality-metric">
+                <span class="metric-label" data-i18n="metric_quality">Quality</span>
+                <span class="metric-value" id="quality-value">—</span>
+            </div>
+            <div class="status-metric" id="intent-metric">
+                <span class="metric-label" data-i18n="metric_intent">意图对齐</span>
+                <span class="metric-value" id="intent-value">—</span>
+            </div>
+            <div class="status-metric" id="memory-metric">
+                <span class="metric-label" data-i18n="metric_memory">记忆命中</span>
+                <span class="metric-value" id="memory-value">—</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- Scripts -->
+    <!-- ================================================================= -->
+    <script src="/static/i18n.js"></script>
+    <script src="/static/avatar_scene.js"></script>
+    <script src="/static/decision_timeline.js"></script>
+    <script src="/static/learning_panel.js"></script>
+    <script src="/static/dashboard_v2.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            initDashboardV2();
+        });
+    </script>
+</body>
+</html>

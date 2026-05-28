@@ -20,15 +20,15 @@ import asyncio
 import json
 from typing import Any, TYPE_CHECKING
 
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+
 from stable_agent.gateway.unified_tool_registry import UnifiedToolRegistry
 from stable_agent.gateway.tool_router import ToolRouter
 from stable_agent.gateway.response_adapter import ResponseAdapter
 from stable_agent.gateway.jsonrpc_handler import JSONRPCHandler
 from stable_agent.observation.run_store import RunStore
 from stable_agent.observation.event_stream import EventStream
-
-if TYPE_CHECKING:
-    from fastapi import FastAPI
 
 
 class MCPGateway:
@@ -87,44 +87,30 @@ class MCPGateway:
     # 公共 API
     # ------------------------------------------------------------------
 
-    def create_fastapi_app(self) -> "FastAPI":
-        """创建包含 /mcp 端点的 FastAPI app。
-
-        POST /mcp — JSON-RPC 2.0 端点，处理 initialize/tools/list/tools/call。
-        GET /mcp — SSE 事件流端点，按 ?run_id=xxx 筛选实时事件。
-
-        Returns:
-            配置好路由的 FastAPI 应用实例。
-        """
-        from fastapi import FastAPI, Request
-        from fastapi.responses import StreamingResponse, JSONResponse
-
+    def create_fastapi_app(self) -> FastAPI:
+        """创建包含 /mcp 端点的 FastAPI app。"""
         app: FastAPI = FastAPI(title="StableAgent MCP Gateway")
 
         @app.post("/mcp")
-        async def mcp_post(req: Request) -> JSONResponse:
-            """JSON-RPC 2.0 端点。
-
-            接收 JSON-RPC 请求，路由到 JSONRPCHandler 处理，
-            返回 JSON-RPC 响应。
-
-            Returns:
-                JSONResponse 包含 JSON-RPC 2.0 响应。
-            """
+        async def mcp_post(req: Request):
             body: dict[str, Any] = await req.json()
             result: dict[str, Any] = self.jsonrpc.handle(body)
+
+            # V5.5: 对 tools/call 结果注入 DecisionTrace 字段
+            if body.get("method") == "tools/call":
+                if "result" in result and "structuredContent" in result["result"]:
+                    sc: dict[str, Any] = result["result"]["structuredContent"]
+                    run_id: str = sc.get("run_id", "")
+                    trace_url: str = f"/runs/{run_id}" if run_id else ""
+                    stage_name: str = sc.get("current_stage", "execution")
+                    sc["trace_url"] = trace_url
+                    sc["dashboard_url"] = trace_url
+                    sc["current_stage"] = stage_name
+
             return JSONResponse(content=result)
 
         @app.get("/mcp")
-        async def mcp_get(req: Request) -> StreamingResponse | JSONResponse:
-            """SSE 事件流端点。
-
-            按 run_id 筛选事件流。客户端通过 EventSource 连接，接收
-            实时推送的工具调用事件。
-
-            Returns:
-                StreamingResponse（SSE 格式）或 JSONResponse（参数错误）。
-            """
+        async def mcp_get(req: Request):
             run_id: str = req.query_params.get("run_id", "")
             if not run_id:
                 return JSONResponse(

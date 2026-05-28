@@ -1,171 +1,48 @@
 sequenceDiagram
-    actor Client
-    participant Server as web/server.py
-    participant GW as MCPGateway
-    participant JSONRPC as JSONRPCHandler
+    participant Client as MCP Client
+    participant Gateway as MCPGateway
     participant Router as ToolRouter
-    participant Registry as UnifiedToolRegistry
-    participant Security as SecurityPolicy
-    participant Approval as ApprovalManager
-    participant Bus as EventBus
+    participant Builder as DecisionTraceBuilder
+    participant Narrator as DecisionNarrator
+    participant Projection as DashboardProjection
     participant Adapter as ResponseAdapter
-    participant RunStore as RunStore
-    participant EventStream as EventStream
+    participant Frontend as Dashboard V2
 
-    %% ============================================================
-    %% Flow 1: JSON-RPC tools/call (正常流程，无需审批)
-    %% ============================================================
-    rect rgb(232, 245, 233)
-        Note over Client,Bus: Flow 1: tools/call — 正常工具调用（无审批）
+    Client->>Gateway: POST /mcp (tools/call)
+    Gateway->>Router: route(tool_name, args)
 
-        Client->>Server: POST /mcp<br/>{"jsonrpc":"2.0","id":1,"method":"tools/call",<br/>"params":{"name":"stableagent.memory.retrieve","arguments":{"task_input":"..."}}}
-        Server->>GW: handle_jsonrpc(request)
-        GW->>JSONRPC: parse_message(body)
+    Note over Router: 1. Create RunContext
+    Router->>Router: 2. Lookup tool definition
+    Router->>Router: 3. Assess importance from schema
 
-        JSONRPC->>JSONRPC: 验证 JSON-RPC 2.0 格式
-        JSONRPC->>JSONRPC: 路由到 tools/call handler
-        JSONRPC->>JSONRPC: _generate_run_context()<br/>→ RunContext(run_id, tool_call_id, trace_id, span_id)
-        JSONRPC->>RunStore: create_run(run_id, user_task)
+    Router->>Router: 4. Publish mcp.call.received
+    Note over Router: event.importance = "important"
 
-        JSONRPC->>Router: route(ctx, "stableagent.memory.retrieve", args)
+    Router->>Builder: 5. build_trace(event_dict)
+    Builder->>Narrator: narrate(event_dict)
+    Narrator->>Narrator: match template by event_type
+    Narrator->>Narrator: build DecisionStage + Evidence
+    Narrator-->>Builder: DecisionTrace (partial)
+    Builder-->>Router: DecisionTrace
 
-        Router->>Bus: publish_trace_event("mcp.call.received", ctx,<br/>{avatar_state:"reading_notes"})
+    Router->>Router: 6-9. Risk check → Execute handler
 
-        Router->>Registry: lookup("stableagent.memory.retrieve")
-        Registry-->>Router: handler found
+    Router->>Builder: 10. complete_trace(trace, result)
+    Builder->>Narrator: add conclusion to stage
+    Builder-->>Router: DecisionTrace (complete)
 
-        Router->>Security: should_require_approval(action, command=args)
-        Security-->>Router: False (low risk)
+    Router->>Router: Add trace to event_dict
 
-        Router->>Bus: publish_trace_event("tool.risk_checked", ctx,<br/>{risk:"low", avatar_state:"reading_notes"})
-        Router->>Bus: publish_trace_event("tool.started", ctx,<br/>{avatar_state:"working"})
+    Router->>Adapter: to_mcp_content(result, decision_trace)
+    Adapter->>Adapter: Add plain_text_zh/en, dashboard_url
+    Adapter-->>Router: MCP response
 
-        Router->>Registry: call(ctx, "stableagent.memory.retrieve", args)
-        Registry-->>Router: StableAgentToolResult(ok=true, ...)
+    Router-->>Gateway: StableAgentToolResult
+    Gateway-->>Client: JSON-RPC response
 
-        Router->>Bus: publish_trace_event("tool.completed", ctx,<br/>{result, avatar_state:"celebrating"})
-        Router-->>JSONRPC: StableAgentToolResult
+    Note over Router: Async: publish event via EventStream
+    Router->>Projection: project_for_dashboard(trace)
+    Projection->>Projection: format stage_cards, timeline_nodes
+    Projection-->>Frontend: SSE event (dashboard_projection)
 
-        JSONRPC->>Adapter: to_mcp_content(result)
-        Adapter-->>JSONRPC: [{"type":"text","text":"找到了 5 条相关记忆"}]
-
-        JSONRPC-->>GW: {"jsonrpc":"2.0","id":1,"result":{...}}
-        GW-->>Server: JSONResponse
-        Server-->>Client: 200 OK
-    end
-
-    %% ============================================================
-    %% Flow 2: 审批流程
-    %% ============================================================
-    rect rgb(255, 243, 224)
-        Note over Client,Approval: Flow 2: tools/call — 高风险操作触发审批
-
-        Client->>Server: POST /mcp<br/>{"jsonrpc":"2.0","id":2,"method":"tools/call",<br/>"params":{"name":"stableagent.task.process","arguments":{"command":["rm","-rf","/tmp/cache"]}}}
-        Server->>GW->>JSONRPC: parse → route to tools/call
-        JSONRPC->>JSONRPC: generate RunContext
-
-        JSONRPC->>Router: route(ctx, "stableagent.task.process", args)
-
-        Router->>Bus: publish_trace_event("mcp.call.received", ctx)
-
-        Router->>Registry: lookup("stableagent.task.process")
-
-        Router->>Security: should_require_approval("execute", command=["rm","-rf","/tmp/cache"])
-        Security-->>Router: True (HIGH risk)
-
-        Router->>Bus: publish_trace_event("tool.risk_checked", ctx,<br/>{risk:"high", avatar_state:"safety_check"})
-
-        Router->>Approval: create_request(run_id, "execute: rm -rf /tmp/cache", "high", "高风险操作")
-        Approval-->>Router: ApprovalRequest(request_id="abc-123", status="pending")
-
-        Router->>Bus: publish_trace_event("approval.required", ctx,<br/>{request_id:"abc-123", avatar_state:"waiting_approval"})
-
-        Router-->>JSONRPC: raises ApprovalRequiredException("abc-123")
-        JSONRPC->>Adapter: to_jsonrpc_error(-32000, "approval_required", {"request_id":"abc-123"})
-        JSONRPC-->>GW: {"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"approval_required","data":{"request_id":"abc-123"}}}
-        GW-->>Client: 200 OK (with error in body)
-
-        Note over Client,Approval: 用户在 Dashboard 中审批...
-
-        Client->>Server: POST /mcp<br/>{"jsonrpc":"2.0","id":3,"method":"tools/call",<br/>"params":{"name":"stableagent.approval.respond","arguments":{"request_id":"abc-123","action":"approve"}}}
-        Server->>GW->>JSONRPC->>Router: route → lookup("stableagent.approval.respond")
-
-        Router->>Approval: approve("abc-123")
-        Approval-->>Router: ApprovalRequest(status="approved")
-        Router->>Bus: publish_trace_event("approval.resolved", ctx,<br/>{request_id, action:"approved", avatar_state:"working"})
-
-        Note over Router: 审批通过后，ToolRouter 重放原始调用
-        Router->>Bus: publish_trace_event("tool.started", ctx)
-        Router->>Registry: call(ctx, "stableagent.task.process", args)
-        Registry-->>Router: StableAgentToolResult(ok=true)
-        Router->>Bus: publish_trace_event("tool.completed", ctx)
-
-        Router-->>JSONRPC-->>GW-->>Client: JSON-RPC result
-    end
-
-    %% ============================================================
-    %% Flow 3: SSE 事件流 + Dashboard WebSocket
-    %% ============================================================
-    rect rgb(227, 242, 253)
-        Note over Client,EventStream: Flow 3: SSE + per-run Dashboard WebSocket
-
-        Client->>Server: GET /mcp?run_id=run-abc<br/>Accept: text/event-stream
-        Server->>GW: handle_sse("run-abc")
-        GW->>EventStream: subscribe("run-abc", callback)
-
-        loop 工具调用进行中...
-            Note over Bus,EventStream: ToolRouter 发布 trace 事件
-            Bus->>EventStream: _on_event(event{payload.run_id="run-abc"})
-            EventStream->>EventStream: 匹配 run_id → 调用 callback
-            EventStream->>GW: callback(event)
-            GW-->>Client: SSE: event: tool.started\ndata: {"type":"tool.started","run_id":"run-abc",...}\n\n
-        end
-
-        Note over Bus: 工具调用完成
-        Bus->>EventStream: tool.completed event
-        EventStream->>GW: callback
-        GW-->>Client: SSE: event: tool.completed\ndata: {...}\n\n
-        GW-->>Client: SSE: event: done\ndata: {"run_id":"run-abc"}\n\n
-
-        GW->>EventStream: unsubscribe("run-abc", callback)
-    end
-
-    rect rgb(243, 229, 245)
-        Note over Client,Dashboard: Flow 4: Dashboard per-run WebSocket
-
-        Client->>Server: WS /ws/runs/run-abc
-        Server->>GW: handle_ws("run-abc", websocket)
-        GW->>EventStream: subscribe("run-abc", ws_callback)
-        GW->>RunStore: get_events("run-abc")
-        RunStore-->>GW: [event1, event2, event3] (历史事件回放)
-
-        loop 每个历史事件
-            GW-->>Client: WS send: {"type":"event_replay","data":{...}}
-        end
-
-        loop 实时事件
-            Bus->>EventStream: _on_event(event)
-            EventStream->>GW: ws_callback(event)
-            GW-->>Client: WS send: {"type":"event","data":{...}}
-        end
-
-        Client->>Server: WS disconnect
-        Server->>GW: disconnect
-        GW->>EventStream: unsubscribe("run-abc", ws_callback)
-    end
-
-    %% ============================================================
-    %% Flow 5: tools/list
-    %% ============================================================
-    rect rgb(255, 235, 238)
-        Note over Client,Registry: Flow 5: tools/list
-
-        Client->>Server: POST /mcp<br/>{"jsonrpc":"2.0","id":0,"method":"tools/list","params":{}}
-        Server->>GW->>JSONRPC: parse → route to tools/list
-        JSONRPC->>Router->>Registry: list_tools()
-        Registry-->>Router: [{"name":"stableagent.task.process","description":"...","inputSchema":{...}}, ...]
-        Router-->>JSONRPC: 14 tools
-        JSONRPC->>Adapter: to_jsonrpc_result(0, {"tools":[...]})
-        Adapter-->>JSONRPC: {"jsonrpc":"2.0","id":0,"result":{"tools":[...]}}
-        JSONRPC-->>GW-->>Client: 200 OK
-    end
+    Frontend->>Frontend: Render decision cards + timeline

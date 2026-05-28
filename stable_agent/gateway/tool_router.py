@@ -289,6 +289,53 @@ class ToolRouter:
 
         return schema_risk
 
+    # V5.5: 事件 → 重要程度映射
+    _IMPORTANCE_MAP: dict[str, str] = {
+        "mcp.call.received": "normal",
+        "tool.started": "important",
+        "tool.completed": "important",
+        "tool.failed": "critical",
+    }
+
+    # V5.5: 事件 → 阶段映射
+    _STAGE_MAP: dict[str, str] = {
+        "mcp.call.received": "execution",
+        "tool.risk_checked": "execution",
+        "tool.started": "execution",
+        "tool.completed": "execution",
+        "tool.failed": "execution",
+        "task.completed": "execution",
+        "approval.required": "approval",
+    }
+
+    @staticmethod
+    def _get_importance(event_type: str) -> str:
+        """根据事件类型返回重要程度等级。
+
+        V5.5 新增：事件分级（debug/normal/important/critical）。
+
+        Args:
+            event_type: 事件类型字符串。
+
+        Returns:
+            importance 等级字符串。
+        """
+        return ToolRouter._IMPORTANCE_MAP.get(event_type, "normal")
+
+    @staticmethod
+    def _get_stage(event_type: str) -> str:
+        """根据事件类型返回当前阶段名称。
+
+        V5.5 新增：阶段追踪。
+
+        Args:
+            event_type: 事件类型字符串。
+
+        Returns:
+            阶段名称字符串。
+        """
+        return ToolRouter._STAGE_MAP.get(event_type, "execution")
+
     def _make_event_dict(
         self,
         ctx: RunContext,
@@ -319,6 +366,8 @@ class ToolRouter:
             "payload": payload or {},
             "plain_text": plain_text,
             "avatar_state": get_avatar_state(event_type),
+            "importance": self._get_importance(event_type),
+            "stage": self._get_stage(event_type),
         }
 
     def _publish_event(self, event_dict: dict[str, Any]) -> None:

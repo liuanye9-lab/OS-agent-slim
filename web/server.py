@@ -135,13 +135,7 @@ def create_app() -> FastAPI:
     app.mount("/mcp", mcp_server.app)
 
     # ------------------------------------------------------------------
-    # 5. 挂载 Dashboard（/dashboard 前缀）
-    # ------------------------------------------------------------------
-    dashboard: Dashboard = Dashboard(event_bus, orchestrator=orchestrator)
-    dashboard.mount_to(app, prefix="/dashboard")
-
-    # ------------------------------------------------------------------
-    # 6. 配置静态文件和模板
+    # 5. 配置静态文件和模板
     # ------------------------------------------------------------------
     web_dir: str = os.path.dirname(os.path.abspath(__file__))
     static_dir: str = os.path.join(web_dir, "static")
@@ -151,12 +145,17 @@ def create_app() -> FastAPI:
     if os.path.exists(static_dir):
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-    # 读取 dashboard.html 模板文件
+    # 读取模板文件
     dashboard_html_path: str = os.path.join(templates_dir, "dashboard.html")
+    dashboard_v2_html_path: str = os.path.join(templates_dir, "dashboard_v2.html")
 
     # ------------------------------------------------------------------
-    # 7. 注册根路由
+    # 6. 注册路由（必须在 Dashboard mount 之前注册 /dashboard/v2，
+    #    因为 mount 会遮蔽其前缀下的所有路由）
     # ------------------------------------------------------------------
+
+    from fastapi.responses import HTMLResponse
+
     @app.get("/")
     async def root():
         """根路由 — 直接返回 Dashboard HTML。
@@ -167,8 +166,6 @@ def create_app() -> FastAPI:
         Returns:
             HTMLResponse 包含完整的 Dashboard 页面。
         """
-        from fastapi.responses import HTMLResponse
-
         if os.path.exists(dashboard_html_path):
             with open(dashboard_html_path, "r", encoding="utf-8") as f:
                 html_content = f.read()
@@ -176,6 +173,57 @@ def create_app() -> FastAPI:
         return HTMLResponse(
             content="<h1>Dashboard not found</h1>", status_code=404
         )
+
+    # ------------------------------------------------------------------
+    # V5.5: Dashboard V2 路由（必须在 Dashboard mount 之前）
+    # ------------------------------------------------------------------
+
+    @app.get("/dashboard/v2")
+    async def dashboard_v2():
+        """Dashboard V2 — 决策观察舱 UI。
+
+        Returns:
+            HTMLResponse 包含完整的 Dashboard V2 页面。
+        """
+        if os.path.exists(dashboard_v2_html_path):
+            with open(dashboard_v2_html_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
+            return HTMLResponse(content=html_content)
+        return HTMLResponse(
+            content="<h1>Dashboard V2 not found</h1>", status_code=404
+        )
+
+    @app.get("/runs/{run_id}")
+    async def run_page(run_id: str):
+        """按 run_id 返回 Dashboard V2 页面。
+
+        将 HTML 中的 RUN_ID_PLACEHOLDER 替换为实际 run_id，
+        以便前端 JS 能连接到对应的 WebSocket。
+
+        Args:
+            run_id: 运行唯一标识。
+
+        Returns:
+            HTMLResponse 包含注入 run_id 的 Dashboard V2 页面。
+        """
+        if os.path.exists(dashboard_v2_html_path):
+            with open(dashboard_v2_html_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
+            # 注入 run_id 到 meta 标签供前端 JS 读取
+            html_content = html_content.replace(
+                "<head>",
+                f'<head>\n    <meta name="run-id" content="{run_id}">',
+            )
+            return HTMLResponse(content=html_content)
+        return HTMLResponse(
+            content="<h1>Dashboard V2 not found</h1>", status_code=404
+        )
+
+    # ------------------------------------------------------------------
+    # 7. 挂载 Dashboard（/dashboard 前缀）— 必须在 V2 路由之后
+    # ------------------------------------------------------------------
+    dashboard: Dashboard = Dashboard(event_bus, orchestrator=orchestrator)
+    dashboard.mount_to(app, prefix="/dashboard")
 
     return app
 
