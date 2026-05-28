@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StableAgent Cloud — API Keys</title>
+<link rel="stylesheet" href="/static/styles_v2.css">
+<link rel="stylesheet" href="/static/liquid_glass.css">
+</head>
+<body class="liquid-bg">
+<div style="max-width:900px;margin:0 auto;padding:20px;">
+  <div class="glass-card" style="padding:12px 20px;margin-bottom:16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+    <a href="/" style="font-weight:700;font-size:1.1rem;text-decoration:none;color:var(--text-primary);">☁️ StableAgent Cloud</a>
+    <span style="flex:1;"></span>
+    <a href="/dashboard/v3" class="btn-glass" style="text-decoration:none;padding:6px 14px;">📊 Dashboard</a>
+    <a href="/dashboard/usage" class="btn-glass" style="text-decoration:none;padding:6px 14px;">📈 用量</a>
+    <a href="/dashboard/apikeys" class="btn-glass" style="text-decoration:none;padding:6px 14px;background:var(--accent);color:#fff;">🔑 API Keys</a>
+    <a href="/dashboard/billing" class="btn-glass" style="text-decoration:none;padding:6px 14px;">💳 套餐</a>
+    <select id="ws-selector" onchange="loadKeys()" style="padding:6px 12px;border-radius:8px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);"><option value="">选择工作空间</option></select>
+  </div>
+
+  <!-- 创建 Key -->
+  <div class="glass-card" style="padding:16px;margin-bottom:12px;">
+    <div style="font-weight:600;margin-bottom:8px;">➕ 创建新 API Key</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <input id="key-name" placeholder="Key 名称 (如 dev-key)" style="flex:1;min-width:200px;padding:8px 12px;border-radius:8px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);">
+      <button onclick="createKey()" class="btn-glass" style="padding:8px 16px;">创建</button>
+    </div>
+    <div id="new-key-display" style="margin-top:8px;padding:12px;background:rgba(99,102,241,0.1);border-radius:8px;display:none;word-break:break-all;">
+      <div style="font-weight:600;color:var(--accent);">⚠️ 仅显示一次，请立即保存：</div>
+      <code id="new-key-value" style="display:block;margin-top:4px;font-size:0.9rem;"></code>
+    </div>
+  </div>
+
+  <!-- Key 列表 -->
+  <div id="key-list"></div>
+</div>
+
+<script>
+async function loadWorkspaces() {
+  const r = await fetch('/api/workspaces');
+  const d = await r.json();
+  const sel = document.getElementById('ws-selector');
+  (d.workspaces||[]).forEach(w => sel.innerHTML += `<option value="${w.id}">${w.name}</option>`);
+}
+async function loadKeys() {
+  const wsId = document.getElementById('ws-selector').value;
+  if (!wsId) return;
+  const r = await fetch('/api/api-keys?workspace_id=' + wsId);
+  const data = await r.json();
+  const keys = data.keys || [];
+  let html = '';
+  keys.forEach(k => {
+    const revoked = k.revoked_at;
+    html += `<div class="glass-card" style="padding:12px 16px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;opacity:${revoked?'0.5':'1'};">
+      <div>
+        <div style="font-weight:600;">${k.name} <span style="font-size:0.75rem;color:var(--text-muted);">${k.key_prefix}****</span></div>
+        <div style="font-size:0.8rem;color:var(--text-muted);">${new Date(k.created_at*1000).toLocaleString()}</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span class="status-badge" style="background:${revoked?'rgba(239,68,68,0.2)':'rgba(34,197,94,0.2)'};padding:4px 10px;border-radius:8px;font-size:0.8rem;">
+          ${revoked ? '已撤销' : '活跃'}
+        </span>
+        ${!revoked ? `<button onclick="revokeKey('${k.id}')" class="btn-glass" style="padding:4px 10px;font-size:0.8rem;color:#ef4444;">撤销</button>` : ''}
+      </div>
+    </div>`;
+  });
+  document.getElementById('key-list').innerHTML = html || '<div class="glass-card" style="padding:16px;text-align:center;color:var(--text-muted);">暂无 API Key</div>';
+}
+async function createKey() {
+  const name = document.getElementById('key-name').value.trim();
+  const wsId = document.getElementById('ws-selector').value;
+  if (!name || !wsId) return alert('请输入名称并选择工作空间');
+  const r = await fetch('/api/api-keys', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workspace_id:wsId,name:name,scopes:['runs:write','runs:read']})});
+  const d = await r.json();
+  if (d.api_key) {
+    document.getElementById('new-key-value').textContent = d.api_key;
+    document.getElementById('new-key-display').style.display = 'block';
+    document.getElementById('key-name').value = '';
+    loadKeys();
+  }
+}
+async function revokeKey(keyId) {
+  if (!confirm('确定撤销此 API Key？此操作不可逆。')) return;
+  await fetch('/api/api-keys/' + keyId, {method:'DELETE'});
+  loadKeys();
+}
+loadWorkspaces();
+</script>
+</body>
+</html>

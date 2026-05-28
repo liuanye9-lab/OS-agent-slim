@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StableAgent Cloud — 套餐</title>
+<link rel="stylesheet" href="/static/styles_v2.css">
+<link rel="stylesheet" href="/static/liquid_glass.css">
+<style>
+.plan-card {padding:24px;border-radius:16px;text-align:center;transition:all 0.3s;}
+.plan-card:hover {transform:translateY(-4px);}
+.plan-free {border:1px solid var(--glass-border);}
+.plan-pro {border:2px solid var(--accent);}
+.plan-team {border:2px solid #f59e0b;}
+.plan-enterprise {border:2px solid #ec4899;}
+.plan-name {font-size:1.2rem;font-weight:700;}
+.plan-price {font-size:2rem;font-weight:800;margin:8px 0;}
+.plan-price small {font-size:0.9rem;font-weight:400;color:var(--text-muted);}
+.feature-list {list-style:none;padding:0;margin:16px 0;text-align:left;}
+.feature-list li {padding:4px 0;font-size:0.85rem;}
+.feature-list li::before {content:'✓ ';color:#22c55e;font-weight:700;}
+.feature-list li.no::before {content:'✗ ';color:#ef4444;}
+</style>
+</head>
+<body class="liquid-bg">
+<div style="max-width:1100px;margin:0 auto;padding:20px;">
+  <div class="glass-card" style="padding:12px 20px;margin-bottom:16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+    <a href="/" style="font-weight:700;font-size:1.1rem;text-decoration:none;color:var(--text-primary);">☁️ StableAgent Cloud</a>
+    <span style="flex:1;"></span>
+    <a href="/dashboard/v3" class="btn-glass" style="text-decoration:none;padding:6px 14px;">📊 Dashboard</a>
+    <a href="/dashboard/usage" class="btn-glass" style="text-decoration:none;padding:6px 14px;">📈 用量</a>
+    <a href="/dashboard/apikeys" class="btn-glass" style="text-decoration:none;padding:6px 14px;">🔑 API Keys</a>
+    <a href="/dashboard/billing" class="btn-glass" style="text-decoration:none;padding:6px 14px;background:var(--accent);color:#fff;">💳 套餐</a>
+    <select id="ws-selector" onchange="highlightCurrent()" style="padding:6px 12px;border-radius:8px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);"><option value="">选择工作空间</option></select>
+  </div>
+
+  <!-- 页面标题 -->
+  <div style="text-align:center;padding:20px 0;">
+    <h1 style="font-size:2rem;font-weight:800;">选择适合你的套餐</h1>
+    <p style="color:var(--text-muted);font-size:1rem;margin-top:4px;">从免费起步，随团队成长升级</p>
+  </div>
+
+  <!-- 套餐卡片 -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:20px;">
+    <div class="glass-card plan-card plan-free" id="plan-free">
+      <div class="plan-name">🆓 Free</div>
+      <div class="plan-price">$0<small>/月</small></div>
+      <ul class="feature-list">
+        <li>1 个工作空间</li>
+        <li>1 个项目</li>
+        <li>100 runs/月</li>
+        <li>7 天 Trace 保留</li>
+        <li>基础 Dashboard</li>
+        <li>本地 MCP 接入</li>
+        <li class="no">Skill Validation</li>
+        <li class="no">Human Review</li>
+        <li class="no">API Key</li>
+        <li class="no">Audit Log</li>
+      </ul>
+      <div style="margin-top:12px;padding:8px;background:rgba(99,102,241,0.1);border-radius:8px;font-size:0.85rem;font-weight:600;color:var(--accent);" id="badge-free" style="display:none;">当前套餐</div>
+    </div>
+    <div class="glass-card plan-card plan-pro" id="plan-pro" style="position:relative;">
+      <div style="position:absolute;top:-10px;right:16px;background:var(--accent);color:#fff;padding:2px 10px;border-radius:8px;font-size:0.75rem;">推荐</div>
+      <div class="plan-name">⭐ Pro</div>
+      <div class="plan-price">$29<small>/月</small></div>
+      <ul class="feature-list">
+        <li>3 个项目</li>
+        <li>2,000 runs/月</li>
+        <li>30 天 Trace 保留</li>
+        <li>Skill Validation</li>
+        <li>Regression Suite</li>
+        <li>Export Report</li>
+        <li class="no">Human Review</li>
+        <li class="no">API Key</li>
+        <li class="no">Audit Log</li>
+      </ul>
+      <div style="margin-top:12px;padding:8px;background:rgba(99,102,241,0.1);border-radius:8px;font-size:0.85rem;font-weight:600;color:var(--accent);display:none;" id="badge-pro">当前套餐</div>
+    </div>
+    <div class="glass-card plan-card plan-team" id="plan-team">
+      <div class="plan-name">👥 Team</div>
+      <div class="plan-price">$99<small>/月</small></div>
+      <ul class="feature-list">
+        <li>10 个项目</li>
+        <li>20,000 runs/月</li>
+        <li>90 天 Trace 保留</li>
+        <li>Skill Validation</li>
+        <li>Regression Suite</li>
+        <li>Export Report</li>
+        <li>Human Review</li>
+        <li>API Key 管理</li>
+        <li>Audit Log</li>
+        <li>多成员协作</li>
+      </ul>
+      <div style="margin-top:12px;padding:8px;background:rgba(245,158,11,0.1);border-radius:8px;font-size:0.85rem;font-weight:600;color:#f59e0b;display:none;" id="badge-team">当前套餐</div>
+    </div>
+    <div class="glass-card plan-card plan-enterprise" id="plan-enterprise">
+      <div class="plan-name">🏢 Enterprise</div>
+      <div class="plan-price">定制<small>/年</small></div>
+      <ul class="feature-list">
+        <li>无限制项目</li>
+        <li>无限制 runs</li>
+        <li>365 天 Trace 保留</li>
+        <li>全部功能</li>
+        <li>SSO 单点登录</li>
+        <li>私有部署</li>
+        <li>专属安全策略</li>
+        <li>Priority Support</li>
+      </ul>
+      <div style="margin-top:12px;padding:8px;background:rgba(236,72,153,0.1);border-radius:8px;font-size:0.85rem;font-weight:600;color:#ec4899;display:none;" id="badge-enterprise">当前套餐</div>
+    </div>
+  </div>
+
+  <!-- 功能对比表 -->
+  <div class="glass-card" style="padding:16px;overflow-x:auto;">
+    <div style="font-weight:600;margin-bottom:12px;">📋 功能对比</div>
+    <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+      <tr style="border-bottom:1px solid var(--glass-border);"><th style="text-align:left;padding:8px;">功能</th><th>Free</th><th>Pro</th><th>Team</th><th>Enterprise</th></tr>
+      <tr><td style="padding:8px;">Agent 执行记录</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><td style="padding:8px;">Decision Trace</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><td style="padding:8px;">Eval 评测</td><td style="color:#ef4444;">✗</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><td style="padding:8px;">Regression Suite</td><td style="color:#ef4444;">✗</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><td style="padding:8px;">Skill Validation</td><td style="color:#ef4444;">✗</td><td>✓</td><td>✓</td><td>✓</td></tr>
+      <tr><td style="padding:8px;">Human Review</td><td style="color:#ef4444;">✗</td><td style="color:#ef4444;">✗</td><td>✓</td><td>✓</td></tr>
+      <tr><td style="padding:8px;">API Key 管理</td><td style="color:#ef4444;">✗</td><td style="color:#ef4444;">✗</td><td>✓</td><td>✓</td></tr>
+      <tr><td style="padding:8px;">Audit Log</td><td style="color:#ef4444;">✗</td><td style="color:#ef4444;">✗</td><td>✓</td><td>✓</td></tr>
+      <tr><td style="padding:8px;">SSO</td><td style="color:#ef4444;">✗</td><td style="color:#ef4444;">✗</td><td style="color:#ef4444;">✗</td><td>✓</td></tr>
+      <tr><td style="padding:8px;">私有部署</td><td style="color:#ef4444;">✗</td><td style="color:#ef4444;">✗</td><td style="color:#ef4444;">✗</td><td>✓</td></tr>
+    </table>
+  </div>
+</div>
+
+<script>
+async function loadWorkspaces() {
+  const r = await fetch('/api/workspaces'); const d = await r.json();
+  const sel = document.getElementById('ws-selector');
+  (d.workspaces||[]).forEach(w => sel.innerHTML += `<option value="${w.id}">${w.name} (${w.tier})</option>`);
+}
+async function highlightCurrent() {
+  const wsId = document.getElementById('ws-selector').value;
+  if (!wsId) return;
+  const r = await fetch('/api/workspaces/' + wsId); const ws = await r.json();
+  document.querySelectorAll('[id^="badge-"]').forEach(el => el.style.display = 'none');
+  const badge = document.getElementById('badge-' + (ws.tier||'free'));
+  if (badge) badge.style.display = 'block';
+}
+loadWorkspaces();
+</script>
+</body>
+</html>

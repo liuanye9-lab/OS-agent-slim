@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StableAgent Cloud — 团队</title>
+<link rel="stylesheet" href="/static/styles_v2.css"><link rel="stylesheet" href="/static/liquid_glass.css">
+</head>
+<body class="liquid-bg">
+<div style="max-width:800px;margin:0 auto;padding:20px;">
+  <div class="glass-card" style="padding:12px 20px;margin-bottom:16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+    <a href="/" style="font-weight:700;font-size:1.1rem;text-decoration:none;color:var(--text-primary);">☁️ StableAgent Cloud</a>
+    <span style="flex:1;"></span>
+    <a href="/dashboard/v3" class="btn-glass" style="text-decoration:none;padding:6px 14px;">📊 Dashboard</a>
+    <a href="/dashboard/usage" class="btn-glass" style="text-decoration:none;padding:6px 14px;">📈 用量</a>
+    <a href="/dashboard/apikeys" class="btn-glass" style="text-decoration:none;padding:6px 14px;">🔑 API Keys</a>
+    <a href="/dashboard/team" class="btn-glass" style="text-decoration:none;padding:6px 14px;background:var(--accent);color:#fff;">👥 团队</a>
+    <select id="ws-selector" onchange="loadTeam()" style="padding:6px 12px;border-radius:8px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);"><option value="">选择工作空间</option></select>
+  </div>
+
+  <div class="glass-card" style="padding:16px;margin-bottom:12px;">
+    <div style="font-weight:600;margin-bottom:8px;">➕ 邀请成员</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <input id="inv-email" placeholder="邮箱" style="flex:1;min-width:180px;padding:8px 12px;border-radius:8px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);">
+      <select id="inv-role" style="padding:8px 12px;border-radius:8px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);">
+        <option value="developer">Developer</option><option value="reviewer">Reviewer</option><option value="viewer">Viewer</option><option value="admin">Admin</option>
+      </select>
+      <button onclick="inviteMember()" class="btn-glass" style="padding:8px 16px;">邀请</button>
+    </div>
+  </div>
+
+  <div id="team-list"></div>
+</div>
+
+<script>
+async function loadWorkspaces() {
+  const r = await fetch('/api/workspaces'); const d = await r.json();
+  const sel = document.getElementById('ws-selector');
+  (d.workspaces||[]).forEach(w => sel.innerHTML += `<option value="${w.id}">${w.name}</option>`);
+}
+async function loadTeam() {
+  const wsId = document.getElementById('ws-selector').value;
+  if (!wsId) return;
+  const r = await fetch('/api/workspaces/' + wsId + '/members');
+  const d = await r.json();
+  const members = d.members || [];
+  let html = '';
+  const roleLabel = {owner:'👑 拥有者',admin:'⚙️ 管理员',developer:'💻 开发者',reviewer:'👁️ 审核者',viewer:'📖 观察者'};
+  members.forEach(m => {
+    html += `<div class="glass-card" style="padding:12px 16px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <div><div style="font-weight:600;">${m.email||m.user_id}</div><div style="font-size:0.8rem;color:var(--text-muted);">${m.id.slice(0,14)}...</div></div>
+      <span class="status-badge" style="background:var(--glass-bg);padding:4px 10px;border-radius:8px;">${roleLabel[m.role]||m.role}</span></div>`;
+  });
+  document.getElementById('team-list').innerHTML = html || '<div class="glass-card" style="padding:16px;text-align:center;color:var(--text-muted);">暂无成员</div>';
+}
+async function inviteMember() {
+  const wsId = document.getElementById('ws-selector').value;
+  const email = document.getElementById('inv-email').value.trim();
+  const role = document.getElementById('inv-role').value;
+  if (!wsId || !email) return alert('请选择工作空间并输入邮箱');
+  await fetch('/api/workspaces/' + wsId + '/members', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,role})});
+  document.getElementById('inv-email').value = '';
+  loadTeam();
+}
+loadWorkspaces();
+</script>
+</body>
+</html>

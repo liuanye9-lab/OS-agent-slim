@@ -322,6 +322,115 @@ def create_app() -> FastAPI:
         return HTMLResponse(content="<h1>Connect page not found</h1>", status_code=404)
 
     # ------------------------------------------------------------------
+    # SaaS v1.4: SaaS 业务页面
+    # ------------------------------------------------------------------
+    usage_html = os.path.join(templates_dir, "usage.html")
+    apikeys_html = os.path.join(templates_dir, "apikeys.html")
+    billing_html = os.path.join(templates_dir, "billing.html")
+
+    @app.get("/dashboard/usage")
+    async def usage_page():
+        if os.path.exists(usage_html):
+            with open(usage_html, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read())
+        return HTMLResponse(content="<h1>Usage page not found</h1>", status_code=404)
+
+    @app.get("/dashboard/apikeys")
+    async def apikeys_page():
+        if os.path.exists(apikeys_html):
+            with open(apikeys_html, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read())
+        return HTMLResponse(content="<h1>API Keys page not found</h1>", status_code=404)
+
+    @app.get("/dashboard/billing")
+    async def billing_page():
+        if os.path.exists(billing_html):
+            with open(billing_html, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read())
+        return HTMLResponse(content="<h1>Billing page not found</h1>", status_code=404)
+
+    team_html = os.path.join(templates_dir, "team.html")
+
+    @app.get("/dashboard/team")
+    async def team_page():
+        if os.path.exists(team_html):
+            with open(team_html, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read())
+        return HTMLResponse(content="<h1>Team page not found</h1>", status_code=404)
+
+    # Members API
+    @app.get("/api/workspaces/{workspace_id}/members")
+    async def api_workspace_members(workspace_id: str):
+        try:
+            from stable_agent.saas import WorkspaceService, SaasRepository
+            svc = WorkspaceService(SaasRepository())
+            members = svc.list_members(workspace_id)
+            return {"members": [{"id": m.id, "user_id": m.user_id, "email": m.email, "role": m.role} for m in members]}
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.post("/api/workspaces/{workspace_id}/members")
+    async def api_invite_member(workspace_id: str, request: Request):
+        body = await request.json()
+        try:
+            from stable_agent.saas import WorkspaceService, SaasRepository
+            svc = WorkspaceService(SaasRepository())
+            import uuid
+            member = svc.add_member(workspace_id, f"user_{uuid.uuid4().hex[:8]}",
+                email=body.get("email", ""), role=body.get("role", "developer"))
+            return {"member_id": member.id, "email": member.email, "role": member.role}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # ------------------------------------------------------------------
+    # SaaS v1.5: Auth API
+    # ------------------------------------------------------------------
+
+    @app.post("/api/auth/register")
+    async def api_register(request: Request):
+        body = await request.json()
+        try:
+            from stable_agent.saas.auth import AuthManager
+            from stable_agent.saas.repository import SaasRepository
+            auth = AuthManager(SaasRepository())
+            user = auth.register(body["email"], body["password"], body.get("name", ""))
+            token = auth.login(body["email"], body["password"])
+            return {"user_id": user.id, "email": user.email, "token": token}
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=409)
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.post("/api/auth/login")
+    async def api_login(request: Request):
+        body = await request.json()
+        try:
+            from stable_agent.saas.auth import AuthManager
+            from stable_agent.saas.repository import SaasRepository
+            auth = AuthManager(SaasRepository())
+            token = auth.login(body["email"], body["password"])
+            user = auth.get_current_user(token)
+            return {"token": token, "email": user.email if user else body["email"]}
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=401)
+
+    @app.get("/api/auth/me")
+    async def api_me(request: Request):
+        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+        if not token:
+            return JSONResponse({"error": "未提供 token"}, status_code=401)
+        try:
+            from stable_agent.saas.auth import AuthManager
+            from stable_agent.saas.repository import SaasRepository
+            auth = AuthManager(SaasRepository())
+            user = auth.get_current_user(token)
+            if user is None:
+                return JSONResponse({"error": "token 无效或已过期"}, status_code=401)
+            return {"user_id": user.id, "email": user.email, "name": user.name}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # ------------------------------------------------------------------
     # V6.5: /api/connect/* 接入配置 API
     # ------------------------------------------------------------------
 
@@ -590,11 +699,23 @@ def create_app() -> FastAPI:
     # -- Usage --
 
     @app.get("/api/usage")
-    async def api_get_usage(project_id: str = ""):
+    async def api_get_usage(project_id: str = "", workspace_id: str = ""):
         try:
-            from stable_agent.saas import UsageCounter, SaasRepository
-            uc = UsageCounter(SaasRepository())
-            summary = uc.get_summary(project_id) if project_id else {"total_tokens": 0, "total_events": 0}
+            from stable_agent.saas import SaasRepository
+            repo = SaasRepository()
+            if project_id:
+                summary = repo.get_project_usage_summary(project_id)
+            elif workspace_id:
+                projects = repo.list_projects(workspace_id)
+                total_events = 0; total_tokens = 0; total_cost = 0.0
+                for p in projects:
+                    s = repo.get_project_usage_summary(p.id)
+                    total_events += s.get("total_events", 0)
+                    total_tokens += s.get("total_tokens", 0)
+                    total_cost += s.get("total_cost", 0.0)
+                summary = {"total_events": total_events, "total_tokens": total_tokens, "total_cost": round(total_cost, 6)}
+            else:
+                summary = {"total_events": 0, "total_tokens": 0, "total_cost": 0}
             return summary
         except Exception as e:
             return {"error": str(e)}
@@ -622,6 +743,17 @@ def create_app() -> FastAPI:
             key_record, raw_key = mgr.create_key(body["workspace_id"], body["name"],
                 scopes=body.get("scopes", ["runs:write"]))
             return {"key_id": key_record.id, "api_key": raw_key, "prefix": key_record.key_prefix}
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.get("/api/api-keys")
+    async def api_list_api_keys(workspace_id: str = ""):
+        try:
+            from stable_agent.saas import SaasRepository
+            repo = SaasRepository()
+            keys = repo.list_api_keys(workspace_id) if workspace_id else []
+            return {"keys": [{"id": k.id, "name": k.name, "key_prefix": k.key_prefix,
+                    "created_at": k.created_at, "revoked_at": k.revoked_at} for k in keys]}
         except Exception as e:
             return {"error": str(e)}
 

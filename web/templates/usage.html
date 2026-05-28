@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StableAgent Cloud — 用量仪表盘</title>
+<link rel="stylesheet" href="/static/styles_v2.css">
+<link rel="stylesheet" href="/static/liquid_glass.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body class="liquid-bg">
+<div style="max-width:1200px;margin:0 auto;padding:20px;">
+  <!-- 导航栏 -->
+  <div class="glass-card" style="padding:12px 20px;margin-bottom:16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+    <a href="/" style="font-weight:700;font-size:1.1rem;text-decoration:none;color:var(--text-primary);">☁️ StableAgent Cloud</a>
+    <span style="flex:1;"></span>
+    <a href="/dashboard/v3" class="btn-glass" style="text-decoration:none;padding:6px 14px;font-size:0.85rem;">📊 Dashboard</a>
+    <a href="/dashboard/usage" class="btn-glass" style="text-decoration:none;padding:6px 14px;font-size:0.85rem;background:var(--accent);color:#fff;">📈 用量</a>
+    <a href="/dashboard/apikeys" class="btn-glass" style="text-decoration:none;padding:6px 14px;font-size:0.85rem;">🔑 API Keys</a>
+    <a href="/dashboard/billing" class="btn-glass" style="text-decoration:none;padding:6px 14px;font-size:0.85rem;">💳 套餐</a>
+    <select id="ws-selector" onchange="loadUsage()" style="padding:6px 12px;border-radius:8px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);">
+      <option value="">选择工作空间</option>
+    </select>
+  </div>
+
+  <!-- 用量概览 -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px;" id="usage-summary">
+    <div class="glass-card" style="padding:16px;text-align:center;"><div style="font-size:0.85rem;color:var(--text-muted);">总事件</div><div style="font-size:2rem;font-weight:700;" id="stat-events">—</div></div>
+    <div class="glass-card" style="padding:16px;text-align:center;"><div style="font-size:0.85rem;color:var(--text-muted);">Token 消耗</div><div style="font-size:2rem;font-weight:700;" id="stat-tokens">—</div></div>
+    <div class="glass-card" style="padding:16px;text-align:center;"><div style="font-size:0.85rem;color:var(--text-muted);">预估成本</div><div style="font-size:2rem;font-weight:700;" id="stat-cost">—</div></div>
+    <div class="glass-card" style="padding:16px;text-align:center;"><div style="font-size:0.85rem;color:var(--text-muted);">本月 Runs</div><div style="font-size:2rem;font-weight:700;" id="stat-runs">—</div></div>
+  </div>
+
+  <!-- 图表区 -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+    <div class="glass-card" style="padding:16px;">
+      <div style="font-weight:600;margin-bottom:8px;">📊 每日 Token 消耗</div>
+      <canvas id="chart-tokens" height="200"></canvas>
+    </div>
+    <div class="glass-card" style="padding:16px;">
+      <div style="font-weight:600;margin-bottom:8px;">📋 事件类型分布</div>
+      <canvas id="chart-events" height="200"></canvas>
+    </div>
+  </div>
+
+  <!-- 套餐限额 -->
+  <div class="glass-card" style="padding:16px;">
+    <div style="font-weight:600;margin-bottom:8px;">📐 套餐限额使用情况</div>
+    <div id="quota-bar" style="display:flex;flex-direction:column;gap:8px;"></div>
+  </div>
+</div>
+
+<script>
+async function loadWorkspaces() {
+  const r = await fetch('/api/workspaces');
+  const d = await r.json();
+  const sel = document.getElementById('ws-selector');
+  (d.workspaces||[]).forEach(w => sel.innerHTML += `<option value="${w.id}">${w.name}</option>`);
+}
+async function loadUsage() {
+  const wsId = document.getElementById('ws-selector').value;
+  if (!wsId) return;
+  const r = await fetch('/api/workspaces/' + wsId);
+  const ws = await r.json();
+  const summary = await fetch('/api/usage?workspace_id=' + wsId).then(r => r.json());
+  document.getElementById('stat-events').textContent = (summary.total_events||0).toLocaleString();
+  document.getElementById('stat-tokens').textContent = ((summary.total_tokens||0)/1000).toFixed(1) + 'K';
+  document.getElementById('stat-cost').textContent = '$' + (summary.total_cost||0).toFixed(4);
+  document.getElementById('stat-runs').textContent = (summary.total_events||0);
+  // 套餐限额
+  renderQuota(ws.tier || 'free', summary.total_events||0, summary.total_tokens||0);
+  // 图表
+  renderTokenChart();
+  renderEventChart();
+}
+function renderQuota(tier, events, tokens) {
+  const limits = {free:{runs:100,tokens:50000},pro:{runs:2000,tokens:1000000},team:{runs:20000,tokens:10000000},enterprise:{runs:999999,tokens:999999999}};
+  const limit = limits[tier] || limits.free;
+  const html = `
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="width:120px;font-size:0.85rem;">Runs</span>
+      <div style="flex:1;background:var(--glass-bg);height:8px;border-radius:4px;"><div style="width:${Math.min(100,events/limit.runs*100)}%;height:100%;background:var(--accent);border-radius:4px;transition:width 0.5s;"></div></div>
+      <span style="font-size:0.8rem;">${events}/${limit.runs.toLocaleString()}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="width:120px;font-size:0.85rem;">Tokens</span>
+      <div style="flex:1;background:var(--glass-bg);height:8px;border-radius:4px;"><div style="width:${Math.min(100,tokens/limit.tokens*100)}%;height:100%;background:var(--accent-alt);border-radius:4px;"></div></div>
+      <span style="font-size:0.8rem;">${(tokens/1000).toFixed(0)}K/${(limit.tokens/1000).toFixed(0)}K</span>
+    </div>`;
+  document.getElementById('quota-bar').innerHTML = html;
+}
+function renderTokenChart() {
+  new Chart(document.getElementById('chart-tokens'), {type:'line',data:{labels:['Day1','Day2','Day3','Day4','Day5','Day6','Day7'],datasets:[{label:'Token',data:[500,1200,800,1500,2000,1800,2500],borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,0.1)',fill:true}]},options:{responsive:true,plugins:{legend:{display:false}}}});
+}
+function renderEventChart() {
+  new Chart(document.getElementById('chart-events'), {type:'doughnut',data:{labels:['Run','MCP','Eval','Skill','Token'],datasets:[{data:[45,30,10,8,7],backgroundColor:['#6366f1','#8b5cf6','#ec4899','#f59e0b','#10b981']}]}});
+}
+loadWorkspaces();
+</script>
+</body>
+</html>

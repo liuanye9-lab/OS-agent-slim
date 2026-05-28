@@ -295,6 +295,17 @@ class SaasRepository:
             CREATE INDEX IF NOT EXISTS idx_audit_logs_event_type ON audit_logs(event_type);
             CREATE INDEX IF NOT EXISTS idx_usage_events_project ON usage_events(project_id, created_at);
 
+            -- SaaS v1.5: 用户认证表
+            CREATE TABLE IF NOT EXISTS saas_users (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                name TEXT DEFAULT '',
+                created_at REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_saas_users_email ON saas_users(email);
+
         """)
         conn.commit()
 
@@ -1176,3 +1187,49 @@ class SaasRepository:
             except Exception as e:
                 logger.warning("save_eval_result failed: %s", e)
                 return False
+
+    # ------------------------------------------------------------------
+    # SaaS v1.5: User 认证
+    # ------------------------------------------------------------------
+
+    def save_user(self, user_data: Any) -> bool:
+        """保存用户记录。user_data 为 SaaSUser dataclass。"""
+        try:
+            conn = self._get_conn()
+            conn.execute(
+                "INSERT OR REPLACE INTO saas_users (id, email, password_hash, name, created_at) VALUES (?,?,?,?,?)",
+                (user_data.id, user_data.email, user_data.password_hash, user_data.name, user_data.created_at),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.warning("save_user failed: %s", e)
+            return False
+
+    def get_user_by_email(self, email: str) -> Any | None:
+        """按邮箱查找用户。"""
+        try:
+            conn = self._get_conn()
+            row = conn.execute("SELECT * FROM saas_users WHERE email=?", (email,)).fetchone()
+            if row is None:
+                return None
+            from stable_agent.saas.auth import SaaSUser
+            return SaaSUser(id=row["id"], email=row["email"], password_hash=row["password_hash"],
+                           name=row["name"] or "", created_at=row["created_at"])
+        except Exception as e:
+            logger.warning("get_user_by_email failed: %s", e)
+            return None
+
+    def get_user_by_id(self, user_id: str) -> Any | None:
+        """按 ID 查找用户。"""
+        try:
+            conn = self._get_conn()
+            row = conn.execute("SELECT * FROM saas_users WHERE id=?", (user_id,)).fetchone()
+            if row is None:
+                return None
+            from stable_agent.saas.auth import SaaSUser
+            return SaaSUser(id=row["id"], email=row["email"], password_hash=row["password_hash"],
+                           name=row["name"] or "", created_at=row["created_at"])
+        except Exception as e:
+            logger.warning("get_user_by_id failed: %s", e)
+            return None
