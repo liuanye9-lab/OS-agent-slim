@@ -248,6 +248,33 @@ def create_app() -> FastAPI:
                 return HTMLResponse(content=f.read())
         return HTMLResponse(content="<h1>Dashboard V3 not found</h1>", status_code=404)
 
+    # SaaS: 所有 SaaS 页面路由（必须在 Dashboard mount 之前）
+    _usage_h = os.path.join(templates_dir, "usage.html")
+    _apikeys_h = os.path.join(templates_dir, "apikeys.html")
+    _billing_h = os.path.join(templates_dir, "billing.html")
+    _team_h = os.path.join(templates_dir, "team.html")
+    _skills_h = os.path.join(templates_dir, "skills.html")
+    _review_h = os.path.join(templates_dir, "review.html")
+
+    @app.get("/dashboard/usage")
+    async def saas_usage(): return _serve_html(_usage_h)
+    @app.get("/dashboard/apikeys")
+    async def saas_apikeys(): return _serve_html(_apikeys_h)
+    @app.get("/dashboard/billing")
+    async def saas_billing(): return _serve_html(_billing_h)
+    @app.get("/dashboard/team")
+    async def saas_team(): return _serve_html(_team_h)
+    @app.get("/dashboard/skills")
+    async def saas_skills(): return _serve_html(_skills_h)
+    @app.get("/dashboard/review")
+    async def saas_review(): return _serve_html(_review_h)
+
+    def _serve_html(path: str):
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read())
+        return HTMLResponse(content="<h1>Page not found</h1>", status_code=404)
+
     # ------------------------------------------------------------------
     # 7. 挂载 Dashboard（/dashboard 前缀）— 必须在 V2/V3 路由之后
     # ------------------------------------------------------------------
@@ -351,24 +378,8 @@ def create_app() -> FastAPI:
         return HTMLResponse(content="<h1>Connect page not found</h1>", status_code=404)
 
     # ------------------------------------------------------------------
-    # SaaS v1.6: Skill + Review 页面
+    # SaaS: Skill/Review API（页面路由已在 Dashboard mount 之前注册）
     # ------------------------------------------------------------------
-    skills_html = os.path.join(templates_dir, "skills.html")
-    review_html = os.path.join(templates_dir, "review.html")
-
-    @app.get("/dashboard/skills")
-    async def skills_page():
-        if os.path.exists(skills_html):
-            with open(skills_html, "r", encoding="utf-8") as f:
-                return HTMLResponse(content=f.read())
-        return HTMLResponse(content="<h1>Skills page not found</h1>", status_code=404)
-
-    @app.get("/dashboard/review")
-    async def review_page():
-        if os.path.exists(review_html):
-            with open(review_html, "r", encoding="utf-8") as f:
-                return HTMLResponse(content=f.read())
-        return HTMLResponse(content="<h1>Review page not found</h1>", status_code=404)
 
     # Skill API
     @app.get("/api/skills")
@@ -442,41 +453,9 @@ def create_app() -> FastAPI:
             return {"review_id": review_id, "status": result.status, "action": action}
         except Exception as e:
             return {"error": str(e)}
-    usage_html = os.path.join(templates_dir, "usage.html")
-    apikeys_html = os.path.join(templates_dir, "apikeys.html")
-    billing_html = os.path.join(templates_dir, "billing.html")
-
-    @app.get("/dashboard/usage")
-    async def usage_page():
-        if os.path.exists(usage_html):
-            with open(usage_html, "r", encoding="utf-8") as f:
-                return HTMLResponse(content=f.read())
-        return HTMLResponse(content="<h1>Usage page not found</h1>", status_code=404)
-
-    @app.get("/dashboard/apikeys")
-    async def apikeys_page():
-        if os.path.exists(apikeys_html):
-            with open(apikeys_html, "r", encoding="utf-8") as f:
-                return HTMLResponse(content=f.read())
-        return HTMLResponse(content="<h1>API Keys page not found</h1>", status_code=404)
-
-    @app.get("/dashboard/billing")
-    async def billing_page():
-        if os.path.exists(billing_html):
-            with open(billing_html, "r", encoding="utf-8") as f:
-                return HTMLResponse(content=f.read())
-        return HTMLResponse(content="<h1>Billing page not found</h1>", status_code=404)
-
-    team_html = os.path.join(templates_dir, "team.html")
-
-    @app.get("/dashboard/team")
-    async def team_page():
-        if os.path.exists(team_html):
-            with open(team_html, "r", encoding="utf-8") as f:
-                return HTMLResponse(content=f.read())
-        return HTMLResponse(content="<h1>Team page not found</h1>", status_code=404)
-
-    # Members API
+    # ------------------------------------------------------------------
+    # SaaS: Members API
+    # ------------------------------------------------------------------
     @app.get("/api/workspaces/{workspace_id}/members")
     async def api_workspace_members(workspace_id: str):
         try:
