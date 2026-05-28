@@ -87,7 +87,7 @@
 
 .status-dot-v2.active {
     background: var(--color-success);
-    box-shadow: 0 0 8px rgba(52, 199, 89, 0.5);
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
 }
 
 .status-dot-v2.running {
@@ -178,7 +178,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #faf8f5;
+    background: #f8fafc;
     border-radius: var(--radius-md);
     border: 2px solid var(--color-glass-border-subtle);
     overflow: hidden;
@@ -296,8 +296,8 @@
     align-items: center;
     gap: 4px;
     padding: 4px 10px;
-    background: rgba(52, 199, 89, 0.08);
-    border: 1px solid rgba(52, 199, 89, 0.2);
+    background: rgba(16, 185, 129, 0.08);
+    border: 1px solid rgba(16, 185, 129, 0.2);
     border-radius: var(--radius-sm);
     font-size: 12px;
     color: var(--color-success);
@@ -349,18 +349,18 @@
 }
 
 .risk-low {
-    background: rgba(52, 199, 89, 0.1);
-    color: #248a3d;
+    background: rgba(16, 185, 129, 0.1);
+    color: #047857;
 }
 
 .risk-medium {
-    background: rgba(255, 159, 10, 0.1);
-    color: #b06d00;
+    background: rgba(245, 158, 11, 0.1);
+    color: #b45309;
 }
 
 .risk-high {
-    background: rgba(255, 59, 48, 0.1);
-    color: #c62828;
+    background: rgba(239, 68, 68, 0.1);
+    color: #ba1a1a;
     animation: risk-pulse 1.5s ease-in-out infinite;
 }
 
@@ -713,13 +713,13 @@
 }
 
 .verdict-badge.passed {
-    background: rgba(52, 199, 89, 0.1);
-    color: #248a3d;
+    background: rgba(16, 185, 129, 0.1);
+    color: #047857;
 }
 
 .verdict-badge.rejected {
-    background: rgba(255, 59, 48, 0.1);
-    color: #c62828;
+    background: rgba(239, 68, 68, 0.1);
+    color: #ba1a1a;
 }
 
 .verdict-badge.pending {
@@ -855,12 +855,12 @@
 }
 
 .diff-before {
-    background: rgba(255, 59, 48, 0.06);
+    background: rgba(239, 68, 68, 0.06);
     border-left: 3px solid var(--color-danger);
 }
 
 .diff-after {
-    background: rgba(52, 199, 89, 0.06);
+    background: rgba(16, 185, 129, 0.06);
     border-left: 3px solid var(--color-success);
 }
 
@@ -973,7 +973,7 @@
 
 .fb-aligned.fb-selected {
     background: var(--color-success);
-    box-shadow: 0 0 12px rgba(52, 199, 89, 0.4);
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
 }
 
 .fb-off-track.fb-selected,
@@ -983,13 +983,13 @@
 .fb-no-plan.fb-selected {
     background: var(--color-danger);
     border-color: var(--color-danger);
-    box-shadow: 0 0 12px rgba(255, 59, 48, 0.4);
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
 }
 
 .fb-partial.fb-selected {
     background: var(--color-warning);
     border-color: var(--color-warning);
-    box-shadow: 0 0 12px rgba(255, 159, 10, 0.4);
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.4);
 }
 
 /* --- 反馈评论区域 --- */

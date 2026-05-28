@@ -89,29 +89,29 @@
     var panel = document.getElementById('run-detail-panel');
     if (!panel) return;
     if (!runData || runData.error) {
-      panel.innerHTML = '<div class="glass-card" style="padding:16px;text-align:center;color:var(--text-muted);">暂无运行数据</div>';
+      panel.innerHTML = '<div class="glass-card run-detail-card" style="text-align:center;color:var(--text-tertiary);">暂无运行数据</div>';
       return;
     }
 
     var statusEmoji = { created: '⚪', running: '🟢', completed: '✅', failed: '❌', cancelled: '⏹️' };
     var emoji = statusEmoji[runData.status] || '⚪';
     var scoreHtml = runData.overall_score != null
-      ? '<span style="color:var(--accent);font-weight:700;">评分: ' + (runData.overall_score * 100).toFixed(0) + '%</span>'
+      ? '<span style="background:linear-gradient(135deg,var(--accent-primary),var(--accent-secondary));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;font-weight:700;">评分: ' + (runData.overall_score * 100).toFixed(0) + '%</span>'
       : '';
 
-    var html = '<div class="glass-card" style="padding:16px;margin-bottom:12px;">'
-      + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">'
-      + '<div><span style="font-size:1.1rem;font-weight:700;">' + emoji + ' Run ' + runId.slice(0, 16) + '...</span></div>'
-      + '<div style="display:flex;gap:12px;align-items:center;">'
-      + '<span class="status-badge" style="background:var(--glass-bg);padding:4px 10px;border-radius:8px;">' + runData.status + '</span>'
+    var html = '<div class="glass-card run-detail-card">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">'
+      + '<div><span style="font-size:1.1rem;font-weight:700;letter-spacing:-0.3px;">' + emoji + ' Run ' + runId.slice(0, 16) + '...</span></div>'
+      + '<div style="display:flex;gap:14px;align-items:center;">'
+      + '<span class="status-badge">' + runData.status + '</span>'
       + scoreHtml
-      + '<span style="font-size:0.85rem;">Token: ' + (runData.token_used || 0).toLocaleString() + '</span>'
+      + '<span style="font-size:0.85rem;color:var(--text-secondary);font-family:var(--font-mono);">Token: ' + (runData.token_used || 0).toLocaleString() + '</span>'
       + '</div></div></div>';
 
     // Trace 时间线
     if (events && events.length) {
-      html += '<div class="glass-card" style="padding:12px 16px;max-height:400px;overflow-y:auto;">';
-      html += '<div style="font-weight:600;margin-bottom:8px;">📋 执行时间线 <span style="font-size:0.8rem;color:var(--text-muted);">(' + events.length + ' 个事件)</span></div>';
+      html += '<div class="glass-card run-detail-card" style="max-height:400px;overflow-y:auto;">';
+      html += '<div style="font-weight:700;margin-bottom:12px;font-size:0.95rem;letter-spacing:-0.2px;">📋 执行时间线 <span style="font-size:0.8rem;color:var(--text-tertiary);font-weight:500;">(' + events.length + ' 个事件)</span></div>';
       html += '<div class="trace-timeline">';
       var shown = events.slice(-30); // 最近 30 个
       for (var i = 0; i < shown.length; i++) {
@@ -122,22 +122,22 @@
         if (ev.event_type && ev.event_type.includes('failed')) icon = '❌';
         if (ev.event_type && ev.event_type.includes('decision')) icon = '🧠';
         if (ev.status_text_zh) icon = '💬';
-        html += '<div class="trace-item" style="display:flex;gap:8px;padding:4px 0;font-size:0.85rem;border-bottom:1px solid var(--glass-border);">'
-          + '<span>' + icon + '</span>'
-          + '<span style="flex:1;">' + (ev.status_text_zh || ev.plain_text || ev.event_type || '') + '</span>'
-          + '<span style="color:var(--text-muted);font-size:0.75rem;">' + (ev.progress_pct != null ? ev.progress_pct + '%' : '') + '</span>'
+        html += '<div class="trace-item">'
+          + '<span style="flex-shrink:0;">' + icon + '</span>'
+          + '<span style="flex:1;color:var(--text-primary);">' + (ev.status_text_zh || ev.plain_text || ev.event_type || '') + '</span>'
+          + '<span style="color:var(--text-tertiary);font-size:0.75rem;font-family:var(--font-mono);font-weight:500;">' + (ev.progress_pct != null ? ev.progress_pct + '%' : '') + '</span>'
           + '</div>';
       }
       html += '</div></div>';
     }
 
     // 进度条
-    html += '<div class="glass-card" style="padding:12px 16px;margin-top:8px;">'
-      + '<div style="font-weight:600;margin-bottom:4px;">进度</div>'
-      + '<div style="background:var(--glass-bg);border-radius:8px;height:8px;overflow:hidden;">'
-      + '<div style="width:' + (runData.progress_pct || 0) + '%;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-alt));transition:width 0.5s;border-radius:8px;"></div>'
+    html += '<div class="glass-card run-detail-card">'
+      + '<div style="font-weight:700;margin-bottom:8px;font-size:0.95rem;letter-spacing:-0.2px;">进度</div>'
+      + '<div class="progress-bar-wrap">'
+      + '<div class="progress-bar-fill" style="width:' + (runData.progress_pct || 0) + '%;"></div>'
       + '</div>'
-      + '<div style="text-align:right;font-size:0.8rem;color:var(--text-muted);">' + (runData.progress_pct || 0) + '%</div>'
+      + '<div class="progress-pct">' + (runData.progress_pct || 0) + '%</div>'
       + '</div>';
 
     panel.innerHTML = html;

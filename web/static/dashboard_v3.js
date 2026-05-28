@@ -59,8 +59,10 @@
     ws = new WebSocket(url);
 
     ws.onopen = () => {
-      document.getElementById('conn-status').textContent = '● 已连接';
-      document.getElementById('conn-status').className = 'status-badge online';
+      const el = document.getElementById('conn-status');
+      el.className = 'status-badge online';
+      const txt = el.querySelector('.status-text');
+      if (txt) txt.textContent = '已连接';
     };
 
     ws.onmessage = (evt) => {
@@ -72,14 +74,18 @@
     };
 
     ws.onclose = () => {
-      document.getElementById('conn-status').textContent = '○ 重连中';
-      document.getElementById('conn-status').className = 'status-badge offline';
+      const el = document.getElementById('conn-status');
+      el.className = 'status-badge offline';
+      const txt = el.querySelector('.status-text');
+      if (txt) txt.textContent = '重连中';
       setTimeout(() => connectWs(runId), 2000);
     };
 
     ws.onerror = () => {
-      document.getElementById('conn-status').textContent = '○ 离线';
-      document.getElementById('conn-status').className = 'status-badge offline';
+      const el = document.getElementById('conn-status');
+      el.className = 'status-badge offline';
+      const txt = el.querySelector('.status-text');
+      if (txt) txt.textContent = '离线';
     };
   }
 
@@ -137,8 +143,8 @@
       <div class="glass-card decision-card">
         <h4>当前决策</h4>
         <div class="decision-what">${what || '处理中...'}</div>
-        ${why ? '<div class="decision-why">为什么：' + why + '</div>' : ''}
-        ${next ? '<div class="decision-next">下一步：' + next + '</div>' : ''}
+        ${why ? '<div class="decision-why">' + why + '</div>' : ''}
+        ${next ? '<div class="decision-next">' + next + '</div>' : ''}
         ${discarded.length ? '<div class="decision-discarded">丢弃了 ' + discarded.length + ' 条无关信息</div>' : ''}
       </div>`;
   }
@@ -159,10 +165,10 @@
       <div class="timeline-dot ${dotClass}"></div>
       <div class="timeline-content">
         <strong>${label}</strong>
-        ${evt.decision_summary_zh ? '<div style="font-size:0.82rem;color:var(--text-muted);">' + evt.decision_summary_zh + '</div>' : ''}
+        ${evt.decision_summary_zh ? '<div class="summary">' + evt.decision_summary_zh + '</div>' : ''}
         <div class="timeline-time">${time}</div>
       </div>`;
-    
+
     if (list.children.length === 1 && list.children[0].tagName === 'SPAN') {
       list.innerHTML = '';
     }
@@ -185,7 +191,7 @@
     if (triggered) {
       panel.innerHTML = '<span class="learning-status learning-triggered">✅ 触发学习</span>';
       if (evt.improvement) {
-        panel.innerHTML += '<div style="font-size:0.85rem;margin-top:6px;">评分提升：+' + (evt.improvement * 100).toFixed(1) + '%</div>';
+        panel.innerHTML += '<div class="learning-reason">评分提升：+' + (evt.improvement * 100).toFixed(1) + '%</div>';
       }
     } else {
       panel.innerHTML = '<span class="learning-status learning-not-triggered">📋 本次无需学习</span>';
