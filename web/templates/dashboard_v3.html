@@ -9,6 +9,17 @@
 </head>
 <body class="liquid-bg">
 <div class="dashboard-v3">
+  <!-- SaaS v1.2: 工作空间/项目选择器 -->
+  <div class="glass-card saas-nav" style="margin-bottom:12px;padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+    <span style="font-weight:600;font-size:0.85rem;">☁️ SaaS</span>
+    <select id="ws-selector" onchange="loadProjects()" style="padding:6px 10px;border-radius:8px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);">
+      <option value="">选择工作空间</option>
+    </select>
+    <select id="proj-selector" onchange="selectProject()" style="padding:6px 10px;border-radius:8px;background:var(--glass-bg);border:1px solid var(--glass-border);color:var(--text-primary);">
+      <option value="">选择项目</option>
+    </select>
+    <span id="saas-info" style="font-size:0.8rem;color:var(--text-muted);"></span>
+  </div>
   <!-- 顶部栏 -->
   <div class="glass-card dash-top-bar">
     <div style="display:flex;align-items:center;gap:16px;">
@@ -82,6 +93,50 @@
 </div>
 
 <script src="/static/i18n.js"></script>
+<script>
+// SaaS v1.2: 项目选择器
+let _saasWsId = '', _saasProjId = '';
+
+async function loadWorkspaces() {
+  try {
+    const r = await fetch('/api/workspaces');
+    const data = await r.json();
+    const sel = document.getElementById('ws-selector');
+    // 保留第一个 option
+    sel.innerHTML = '<option value="">选择工作空间</option>';
+    (data.workspaces||[]).forEach(w => {
+      sel.innerHTML += `<option value="${w.id}">${w.name} (${w.tier})</option>`;
+    });
+  } catch(e) { console.warn('loadWorkspaces:', e); }
+}
+
+async function loadProjects() {
+  const wsId = document.getElementById('ws-selector').value;
+  _saasWsId = wsId;
+  if (!wsId) return;
+  try {
+    const r = await fetch('/api/projects?workspace_id=' + wsId);
+    const data = await r.json();
+    const sel = document.getElementById('proj-selector');
+    sel.innerHTML = '<option value="">选择项目</option>';
+    (data.projects||[]).forEach(p => {
+      sel.innerHTML += `<option value="${p.id}">${p.name}</option>`;
+    });
+    document.getElementById('saas-info').textContent = `WS: ${wsId.slice(0,12)}...`;
+  } catch(e) { console.warn('loadProjects:', e); }
+}
+
+function selectProject() {
+  _saasProjId = document.getElementById('proj-selector').value;
+  if (_saasProjId) {
+    document.getElementById('saas-info').textContent =
+      `WS: ${_saasWsId.slice(0,12)}... | Proj: ${_saasProjId.slice(0,12)}...`;
+  }
+}
+
+// 页面加载时自动加载工作空间列表
+loadWorkspaces();
+</script>
 <script src="/static/dashboard_v3.js"></script>
 </body>
 </html>

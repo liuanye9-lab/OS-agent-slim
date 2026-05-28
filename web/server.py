@@ -434,6 +434,174 @@ def create_app() -> FastAPI:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    # ===================================================================
+    # SaaS v1.2: 商业 API 路由
+    # ===================================================================
+
+    @app.get("/api/health")
+    async def api_health():
+        """健康检查。"""
+        return {"ok": True, "service": "StableAgent Cloud", "version": "v1.2"}
+
+    # -- Workspace --
+
+    @app.post("/api/workspaces")
+    async def api_create_workspace(request: Request):
+        body = await request.json()
+        try:
+            from stable_agent.saas import WorkspaceService, BillingManager, SaasRepository
+            repo = SaasRepository()
+            repo.init_db()
+            svc = WorkspaceService(repo, BillingManager(repo))
+            ws = svc.create_workspace(body.get("name", ""), tier=body.get("tier", "free"))
+            return {"id": ws.id, "name": ws.name, "tier": ws.billing_plan}
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.get("/api/workspaces")
+    async def api_list_workspaces():
+        try:
+            from stable_agent.saas import WorkspaceService, SaasRepository
+            repo = SaasRepository()
+            svc = WorkspaceService(repo)
+            ws_list = svc.list_workspaces()
+            return {"workspaces": [{"id": w.id, "name": w.name, "tier": w.billing_plan} for w in ws_list]}
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.get("/api/workspaces/{workspace_id}")
+    async def api_get_workspace(workspace_id: str):
+        try:
+            from stable_agent.saas import WorkspaceService, SaasRepository
+            svc = WorkspaceService(SaasRepository())
+            ws = svc.get_workspace(workspace_id)
+            if ws is None:
+                return JSONResponse({"error": "not found"}, status_code=404)
+            return {"id": ws.id, "name": ws.name, "slug": ws.slug, "tier": ws.billing_plan}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # -- Project --
+
+    @app.post("/api/projects")
+    async def api_create_project(request: Request):
+        body = await request.json()
+        try:
+            from stable_agent.saas import ProjectService, BillingManager, SaasRepository
+            repo = SaasRepository()
+            svc = ProjectService(repo, BillingManager(repo))
+            proj = svc.create_project(body["workspace_id"], body["name"],
+                description=body.get("description", ""),
+                environment=body.get("environment", "local"))
+            return {"id": proj.id, "name": proj.name, "workspace_id": proj.workspace_id, "environment": proj.environment}
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.get("/api/projects")
+    async def api_list_projects(workspace_id: str = ""):
+        try:
+            from stable_agent.saas import ProjectService, SaasRepository
+            svc = ProjectService(SaasRepository())
+            projects = svc.list_projects(workspace_id) if workspace_id else []
+            return {"projects": [{"id": p.id, "name": p.name, "workspace_id": p.workspace_id} for p in projects]}
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.get("/api/projects/{project_id}")
+    async def api_get_project(project_id: str):
+        try:
+            from stable_agent.saas import ProjectService, SaasRepository
+            svc = ProjectService(SaasRepository())
+            proj = svc.get_project(project_id)
+            if proj is None:
+                return JSONResponse({"error": "not found"}, status_code=404)
+            return {"id": proj.id, "name": proj.name, "workspace_id": proj.workspace_id, "environment": proj.environment}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # -- Run --
+
+    @app.post("/api/runs")
+    async def api_create_run(request: Request):
+        body = await request.json()
+        try:
+            from stable_agent.saas import RunService, SaasRepository
+            svc = RunService(SaasRepository())
+            run = svc.create_run(body.get("workspace_id", ""), body.get("project_id", ""),
+                agent_id=body.get("agent_id", ""), user_task=body.get("user_task", ""))
+            return {"run_id": run.run_id, "status": run.status, "dashboard_url": run.dashboard_url}
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.get("/api/runs/{run_id}")
+    async def api_get_run(run_id: str):
+        try:
+            from stable_agent.saas import RunService, SaasRepository
+            svc = RunService(SaasRepository())
+            run = svc.get_run(run_id)
+            if run is None:
+                return JSONResponse({"error": "not found"}, status_code=404)
+            return {"run_id": run.run_id, "status": run.status, "progress_pct": run.progress_pct,
+                    "overall_score": run.overall_score, "token_used": run.token_used,
+                    "dashboard_url": run.dashboard_url}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # -- Usage --
+
+    @app.get("/api/usage")
+    async def api_get_usage(project_id: str = ""):
+        try:
+            from stable_agent.saas import UsageCounter, SaasRepository
+            uc = UsageCounter(SaasRepository())
+            summary = uc.get_summary(project_id) if project_id else {"total_tokens": 0, "total_events": 0}
+            return summary
+        except Exception as e:
+            return {"error": str(e)}
+
+    # -- Audit Log --
+
+    @app.get("/api/audit-logs")
+    async def api_get_audit_logs(workspace_id: str = ""):
+        try:
+            from stable_agent.saas import AuditLogger, SaasRepository
+            logger = AuditLogger(SaasRepository())
+            logs = logger.list_recent(workspace_id) if workspace_id else []
+            return {"logs": [{"id": l.id, "event_type": l.event_type, "actor": l.actor, "severity": l.severity} for l in logs]}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # -- API Keys --
+
+    @app.post("/api/api-keys")
+    async def api_create_api_key(request: Request):
+        body = await request.json()
+        try:
+            from stable_agent.saas import ApiKeyManager, SaasRepository
+            mgr = ApiKeyManager(SaasRepository())
+            key_record, raw_key = mgr.create_key(body["workspace_id"], body["name"],
+                scopes=body.get("scopes", ["runs:write"]))
+            return {"key_id": key_record.id, "api_key": raw_key, "prefix": key_record.key_prefix}
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.delete("/api/api-keys/{key_id}")
+    async def api_revoke_api_key(key_id: str):
+        try:
+            from stable_agent.saas import ApiKeyManager, SaasRepository
+            mgr = ApiKeyManager(SaasRepository())
+            ok = mgr.revoke_key(key_id)
+            return {"key_id": key_id, "revoked": ok}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # -- Eval --
+
+    @app.post("/api/evals/run")
+    async def api_run_eval(request: Request):
+        body = await request.json()
+        return {"eval": "queued", "run_id": body.get("run_id", "")}
+
     return app
 
 

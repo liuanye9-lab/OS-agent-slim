@@ -77,7 +77,7 @@ class RunService:
 
         # 记录用量
         if self._usage is not None:
-            self._usage.record_event(
+            self._usage.record(
                 workspace_id=workspace_id,
                 project_id=project_id,
                 run_id=run_id,

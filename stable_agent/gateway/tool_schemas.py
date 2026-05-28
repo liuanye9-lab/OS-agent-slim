@@ -227,6 +227,198 @@ TOOLS: dict[str, dict[str, Any]] = {
         },
         "risk_level": "medium",
     },
+    # =======================================================================
+    # SaaS v1.2: 12 个商业 SaaS 工具
+    # =======================================================================
+    "stableagent.workspace.create": {
+        "name": "stableagent.workspace.create",
+        "title": "创建工作空间",
+        "description": "创建新的 SaaS 工作空间（团队空间），包含默认计费套餐",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "工作空间名称"},
+                "tier": {"type": "string", "enum": ["free", "pro", "team", "enterprise"], "default": "free"},
+                "project_id": {"type": "string", "description": "关联项目 ID（SaaS 模式必填）"},
+            },
+            "required": ["name"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.project.create": {
+        "name": "stableagent.project.create",
+        "title": "创建项目",
+        "description": "在指定工作空间下创建新项目",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "workspace_id": {"type": "string"},
+                "name": {"type": "string"},
+                "project_id": {"type": "string"},
+            },
+            "required": ["workspace_id", "name"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.project.list": {
+        "name": "stableagent.project.list",
+        "title": "列出项目",
+        "description": "列出指定工作空间下的所有项目",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "workspace_id": {"type": "string"},
+            },
+            "required": ["workspace_id"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.run.get": {
+        "name": "stableagent.run.get",
+        "title": "获取运行详情",
+        "description": "获取指定 run 的完整状态、进度、评分和 trace",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string"},
+                "project_id": {"type": "string"},
+            },
+            "required": ["run_id"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.eval.run": {
+        "name": "stableagent.eval.run",
+        "title": "运行评测",
+        "description": "对指定 run 执行评测，返回多维度评分",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string"},
+                "project_id": {"type": "string"},
+            },
+            "required": ["run_id"],
+        },
+        "risk_level": "medium",
+    },
+    "stableagent.regression.create": {
+        "name": "stableagent.regression.create",
+        "title": "创建回归用例",
+        "description": "从 BadCase 生成 Regression Case",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "bad_case_id": {"type": "string"},
+                "project_id": {"type": "string"},
+            },
+            "required": ["bad_case_id"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.skill.patch_propose": {
+        "name": "stableagent.skill.patch_propose",
+        "title": "提议 Skill 补丁",
+        "description": "提交一个 Skill 优化补丁",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "skill_id": {"type": "string"},
+                "patch_content": {"type": "string"},
+                "from_version": {"type": "string"},
+                "project_id": {"type": "string"},
+            },
+            "required": ["skill_id", "patch_content"],
+        },
+        "risk_level": "medium",
+    },
+    "stableagent.skill.validate": {
+        "name": "stableagent.skill.validate",
+        "title": "验证 Skill 补丁",
+        "description": "通过 Validation Gate 验证 Skill 补丁",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "patch_id": {"type": "string"},
+                "project_id": {"type": "string"},
+            },
+            "required": ["patch_id"],
+        },
+        "risk_level": "medium",
+    },
+    "stableagent.skill.review": {
+        "name": "stableagent.skill.review",
+        "title": "审核 Skill 补丁",
+        "description": "对已验证的 Skill 补丁执行人工审核",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "patch_id": {"type": "string"},
+                "action": {"type": "string", "enum": ["approve", "reject"]},
+                "reviewer": {"type": "string"},
+                "comment": {"type": "string"},
+                "project_id": {"type": "string"},
+            },
+            "required": ["patch_id", "action"],
+        },
+        "risk_level": "high",
+    },
+    "stableagent.skill.export_best": {
+        "name": "stableagent.skill.export_best",
+        "title": "导出最佳 Skill",
+        "description": "将已审批的 Skill 导出为 best_skill.md",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "patch_id": {"type": "string"},
+                "project_id": {"type": "string"},
+            },
+            "required": ["patch_id"],
+        },
+        "risk_level": "high",
+    },
+    "stableagent.usage.get": {
+        "name": "stableagent.usage.get",
+        "title": "查询用量",
+        "description": "查询项目或工作空间的用量统计",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "project_id": {"type": "string"},
+                "workspace_id": {"type": "string"},
+            },
+        },
+        "risk_level": "low",
+    },
+    "stableagent.apikey.create": {
+        "name": "stableagent.apikey.create",
+        "title": "创建 API Key",
+        "description": "为工作空间创建新的 API Key",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "workspace_id": {"type": "string"},
+                "name": {"type": "string"},
+                "scopes": {"type": "array", "items": {"type": "string"}},
+                "project_id": {"type": "string"},
+            },
+            "required": ["workspace_id", "name"],
+        },
+        "risk_level": "high",
+    },
+    "stableagent.apikey.revoke": {
+        "name": "stableagent.apikey.revoke",
+        "title": "撤销 API Key",
+        "description": "撤销指定的 API Key（不可逆）",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "key_id": {"type": "string"},
+                "project_id": {"type": "string"},
+            },
+            "required": ["key_id"],
+        },
+        "risk_level": "high",
+    },
 }
 
 # ---------------------------------------------------------------------------
