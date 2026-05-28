@@ -37,8 +37,70 @@ class MemberRole(StrEnum):
 
     OWNER = "owner"
     ADMIN = "admin"
-    MEMBER = "member"
+    DEVELOPER = "developer"
+    REVIEWER = "reviewer"
     VIEWER = "viewer"
+
+
+class BillingTier(StrEnum):
+    """计费套餐层级。"""
+
+    FREE = "free"
+    PRO = "pro"
+    TEAM = "team"
+    ENTERPRISE = "enterprise"
+
+
+class RunStatus(StrEnum):
+    """Agent 运行状态。"""
+
+    CREATED = "created"
+    RUNNING = "running"
+    WAITING_APPROVAL = "waiting_approval"
+    EVALUATING = "evaluating"
+    LEARNING = "learning"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class RegressionStatus(StrEnum):
+    """回归用例状态。"""
+
+    DRAFT = "draft"
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class PatchStatus(StrEnum):
+    """Skill Patch 状态。"""
+
+    CANDIDATE = "candidate"
+    VALIDATING = "validating"
+    VALIDATION_PASSED = "validation_passed"
+    VALIDATION_FAILED = "validation_failed"
+    WAITING_REVIEW = "waiting_review"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPORTED = "exported"
+
+
+class AuditEventType(StrEnum):
+    """审计事件类型。"""
+
+    API_KEY_CREATED = "api_key_created"
+    API_KEY_REVOKED = "api_key_revoked"
+    MCP_TOOL_CALLED = "mcp_tool_called"
+    HIGH_RISK_TOOL_BLOCKED = "high_risk_tool_blocked"
+    APPROVAL_REQUESTED = "approval_requested"
+    APPROVAL_APPROVED = "approval_approved"
+    APPROVAL_REJECTED = "approval_rejected"
+    SKILL_PATCH_CREATED = "skill_patch_created"
+    SKILL_PATCH_VALIDATED = "skill_patch_validated"
+    SKILL_PATCH_REVIEWED = "skill_patch_reviewed"
+    BEST_SKILL_EXPORTED = "best_skill_exported"
+    PROJECT_DELETED = "project_deleted"
+    MEMBER_INVITED = "member_invited"
 
 
 class ReviewStatus(StrEnum):
@@ -91,13 +153,21 @@ class Workspace:
     Attributes:
         id: 唯一标识，如 "ws_a1b2c3d4e5f6"。
         name: 工作空间名称。
+        slug: URL 友好的短标识。
+        owner_user_id: 创建者用户 ID。
+        billing_plan: 计费套餐（free/pro/team/enterprise）。
         created_at: 创建时间戳。
+        updated_at: 最后更新时间戳。
         settings: 工作空间设置（JSON字典）。
     """
 
     id: str = field(default_factory=lambda: _new_id("ws"))
     name: str = ""
+    slug: str = ""
+    owner_user_id: str = ""
+    billing_plan: str = BillingTier.FREE.value
     created_at: float = field(default_factory=_now)
+    updated_at: float = field(default_factory=_now)
     settings: dict[str, Any] = field(default_factory=dict)
 
 
@@ -109,15 +179,21 @@ class WorkspaceMember:
         id: 唯一标识。
         workspace_id: 所属工作空间 ID。
         user_id: 用户标识。
-        role: 成员角色。
+        email: 成员邮箱。
+        role: 成员角色（owner/admin/developer/reviewer/viewer）。
         joined_at: 加入时间戳。
+        created_at: 创建时间戳。
+        updated_at: 最后更新时间戳。
     """
 
     id: str = field(default_factory=lambda: _new_id("wm"))
     workspace_id: str = ""
     user_id: str = ""
-    role: str = "member"  # MemberRole.MEMBER.value
+    email: str = ""
+    role: str = MemberRole.DEVELOPER.value
     joined_at: float = field(default_factory=_now)
+    created_at: float = field(default_factory=_now)
+    updated_at: float = field(default_factory=_now)
 
 
 @dataclass
@@ -134,14 +210,20 @@ class Project:
         workspace_id: 所属工作空间 ID。
         name: 项目名称。
         description: 项目描述。
+        default_agent_id: 默认 Agent ID。
+        environment: 运行环境（local/dev/staging/prod）。
         created_at: 创建时间戳。
+        updated_at: 最后更新时间戳。
     """
 
     id: str = field(default_factory=lambda: _new_id("proj"))
     workspace_id: str = ""
     name: str = ""
     description: str = ""
+    default_agent_id: str = ""
+    environment: str = "local"
     created_at: float = field(default_factory=_now)
+    updated_at: float = field(default_factory=_now)
 
 
 @dataclass
@@ -155,16 +237,26 @@ class AgentProfile:
         workspace_id: 所属工作空间 ID。
         project_id: 所属项目 ID。
         name: Agent 名称。
-        config: Agent 配置（JSON字典）。
+        description: Agent 描述。
+        agent_type: Agent 类型（如 "codex", "claude_code", "cursor"）。
+        default_skill_id: 默认 Skill ID。
+        default_model: 默认模型名称。
+        mcp_endpoint: MCP 端点 URL。
         created_at: 创建时间戳。
+        updated_at: 最后更新时间戳。
     """
 
     id: str = field(default_factory=lambda: _new_id("agent"))
     workspace_id: str = ""
     project_id: str = ""
     name: str = ""
-    config: dict[str, Any] = field(default_factory=dict)
+    description: str = ""
+    agent_type: str = "general"
+    default_skill_id: str = ""
+    default_model: str = ""
+    mcp_endpoint: str = ""
     created_at: float = field(default_factory=_now)
+    updated_at: float = field(default_factory=_now)
 
 
 @dataclass
@@ -178,22 +270,48 @@ class AgentRun:
         workspace_id: 所属工作空间 ID。
         project_id: 所属项目 ID。
         agent_id: Agent 配置 ID。
-        status: 运行状态。
+        status: 运行状态（created/running/waiting_approval 等）。
         user_task: 用户任务描述。
+        task_type: 任务类型。
+        progress_pct: 进度百分比（0-100）。
         overall_score: 综合评分。
+        intent_alignment_score: 意图对齐评分。
+        token_used: 消耗 token 数。
+        cost_estimate: 预估成本（美元）。
+        learning_triggered: 是否触发了学习。
+        skill_updated: 是否更新了 skill。
+        dashboard_url: Dashboard URL。
+        trace_url: Trace URL。
+        failure_attribution: 失败归因（JSON 字典）。
+        metadata: 附加元数据。
         started_at: 开始时间戳。
         ended_at: 结束时间戳。
+        created_at: 创建时间戳。
+        updated_at: 最后更新时间戳。
     """
 
     run_id: str = ""
     workspace_id: str = ""
     project_id: str = ""
     agent_id: str = ""
-    status: str = "init"
+    status: str = RunStatus.CREATED.value
     user_task: str = ""
+    task_type: str = "general_qa"
+    progress_pct: int = 0
     overall_score: float | None = None
+    intent_alignment_score: float | None = None
+    token_used: int = 0
+    cost_estimate: float = 0.0
+    learning_triggered: bool = False
+    skill_updated: bool = False
+    dashboard_url: str = ""
+    trace_url: str = ""
+    failure_attribution: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     started_at: float = field(default_factory=_now)
     ended_at: float | None = None
+    created_at: float = field(default_factory=_now)
+    updated_at: float = field(default_factory=_now)
 
 
 @dataclass
@@ -382,22 +500,44 @@ class SkillPatchRecord:
     Attributes:
         id: 唯一标识。
         skill_id: 目标 Skill ID。
+        workspace_id: 所属工作空间 ID。
+        project_id: 所属项目 ID。
+        source_run_id: 来源运行 ID。
         from_version: 源版本。
         to_version: 目标版本。
-        patch_content: 补丁内容。
-        proposed_by: 提议者（系统/人工）。
-        status: 补丁状态（proposed/validated/reviewed/exported/rejected）。
+        patch_type: 补丁类型（"prompt", "constraint", "workflow", "memory"）。
+        patch_diff: 补丁差异内容。
+        reason: 修改原因。
+        old_score: 旧评分。
+        new_score: 新评分（候选）。
+        delta: 评分变化。
+        status: 补丁状态（candidate/validating/validation_passed/...）。
+        validation_run_id: 验证运行 ID。
+        human_review_id: 人工审核 ID。
+        proposed_by: 提议者（"system" 或用户名）。
         created_at: 创建时间戳。
+        updated_at: 最后更新时间戳。
     """
 
     id: str = field(default_factory=lambda: _new_id("sp"))
     skill_id: str = ""
+    workspace_id: str = ""
+    project_id: str = ""
+    source_run_id: str = ""
     from_version: str = ""
     to_version: str = ""
-    patch_content: str = ""
+    patch_type: str = "prompt"
+    patch_diff: str = ""
+    reason: str = ""
+    old_score: float = 0.0
+    new_score: float = 0.0
+    delta: float = 0.0
+    status: str = PatchStatus.CANDIDATE.value
+    validation_run_id: str = ""
+    human_review_id: str = ""
     proposed_by: str = "system"
-    status: str = "proposed"
     created_at: float = field(default_factory=_now)
+    updated_at: float = field(default_factory=_now)
 
 
 @dataclass
@@ -472,18 +612,26 @@ class ApiKeyRecord:
     Attributes:
         id: 唯一标识。
         workspace_id: 所属工作空间 ID。
+        project_id: 关联项目 ID（可选，None 表示 workspace 级别）。
+        name: Key 名称。
         key_hash: API Key 的 SHA256 哈希。
         key_prefix: Key 前缀（如 "sk_"），便于识别。
-        name: Key 名称。
+        scopes: 权限范围列表（如 ["runs:write", "runs:read"]）。
+        status: Key 状态（"active"/"revoked"）。
+        last_used_at: 最后使用时间戳。
         created_at: 创建时间戳。
         revoked_at: 撤销时间戳（None 表示仍有效）。
     """
 
     id: str = field(default_factory=lambda: _new_id("ak"))
     workspace_id: str = ""
+    project_id: str | None = None
+    name: str = ""
     key_hash: str = ""
     key_prefix: str = "sk_"
-    name: str = ""
+    scopes: list[str] = field(default_factory=list)
+    status: str = "active"
+    last_used_at: float | None = None
     created_at: float = field(default_factory=_now)
     revoked_at: float | None = None
 
@@ -500,6 +648,8 @@ class UsageEventRecord:
         project_id: 所属项目 ID。
         run_id: 关联的运行 ID（可选）。
         event_type: 事件类型。
+        quantity: 数量。
+        unit: 单位（"count", "token", "usd"）。
         tokens_used: 消耗 token 数。
         cost_estimate: 预估成本（美元）。
         metadata: 附加元数据。
@@ -511,7 +661,86 @@ class UsageEventRecord:
     project_id: str = ""
     run_id: str = ""
     event_type: str = ""
+    quantity: float = 1.0
+    unit: str = "count"
     tokens_used: int = 0
     cost_estimate: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)
+    created_at: float = field(default_factory=_now)
+
+
+# ============================================================================
+# SaaS 数据模型 — 本轮新增：Billing + Audit
+# ============================================================================
+
+
+@dataclass
+class BillingPlanRecord:
+    """计费套餐记录。
+
+    描述一个 workspace 的计费计划和限制。
+
+    说明：BillingPlan 归属 workspace（不需要 project_id，
+    因为计费是 workspace 级别的）。
+
+    Attributes:
+        id: 唯一标识。
+        workspace_id: 所属工作空间 ID。
+        tier: 套餐层级（free/pro/team/enterprise）。
+        max_projects: 最大项目数。
+        max_runs_per_month: 每月最大运行次数。
+        max_members: 最大成员数。
+        trace_retention_days: Trace 保留天数。
+        features: 启用的功能列表。
+        is_active: 是否激活。
+        created_at: 创建时间戳。
+        updated_at: 最后更新时间戳。
+    """
+
+    id: str = field(default_factory=lambda: _new_id("bp"))
+    workspace_id: str = ""
+    tier: str = BillingTier.FREE.value
+    max_projects: int = 1
+    max_runs_per_month: int = 100
+    max_members: int = 1
+    trace_retention_days: int = 7
+    features: list[str] = field(default_factory=list)
+    is_active: bool = True
+    created_at: float = field(default_factory=_now)
+    updated_at: float = field(default_factory=_now)
+
+
+@dataclass
+class AuditLogRecord:
+    """审计日志记录。
+
+    记录所有高风险操作的不可变审计轨迹。
+
+    说明：AuditLog 归属 workspace + project（可选，有些事件
+    是 workspace 级别的，如 api_key_created）。
+
+    Attributes:
+        id: 唯一标识。
+        workspace_id: 所属工作空间 ID。
+        project_id: 关联项目 ID（可选）。
+        event_type: 事件类型（api_key_created, mcp_tool_called 等）。
+        actor: 执行者标识（用户 ID 或 "system"）。
+        target: 操作目标（如 "skill_patch:sp_xxx"）。
+        details: 事件详情（JSON 字典）。
+        ip_address: 来源 IP（可选）。
+        user_agent: User-Agent（可选）。
+        severity: 严重级别（"info", "warning", "critical"）。
+        created_at: 事件时间戳。
+    """
+
+    id: str = field(default_factory=lambda: _new_id("al"))
+    workspace_id: str = ""
+    project_id: str = ""
+    event_type: str = ""
+    actor: str = ""
+    target: str = ""
+    details: dict[str, Any] = field(default_factory=dict)
+    ip_address: str = ""
+    user_agent: str = ""
+    severity: str = "info"
     created_at: float = field(default_factory=_now)

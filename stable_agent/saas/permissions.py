@@ -1,9 +1,16 @@
 """权限校验模块。
 
-根据 SaaS 模式决定 project_id 是否必填。
+根据 SaaS 模式决定 project_id 是否必填，并提供角色级权限矩阵。
 
 local 模式：project_id 可选，fallback 到 default project
 saas 模式：project_id 必填，且需验证 API Key
+
+角色权限矩阵：
+- owner: 全部权限
+- admin: 管理项目和成员
+- developer: 创建 run / 调试 / eval
+- reviewer: 审批 skill patch
+- viewer: 只读
 """
 
 from __future__ import annotations
@@ -11,9 +18,52 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from stable_agent.saas.models import SaasMode
+from stable_agent.saas.models import MemberRole, SaasMode
 
 logger = logging.getLogger(__name__)
+
+# ============================================================================
+# 角色权限矩阵
+# ============================================================================
+
+ROLE_PERMISSIONS: dict[str, set[str]] = {
+    MemberRole.OWNER.value: {
+        "workspace:manage", "project:create", "project:delete",
+        "project:manage", "member:invite", "member:remove",
+        "run:create", "run:view", "run:delete",
+        "trace:view", "eval:run", "eval:view",
+        "skill:view", "skill:patch", "skill:review",
+        "skill:validate", "skill:export",
+        "apikey:create", "apikey:revoke",
+        "usage:view", "billing:manage",
+        "audit:view",
+    },
+    MemberRole.ADMIN.value: {
+        "project:create", "project:manage",
+        "member:invite",
+        "run:create", "run:view",
+        "trace:view", "eval:run", "eval:view",
+        "skill:view", "skill:patch", "skill:validate",
+        "apikey:create", "usage:view",
+        "audit:view",
+    },
+    MemberRole.DEVELOPER.value: {
+        "run:create", "run:view",
+        "trace:view", "eval:run", "eval:view",
+        "skill:view", "skill:patch",
+        "usage:view",
+    },
+    MemberRole.REVIEWER.value: {
+        "run:view", "trace:view", "eval:view",
+        "skill:view", "skill:review",
+        "skill:validate",
+        "usage:view",
+    },
+    MemberRole.VIEWER.value: {
+        "run:view", "trace:view",
+        "skill:view", "usage:view",
+    },
+}
 
 
 class PermissionChecker:
@@ -85,21 +135,7 @@ class PermissionChecker:
         api_key: str | None = None,
         api_key_manager: Any = None,
     ) -> str:
-        """校验 API Key 并返回对应的 workspace_id。
-
-        local 模式：跳过校验
-        saas 模式：必须有有效 API Key
-
-        Args:
-            api_key: API Key 字符串（已含前缀如 "sk_"）。
-            api_key_manager: ApiKeyManager 实例。
-
-        Returns:
-            对应的 workspace_id。
-
-        Raises:
-            PermissionError: API Key 无效。
-        """
+        """校验 API Key 并返回对应的 workspace_id。"""
         if self.mode == SaasMode.LOCAL:
             return self.default_workspace_id
 
@@ -114,6 +150,50 @@ class PermissionChecker:
             raise PermissionError("API Key 无效或已撤销。")
 
         return result["workspace_id"]
+
+    # ------------------------------------------------------------------
+    # 角色权限方法
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_permissions(role: str) -> set[str]:
+        """获取角色的权限列表。"""
+        return ROLE_PERMISSIONS.get(role, ROLE_PERMISSIONS[MemberRole.VIEWER.value])
+
+    @staticmethod
+    def has_permission(role: str, permission: str) -> bool:
+        """检查角色是否拥有指定权限。"""
+        return permission in PermissionChecker.get_permissions(role)
+
+    @staticmethod
+    def can_view_project(role: str) -> bool:
+        """是否可以查看项目。"""
+        return PermissionChecker.has_permission(role, "run:view")
+
+    @staticmethod
+    def can_create_run(role: str) -> bool:
+        """是否可以创建运行。"""
+        return PermissionChecker.has_permission(role, "run:create")
+
+    @staticmethod
+    def can_review_skill(role: str) -> bool:
+        """是否可以审核 Skill。"""
+        return PermissionChecker.has_permission(role, "skill:review")
+
+    @staticmethod
+    def can_export_skill(role: str) -> bool:
+        """是否可以导出 Skill。"""
+        return PermissionChecker.has_permission(role, "skill:export")
+
+    @staticmethod
+    def can_create_project(role: str) -> bool:
+        """是否可以创建项目。"""
+        return PermissionChecker.has_permission(role, "project:create")
+
+    @staticmethod
+    def can_view_audit(role: str) -> bool:
+        """是否可以查看审计日志。"""
+        return PermissionChecker.has_permission(role, "audit:view")
 
     # ------------------------------------------------------------------
     # 模式查询

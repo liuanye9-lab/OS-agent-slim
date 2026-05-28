@@ -20,7 +20,9 @@ from stable_agent.saas.models import (
     AgentProfile,
     AgentRun,
     ApiKeyRecord,
+    AuditLogRecord,
     BadCaseRecord,
+    BillingPlanRecord,
     EvalResultRecord,
     HumanReviewRecord,
     Project,
@@ -74,11 +76,15 @@ class SaasRepository:
             CREATE TABLE IF NOT EXISTS workspaces (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
+                slug TEXT DEFAULT '',
+                owner_user_id TEXT DEFAULT '',
+                billing_plan TEXT DEFAULT 'free',
                 created_at REAL NOT NULL,
+                updated_at REAL,
                 settings TEXT DEFAULT '{}'
             );
 
-            -- 基础 runs 表（如果不存在则创建，与 StableAgentStorage 兼容）
+            -- 基础 runs 表（与 StableAgentStorage 兼容 + SaaS 扩展）
             CREATE TABLE IF NOT EXISTS runs (
                 run_id TEXT PRIMARY KEY,
                 user_task TEXT NOT NULL DEFAULT '',
@@ -90,6 +96,16 @@ class SaasRepository:
                 total_output_tokens INTEGER NOT NULL DEFAULT 0,
                 total_cost_estimate REAL NOT NULL DEFAULT 0.0,
                 overall_score REAL,
+                progress_pct INTEGER DEFAULT 0,
+                intent_alignment_score REAL,
+                token_used INTEGER DEFAULT 0,
+                cost_estimate REAL DEFAULT 0.0,
+                learning_triggered INTEGER DEFAULT 0,
+                skill_updated INTEGER DEFAULT 0,
+                dashboard_url TEXT DEFAULT '',
+                trace_url TEXT DEFAULT '',
+                failure_attribution TEXT DEFAULT '{}',
+                metadata TEXT DEFAULT '{}',
                 workspace_id TEXT,
                 project_id TEXT,
                 agent_id TEXT
@@ -99,8 +115,11 @@ class SaasRepository:
                 id TEXT PRIMARY KEY,
                 workspace_id TEXT NOT NULL,
                 user_id TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'member',
+                email TEXT DEFAULT '',
+                role TEXT NOT NULL DEFAULT 'developer',
                 joined_at REAL NOT NULL,
+                created_at REAL,
+                updated_at REAL,
                 FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
             );
 
@@ -109,7 +128,10 @@ class SaasRepository:
                 workspace_id TEXT NOT NULL,
                 name TEXT NOT NULL,
                 description TEXT DEFAULT '',
+                default_agent_id TEXT DEFAULT '',
+                environment TEXT DEFAULT 'local',
                 created_at REAL NOT NULL,
+                updated_at REAL,
                 FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
             );
 
@@ -118,16 +140,25 @@ class SaasRepository:
                 workspace_id TEXT NOT NULL,
                 project_id TEXT NOT NULL,
                 name TEXT NOT NULL,
-                config TEXT DEFAULT '{}',
-                created_at REAL NOT NULL
+                description TEXT DEFAULT '',
+                agent_type TEXT DEFAULT 'general',
+                default_skill_id TEXT DEFAULT '',
+                default_model TEXT DEFAULT '',
+                mcp_endpoint TEXT DEFAULT '',
+                created_at REAL NOT NULL,
+                updated_at REAL
             );
 
             CREATE TABLE IF NOT EXISTS api_keys (
                 id TEXT PRIMARY KEY,
                 workspace_id TEXT NOT NULL,
+                project_id TEXT,
+                name TEXT NOT NULL,
                 key_hash TEXT NOT NULL UNIQUE,
                 key_prefix TEXT NOT NULL DEFAULT 'sk_',
-                name TEXT NOT NULL,
+                scopes TEXT DEFAULT '[]',
+                status TEXT DEFAULT 'active',
+                last_used_at REAL,
                 created_at REAL NOT NULL,
                 revoked_at REAL,
                 FOREIGN KEY (workspace_id) REFERENCES workspaces(id)
@@ -184,12 +215,24 @@ class SaasRepository:
             CREATE TABLE IF NOT EXISTS skill_patches (
                 id TEXT PRIMARY KEY,
                 skill_id TEXT NOT NULL,
+                workspace_id TEXT DEFAULT '',
+                project_id TEXT DEFAULT '',
+                source_run_id TEXT DEFAULT '',
                 from_version TEXT NOT NULL,
                 to_version TEXT NOT NULL,
-                patch_content TEXT NOT NULL,
+                patch_type TEXT DEFAULT 'prompt',
+                patch_content TEXT NOT NULL DEFAULT '',
+                patch_diff TEXT DEFAULT '',
+                reason TEXT DEFAULT '',
+                old_score REAL DEFAULT 0.0,
+                new_score REAL DEFAULT 0.0,
+                delta REAL DEFAULT 0.0,
+                status TEXT DEFAULT 'candidate',
+                validation_run_id TEXT DEFAULT '',
+                human_review_id TEXT DEFAULT '',
                 proposed_by TEXT DEFAULT 'system',
-                status TEXT DEFAULT 'proposed',
-                created_at REAL NOT NULL
+                created_at REAL NOT NULL,
+                updated_at REAL
             );
 
             CREATE TABLE IF NOT EXISTS validation_runs (
@@ -217,15 +260,54 @@ class SaasRepository:
                 resolved_at REAL
             );
 
+            CREATE TABLE IF NOT EXISTS billing_plans (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL UNIQUE,
+                tier TEXT NOT NULL DEFAULT 'free',
+                max_projects INTEGER DEFAULT 1,
+                max_runs_per_month INTEGER DEFAULT 100,
+                max_members INTEGER DEFAULT 1,
+                trace_retention_days INTEGER DEFAULT 7,
+                features TEXT DEFAULT '[]',
+                is_active INTEGER DEFAULT 1,
+                created_at REAL NOT NULL,
+                updated_at REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL,
+                project_id TEXT DEFAULT '',
+                event_type TEXT NOT NULL,
+                actor TEXT DEFAULT '',
+                target TEXT DEFAULT '',
+                details TEXT DEFAULT '{}',
+                ip_address TEXT DEFAULT '',
+                user_agent TEXT DEFAULT '',
+                severity TEXT DEFAULT 'info',
+                created_at REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_audit_logs_workspace ON audit_logs(workspace_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_audit_logs_event_type ON audit_logs(event_type);
+            CREATE INDEX IF NOT EXISTS idx_usage_events_project ON usage_events(project_id, created_at);
+
         """)
         conn.commit()
 
         # 为 runs 表添加 SaaS 列和索引（幂等，忽略不存在的表）
         try:
             for col, col_def in [
-                ("workspace_id", "TEXT"),
-                ("project_id", "TEXT"),
-                ("agent_id", "TEXT"),
+                ("progress_pct", "INTEGER DEFAULT 0"),
+                ("intent_alignment_score", "REAL"),
+                ("token_used", "INTEGER DEFAULT 0"),
+                ("cost_estimate", "REAL DEFAULT 0.0"),
+                ("learning_triggered", "INTEGER DEFAULT 0"),
+                ("skill_updated", "INTEGER DEFAULT 0"),
+                ("dashboard_url", "TEXT DEFAULT ''"),
+                ("trace_url", "TEXT DEFAULT ''"),
+                ("failure_attribution", "TEXT DEFAULT '{}'"),
+                ("metadata", "TEXT DEFAULT '{}'"),
             ]:
                 try:
                     conn.execute(f"ALTER TABLE runs ADD COLUMN {col} {col_def}")
@@ -241,6 +323,61 @@ class SaasRepository:
         except sqlite3.OperationalError:
             pass  # runs 表可能不存在（新数据库）
 
+        # 为 workspaces 表添加商业字段（幂等）
+        try:
+            for col, col_def in [
+                ("slug", "TEXT DEFAULT ''"),
+                ("owner_user_id", "TEXT DEFAULT ''"),
+                ("billing_plan", "TEXT DEFAULT 'free'"),
+                ("updated_at", "REAL"),
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE workspaces ADD COLUMN {col} {col_def}")
+                except sqlite3.OperationalError:
+                    pass
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # 为 skill_patches 表添加新字段（幂等）
+        try:
+            for col, col_def in [
+                ("workspace_id", "TEXT DEFAULT ''"),
+                ("project_id", "TEXT DEFAULT ''"),
+                ("source_run_id", "TEXT DEFAULT ''"),
+                ("patch_type", "TEXT DEFAULT 'prompt'"),
+                ("patch_diff", "TEXT DEFAULT ''"),
+                ("reason", "TEXT DEFAULT ''"),
+                ("old_score", "REAL DEFAULT 0.0"),
+                ("new_score", "REAL DEFAULT 0.0"),
+                ("delta", "REAL DEFAULT 0.0"),
+                ("validation_run_id", "TEXT DEFAULT ''"),
+                ("human_review_id", "TEXT DEFAULT ''"),
+                ("updated_at", "REAL"),
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE skill_patches ADD COLUMN {col} {col_def}")
+                except sqlite3.OperationalError:
+                    pass
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # 为 projects 表添加新字段（幂等）
+        try:
+            for col, col_def in [
+                ("default_agent_id", "TEXT DEFAULT ''"),
+                ("environment", "TEXT DEFAULT 'local'"),
+                ("updated_at", "REAL"),
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE projects ADD COLUMN {col} {col_def}")
+                except sqlite3.OperationalError:
+                    pass
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
     # ------------------------------------------------------------------
     # Workspace
     # ------------------------------------------------------------------
@@ -249,8 +386,10 @@ class SaasRepository:
         try:
             conn = self._get_conn()
             conn.execute(
-                "INSERT INTO workspaces (id, name, created_at, settings) VALUES (?,?,?,?)",
-                (ws.id, ws.name, ws.created_at, json.dumps(ws.settings)),
+                "INSERT INTO workspaces (id, name, slug, owner_user_id, billing_plan, created_at, updated_at, settings) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (ws.id, ws.name, ws.slug, ws.owner_user_id, ws.billing_plan,
+                 ws.created_at, ws.updated_at, json.dumps(ws.settings)),
             )
             conn.commit()
             return True
@@ -265,9 +404,10 @@ class SaasRepository:
             if row is None:
                 return None
             return Workspace(
-                id=row["id"],
-                name=row["name"],
-                created_at=row["created_at"],
+                id=row["id"], name=row["name"], slug=row["slug"] or "",
+                owner_user_id=row["owner_user_id"] or "",
+                billing_plan=row["billing_plan"] or "free",
+                created_at=row["created_at"], updated_at=row["updated_at"] or row["created_at"],
                 settings=json.loads(row["settings"]),
             )
         except Exception as e:
@@ -281,7 +421,12 @@ class SaasRepository:
             return [
                 Workspace(
                     id=r["id"], name=r["name"],
-                    created_at=r["created_at"], settings=json.loads(r["settings"]),
+                    slug=r["slug"] if "slug" in r.keys() else "",
+                    owner_user_id=r["owner_user_id"] if "owner_user_id" in r.keys() else "",
+                    billing_plan=r["billing_plan"] if "billing_plan" in r.keys() else "free",
+                    created_at=r["created_at"],
+                    updated_at=r["updated_at"] if "updated_at" in r.keys() and r["updated_at"] else r["created_at"],
+                    settings=json.loads(r["settings"]),
                 )
                 for r in rows
             ]
@@ -297,8 +442,10 @@ class SaasRepository:
         try:
             conn = self._get_conn()
             conn.execute(
-                "INSERT INTO projects (id, workspace_id, name, description, created_at) VALUES (?,?,?,?,?)",
-                (proj.id, proj.workspace_id, proj.name, proj.description, proj.created_at),
+                "INSERT INTO projects (id, workspace_id, name, description, default_agent_id, environment, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (proj.id, proj.workspace_id, proj.name, proj.description,
+                 proj.default_agent_id, proj.environment, proj.created_at, proj.updated_at),
             )
             conn.commit()
             return True
@@ -315,7 +462,10 @@ class SaasRepository:
             return Project(
                 id=row["id"], workspace_id=row["workspace_id"],
                 name=row["name"], description=row["description"],
+                default_agent_id=row["default_agent_id"] if "default_agent_id" in row.keys() else "",
+                environment=row["environment"] if "environment" in row.keys() else "local",
                 created_at=row["created_at"],
+                updated_at=row["updated_at"] if "updated_at" in row.keys() and row["updated_at"] else row["created_at"],
             )
         except Exception as e:
             logger.warning("get_project failed: %s", e)
@@ -349,11 +499,23 @@ class SaasRepository:
             conn = self._get_conn()
             conn.execute(
                 """INSERT OR REPLACE INTO runs
-                   (run_id, workspace_id, project_id, agent_id, user_task, status,
-                    started_at, ended_at, overall_score)
-                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                   (run_id, workspace_id, project_id, agent_id, user_task, task_type, status,
+                    progress_pct, overall_score, intent_alignment_score,
+                    token_used, cost_estimate, learning_triggered, skill_updated,
+                    dashboard_url, trace_url,
+                    failure_attribution, metadata,
+                    started_at, ended_at,
+                    total_input_tokens, total_output_tokens, total_cost_estimate)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (run.run_id, run.workspace_id, run.project_id, run.agent_id,
-                 run.user_task, run.status, run.started_at, run.ended_at, run.overall_score),
+                 run.user_task, run.task_type, run.status,
+                 run.progress_pct, run.overall_score, run.intent_alignment_score,
+                 run.token_used, run.cost_estimate,
+                 int(run.learning_triggered), int(run.skill_updated),
+                 run.dashboard_url, run.trace_url,
+                 json.dumps(run.failure_attribution), json.dumps(run.metadata),
+                 run.started_at, run.ended_at,
+                 run.token_used, 0, run.cost_estimate),
             )
             conn.commit()
             return True
@@ -372,9 +534,31 @@ class SaasRepository:
                 workspace_id=row["workspace_id"] or "",
                 project_id=row["project_id"] or "",
                 agent_id=row["agent_id"] or "",
-                status=row["status"],
-                user_task=row["user_task"],
+                status=row["status"] or "created",
+                user_task=row["user_task"] or "",
+                task_type=row["task_type"] or "general_qa",
+                progress_pct=row["progress_pct"] if "progress_pct" in row.keys() else 0,
                 overall_score=row["overall_score"],
+                intent_alignment_score=(
+                    row["intent_alignment_score"]
+                    if "intent_alignment_score" in row.keys() else None
+                ),
+                token_used=row["token_used"] if "token_used" in row.keys() else 0,
+                cost_estimate=row["cost_estimate"] if "cost_estimate" in row.keys() else 0.0,
+                learning_triggered=bool(
+                    row["learning_triggered"] if "learning_triggered" in row.keys() else False
+                ),
+                skill_updated=bool(
+                    row["skill_updated"] if "skill_updated" in row.keys() else False
+                ),
+                dashboard_url=row["dashboard_url"] if "dashboard_url" in row.keys() else "",
+                trace_url=row["trace_url"] if "trace_url" in row.keys() else "",
+                failure_attribution=json.loads(
+                    row["failure_attribution"] if "failure_attribution" in row.keys() else "{}"
+                ),
+                metadata=json.loads(
+                    row["metadata"] if "metadata" in row.keys() else "{}"
+                ),
                 started_at=row["started_at"],
                 ended_at=row["ended_at"],
             )
@@ -690,13 +874,21 @@ class SaasRepository:
         try:
             conn = self._get_conn()
             conn.execute(
-                """INSERT OR REPLACE INTO skill_patches
-                   (id, skill_id, from_version, to_version, patch_content,
-                    proposed_by, status, created_at)
-                   VALUES (?,?,?,?,?,?,?,?)""",
-                (patch.id, patch.skill_id, patch.from_version, patch.to_version,
-                 patch.patch_content, patch.proposed_by, patch.status, patch.created_at),
-            )
+                    """INSERT OR REPLACE INTO skill_patches
+                       (id, skill_id, workspace_id, project_id, source_run_id,
+                        from_version, to_version, patch_type, patch_diff, reason,
+                        old_score, new_score, delta,
+                        status, validation_run_id, human_review_id,
+                        proposed_by, created_at, updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (patch.id, patch.skill_id, patch.workspace_id, patch.project_id,
+                     patch.source_run_id,
+                     patch.from_version, patch.to_version, patch.patch_type,
+                     patch.patch_diff, patch.reason,
+                     patch.old_score, patch.new_score, patch.delta,
+                     patch.status, patch.validation_run_id, patch.human_review_id,
+                     patch.proposed_by, patch.created_at, patch.updated_at),
+                )
             conn.commit()
             return True
         except Exception as e:
@@ -713,10 +905,22 @@ class SaasRepository:
                 return None
             return SkillPatchRecord(
                 id=row["id"], skill_id=row["skill_id"],
+                workspace_id=(row["workspace_id"] if "workspace_id" in row.keys() else "") or "",
+                project_id=(row["project_id"] if "project_id" in row.keys() else "") or "",
+                source_run_id=(row["source_run_id"] if "source_run_id" in row.keys() else "") or "",
                 from_version=row["from_version"], to_version=row["to_version"],
-                patch_content=row["patch_content"],
-                proposed_by=row["proposed_by"], status=row["status"],
+                patch_type=(row["patch_type"] if "patch_type" in row.keys() else "prompt") or "prompt",
+                patch_diff=row["patch_content"] or (row["patch_diff"] if "patch_diff" in row.keys() else ""),
+                reason=(row["reason"] if "reason" in row.keys() else "") or "",
+                old_score=(row["old_score"] if "old_score" in row.keys() else 0.0) or 0.0,
+                new_score=(row["new_score"] if "new_score" in row.keys() else 0.0) or 0.0,
+                delta=(row["delta"] if "delta" in row.keys() else 0.0) or 0.0,
+                status=row["status"],
+                validation_run_id=(row["validation_run_id"] if "validation_run_id" in row.keys() else "") or "",
+                human_review_id=(row["human_review_id"] if "human_review_id" in row.keys() else "") or "",
+                proposed_by=row["proposed_by"] or "system",
                 created_at=row["created_at"],
+                updated_at=((row["updated_at"] if "updated_at" in row.keys() else None) or row["created_at"]),
             )
         except Exception as e:
             logger.warning("get_skill_patch failed: %s", e)
@@ -779,3 +983,193 @@ class SaasRepository:
         except Exception as e:
             logger.warning("get_validation_run failed: %s", e)
             return None
+
+    # ------------------------------------------------------------------
+    # BillingPlan
+    # ------------------------------------------------------------------
+
+    def save_billing_plan(self, plan: BillingPlanRecord) -> bool:
+        try:
+            conn = self._get_conn()
+            conn.execute(
+                """INSERT OR REPLACE INTO billing_plans
+                   (id, workspace_id, tier, max_projects, max_runs_per_month,
+                    max_members, trace_retention_days, features, is_active,
+                    created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (plan.id, plan.workspace_id, plan.tier,
+                 plan.max_projects, plan.max_runs_per_month,
+                 plan.max_members, plan.trace_retention_days,
+                 json.dumps(plan.features), int(plan.is_active),
+                 plan.created_at, plan.updated_at),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.warning("save_billing_plan failed: %s", e)
+            return False
+
+    def get_billing_plan(self, workspace_id: str) -> BillingPlanRecord | None:
+        try:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT * FROM billing_plans WHERE workspace_id=?",
+                (workspace_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return BillingPlanRecord(
+                id=row["id"], workspace_id=row["workspace_id"],
+                tier=row["tier"], max_projects=row["max_projects"],
+                max_runs_per_month=row["max_runs_per_month"],
+                max_members=row["max_members"],
+                trace_retention_days=row["trace_retention_days"],
+                features=json.loads(row["features"]),
+                is_active=bool(row["is_active"]),
+                created_at=row["created_at"], updated_at=row["updated_at"],
+            )
+        except Exception as e:
+            logger.warning("get_billing_plan failed: %s", e)
+            return None
+
+    # ------------------------------------------------------------------
+    # AuditLog
+    # ------------------------------------------------------------------
+
+    def save_audit_log(self, record: AuditLogRecord) -> bool:
+        try:
+            conn = self._get_conn()
+            conn.execute(
+                """INSERT INTO audit_logs
+                   (id, workspace_id, project_id, event_type, actor, target,
+                    details, ip_address, user_agent, severity, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (record.id, record.workspace_id, record.project_id,
+                 record.event_type, record.actor, record.target,
+                 json.dumps(record.details), record.ip_address,
+                 record.user_agent, record.severity, record.created_at),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.warning("save_audit_log failed: %s", e)
+            return False
+
+    def list_audit_logs(
+        self, workspace_id: str, limit: int = 50,
+    ) -> list[AuditLogRecord]:
+        try:
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT * FROM audit_logs WHERE workspace_id=? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (workspace_id, limit),
+            ).fetchall()
+            return [
+                AuditLogRecord(
+                    id=r["id"], workspace_id=r["workspace_id"],
+                    project_id=r["project_id"] or "",
+                    event_type=r["event_type"], actor=r["actor"],
+                    target=r["target"], details=json.loads(r["details"]),
+                    ip_address=r["ip_address"], user_agent=r["user_agent"],
+                    severity=r["severity"], created_at=r["created_at"],
+                )
+                for r in rows
+            ]
+        except Exception as e:
+            logger.warning("list_audit_logs failed: %s", e)
+            return []
+
+    # ------------------------------------------------------------------
+    # WorkspaceMember 扩展
+    # ------------------------------------------------------------------
+
+    def save_workspace_member(self, member: WorkspaceMember) -> bool:
+        try:
+            conn = self._get_conn()
+            conn.execute(
+                """INSERT OR REPLACE INTO workspace_members
+                   (id, workspace_id, user_id, email, role, joined_at, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (member.id, member.workspace_id, member.user_id, member.email,
+                 member.role, member.joined_at, member.created_at, member.updated_at),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.warning("save_workspace_member failed: %s", e)
+            return False
+
+    def list_workspace_members(self, workspace_id: str) -> list[WorkspaceMember]:
+        try:
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT * FROM workspace_members WHERE workspace_id=? ORDER BY joined_at",
+                (workspace_id,),
+            ).fetchall()
+            return [
+                WorkspaceMember(
+                    id=r["id"], workspace_id=r["workspace_id"],
+                    user_id=r["user_id"], email=r["email"] or "",
+                    role=r["role"], joined_at=r["joined_at"],
+                    created_at=r["created_at"] or r["joined_at"],
+                    updated_at=r["updated_at"] or r["joined_at"],
+                )
+                for r in rows
+            ]
+        except Exception as e:
+            logger.warning("list_workspace_members failed: %s", e)
+            return []
+
+    # ------------------------------------------------------------------
+    # EvalResult
+    # ------------------------------------------------------------------
+
+    def save_eval_result(self, eval_record: EvalResultRecord) -> bool:
+        try:
+            conn = self._get_conn()
+            conn.execute(
+                """INSERT OR REPLACE INTO eval_results
+                   (id, run_id, workspace_id, project_id, scores,
+                    overall_score, failure_attribution, created_at)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (eval_record.id, eval_record.run_id,
+                 eval_record.workspace_id, eval_record.project_id,
+                 json.dumps(eval_record.scores),
+                 eval_record.overall_score,
+                 json.dumps(eval_record.failure_attribution),
+                 eval_record.created_at),
+            )
+            # Create eval_results table if not exists
+            return True
+        except Exception:
+            try:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS eval_results (
+                        id TEXT PRIMARY KEY,
+                        run_id TEXT NOT NULL,
+                        workspace_id TEXT NOT NULL,
+                        project_id TEXT NOT NULL,
+                        scores TEXT DEFAULT '{}',
+                        overall_score REAL DEFAULT 0.0,
+                        failure_attribution TEXT DEFAULT '{}',
+                        created_at REAL NOT NULL
+                    )
+                """)
+                conn.execute(
+                    """INSERT OR REPLACE INTO eval_results
+                       (id, run_id, workspace_id, project_id, scores,
+                        overall_score, failure_attribution, created_at)
+                       VALUES (?,?,?,?,?,?,?,?)""",
+                    (eval_record.id, eval_record.run_id,
+                     eval_record.workspace_id, eval_record.project_id,
+                     json.dumps(eval_record.scores),
+                     eval_record.overall_score,
+                     json.dumps(eval_record.failure_attribution),
+                     eval_record.created_at),
+                )
+                conn.commit()
+                return True
+            except Exception as e:
+                logger.warning("save_eval_result failed: %s", e)
+                return False

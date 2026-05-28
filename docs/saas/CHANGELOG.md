@@ -1,4 +1,37 @@
-# CHANGELOG.md — StableAgent OS SaaS v1.0
+# CHANGELOG.md — StableAgent OS SaaS
+
+## v1.1.0-SaaS (2026-05-29)
+
+### 新增
+- `billing.py` — BillingManager（4级套餐 + 配额检查）
+- `audit_log.py` — AuditLogger（13种事件 + 不可变日志）
+- `workspace_service.py` — WorkspaceService（创建/查询/成员管理）
+- `project_service.py` — ProjectService（创建/查询/default项目）
+- `run_service.py` — RunService（Agent 运行生命周期管理）
+- `BillingPlanRecord` + `AuditLogRecord` 数据模型
+- `BillingTier`、`RunStatus`、`RegressionStatus`、`PatchStatus`、`AuditEventType` 枚举
+- 完整5级角色权限矩阵（owner/admin/developer/reviewer/viewer）
+- `SAAS_UPGRADE_PLAN.md` + `COMMERCIALIZATION_PLAN.md`
+
+### 变更
+- models.py: 扩展16个dataclass字段（+slug/billing_plan/scopes/environment 等）
+- permissions.py: +角色级权限方法 + ROLE_PERMISSIONS 矩阵
+- repository.py:
+  - 新增 billing_plans/audit_logs 表
+  - 扩展 runs/projects/skill_patches/workspaces 表
+  - ALTER TABLE 列迁移（14个新列）
+  - +save_billing_plan/get_billing_plan
+  - +save_audit_log/list_audit_logs
+  - +save_workspace_member/list_workspace_members
+- skill_review_service.py: 状态值对齐 PatchStatus 枚举
+- ApiKeyRecord: +scopes/project_id/last_used_at
+- AgentRun: +10个新字段
+- SkillPatchRecord: +12个新字段
+- 修复 progress_pct 漏传 bug
+
+### 测试
+- +46 个新测试（test_saas_repository/test_permissions/test_audit_log/test_api_routes_saas）
+- 全量: **918/918 passed**
 
 ## v1.0.0-SaaS (2026-05-28)
 

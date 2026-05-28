@@ -35,22 +35,22 @@ class TestSkillValidationReview:
             to_version="v2.0",
         )
         assert patch.id.startswith("sp_")
-        assert patch.status == "proposed"
+        assert patch.status == "candidate"
         assert patch.skill_id == "skill_test"
 
     def test_patch_status_progression(self):
-        """Patch 状态应依次推进：proposed → validated → reviewing → approved → exported。"""
+        """Patch 状态应依次推进：candidate → validation_passed → waiting_review → approved → exported。"""
         repo, ws, proj = self._setup()
         svc = SkillReviewService(repo=repo)
 
         patch = svc.submit_patch(skill_id="s1", patch_content="fix")
-        assert patch.status == "proposed"
+        assert patch.status == "candidate"
 
-        # 模拟 validation pass（通过 setattr 直接改状态，绕开 ValidationGate 依赖）
-        repo.update_skill_patch_status(patch.id, "validated")
+        # 模拟 validation pass
+        repo.update_skill_patch_status(patch.id, "validation_passed")
         fetched = repo.get_skill_patch(patch.id)
         assert fetched is not None
-        assert fetched.status == "validated"
+        assert fetched.status == "validation_passed"
 
     def test_submit_for_review_requires_validated(self):
         repo, ws, proj = self._setup()
@@ -58,12 +58,12 @@ class TestSkillValidationReview:
 
         patch = svc.submit_patch(skill_id="s1", patch_content="fix")
 
-        # 未 validated 时应拒绝提交审核
+        # 未 validation_passed 时应拒绝提交审核
         try:
             svc.submit_for_review(patch.id, ws.id, proj.id)
             assert False, "Should have raised ValueError"
         except ValueError as e:
-            assert "validated" in str(e).lower() or "Validation" in str(e)
+            assert "validation" in str(e).lower() or "Validation" in str(e)
 
     def test_approve_and_reject_review(self):
         repo, ws, proj = self._setup()
@@ -71,7 +71,7 @@ class TestSkillValidationReview:
 
         patch = svc.submit_patch(skill_id="s1", patch_content="fix")
         # 模拟 validation pass
-        repo.update_skill_patch_status(patch.id, "validated")
+        repo.update_skill_patch_status(patch.id, "validation_passed")
 
         # 提交审核
         review = svc.submit_for_review(patch.id, ws.id, proj.id)
@@ -91,7 +91,7 @@ class TestSkillValidationReview:
         svc = SkillReviewService(repo=repo)
 
         patch = svc.submit_patch(skill_id="s1", patch_content="fix")
-        repo.update_skill_patch_status(patch.id, "validated")
+        repo.update_skill_patch_status(patch.id, "validation_passed")
         review = svc.submit_for_review(patch.id, ws.id, proj.id)
 
         rejected = svc.reject_review(review.id, comment="Not ready")
@@ -135,7 +135,7 @@ class TestSkillValidationReview:
         status = svc.get_patch_status(patch.id)
 
         assert status["patch_id"] == patch.id
-        assert status["status"] == "proposed"
+        assert status["status"] == "candidate"
         assert status["skill_id"] == "s1"
 
 

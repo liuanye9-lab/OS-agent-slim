@@ -65,7 +65,7 @@ class TestAgentRun:
 
     def test_agent_run_default_status_init(self):
         run = AgentRun(run_id="run_002")
-        assert run.status == "init"
+        assert run.status == "created"
 
 
 class TestTraceEvalBadCase:
@@ -147,10 +147,10 @@ class TestSkillModels:
             skill_id="skill_001",
             from_version="v1.0",
             to_version="v2.0",
-            patch_content="+ Improved error handling",
-            status="proposed",
+            patch_diff="+ Improved error handling",
+            status="candidate",
         )
-        assert patch.status == "proposed"
+        assert patch.status == "candidate"
         assert patch.id.startswith("sp_")
 
     def test_skill_version(self):

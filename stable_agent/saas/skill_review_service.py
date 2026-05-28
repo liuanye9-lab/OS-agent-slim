@@ -87,7 +87,7 @@ class SkillReviewService:
 
         Args:
             skill_id: Skill ID。
-            patch_content: 补丁内容。
+            patch_content: 补丁内容（兼容旧参数名）。
             from_version: 源版本。
             to_version: 目标版本。
             proposed_by: 提议者。
@@ -102,9 +102,9 @@ class SkillReviewService:
             skill_id=skill_id,
             from_version=from_version,
             to_version=to_version,
-            patch_content=patch_content,
+            patch_diff=patch_content,  # patch_content → patch_diff
             proposed_by=proposed_by,
-            status="proposed",
+            status="candidate",  # "proposed" → "candidate"
         )
         ok = self.repo.save_skill_patch(patch)
         if not ok:
@@ -155,7 +155,7 @@ class SkillReviewService:
         candidate = SkillDocument(
             name="candidate",
             version=patch.to_version,
-            content=patch.patch_content,
+            content=patch.patch_diff,  # patch_content → patch_diff
         )
 
         # 执行验证
@@ -178,7 +178,7 @@ class SkillReviewService:
             self.repo.save_validation_run(vr)
 
             # 更新 patch 状态
-            new_status = "validated" if result.passed else "rejected"
+            new_status = "validation_passed" if result.passed else "validation_failed"
             self.repo.update_skill_patch_status(patch_id, new_status)
 
             logger.info(
@@ -225,7 +225,7 @@ class SkillReviewService:
         patch = self.repo.get_skill_patch(patch_id)
         if patch is None:
             raise ValueError(f"Skill Patch 不存在: {patch_id}")
-        if patch.status != "validated":
+        if patch.status != "validation_passed":
             raise ValueError(
                 f"Patch 必须通过 Validation 才能提交审核。"
                 f"当前状态: {patch.status}"
@@ -243,7 +243,7 @@ class SkillReviewService:
             raise RuntimeError("人工审核记录创建失败")
 
         # 更新 patch 状态
-        self.repo.update_skill_patch_status(patch_id, "reviewing")
+        self.repo.update_skill_patch_status(patch_id, "waiting_review")
 
         logger.info("Human review %s created for patch %s", review.id, patch_id)
         return review
