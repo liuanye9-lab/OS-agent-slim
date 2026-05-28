@@ -100,28 +100,7 @@ def create_app() -> FastAPI:
     app: FastAPI = FastAPI(title="StableAgent OS", version="0.2.0")
 
     # ------------------------------------------------------------------
-    # 3. 挂载 MCP Server（/mcp 前缀）
-    # ------------------------------------------------------------------
-    mcp_server: MCPServer = MCPServer(
-        decision_engine=decision_engine,
-        budget_manager=budget_manager,
-        memory_router=memory_router,
-        evaluator=evaluator,
-        bad_case_manager=bad_case_manager,
-        workflow_engine=workflow_engine,
-        event_bus=event_bus,
-        mcp_tools=mcp_tools,
-    )
-    app.mount("/mcp", mcp_server.app)
-
-    # ------------------------------------------------------------------
-    # 4. 挂载 Dashboard（/dashboard 前缀）
-    # ------------------------------------------------------------------
-    dashboard: Dashboard = Dashboard(event_bus, orchestrator=orchestrator)
-    dashboard.mount_to(app, prefix="/dashboard")
-
-    # ------------------------------------------------------------------
-    # 5. V5: 挂载统一 MCP Gateway（/mcp/v5 前缀，避免与旧 /mcp 冲突）
+    # 3. V5: 先挂载统一 MCP Gateway（必须放在 /mcp 之前，避免被旧 /mcp 遮蔽）
     # ------------------------------------------------------------------
     try:
         from stable_agent.gateway.mcp_gateway import MCPGateway
@@ -139,6 +118,27 @@ def create_app() -> FastAPI:
     except Exception as e:
         import logging
         logging.getLogger("uvicorn").warning(f"V5 MCP Gateway mount skipped: {e}")
+
+    # ------------------------------------------------------------------
+    # 4. 挂载 MCP Server（/mcp 前缀）
+    # ------------------------------------------------------------------
+    mcp_server: MCPServer = MCPServer(
+        decision_engine=decision_engine,
+        budget_manager=budget_manager,
+        memory_router=memory_router,
+        evaluator=evaluator,
+        bad_case_manager=bad_case_manager,
+        workflow_engine=workflow_engine,
+        event_bus=event_bus,
+        mcp_tools=mcp_tools,
+    )
+    app.mount("/mcp", mcp_server.app)
+
+    # ------------------------------------------------------------------
+    # 5. 挂载 Dashboard（/dashboard 前缀）
+    # ------------------------------------------------------------------
+    dashboard: Dashboard = Dashboard(event_bus, orchestrator=orchestrator)
+    dashboard.mount_to(app, prefix="/dashboard")
 
     # ------------------------------------------------------------------
     # 6. 配置静态文件和模板

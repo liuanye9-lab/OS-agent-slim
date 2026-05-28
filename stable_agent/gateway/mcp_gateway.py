@@ -102,36 +102,30 @@ class MCPGateway:
         app: FastAPI = FastAPI(title="StableAgent MCP Gateway")
 
         @app.post("/mcp")
-        async def mcp_post(request: Request) -> JSONResponse:
+        async def mcp_post(req: Request) -> JSONResponse:
             """JSON-RPC 2.0 端点。
 
             接收 JSON-RPC 请求，路由到 JSONRPCHandler 处理，
             返回 JSON-RPC 响应。
 
-            Args:
-                request: FastAPI Request 对象。
-
             Returns:
                 JSONResponse 包含 JSON-RPC 2.0 响应。
             """
-            body: dict[str, Any] = await request.json()
+            body: dict[str, Any] = await req.json()
             result: dict[str, Any] = self.jsonrpc.handle(body)
             return JSONResponse(content=result)
 
         @app.get("/mcp")
-        async def mcp_get(request: Request) -> "StreamingResponse | JSONResponse":
+        async def mcp_get(req: Request) -> StreamingResponse | JSONResponse:
             """SSE 事件流端点。
 
             按 run_id 筛选事件流。客户端通过 EventSource 连接，接收
             实时推送的工具调用事件。
 
-            Args:
-                request: FastAPI Request 对象，需包含 ?run_id=xxx 查询参数。
-
             Returns:
                 StreamingResponse（SSE 格式）或 JSONResponse（参数错误）。
             """
-            run_id: str = request.query_params.get("run_id", "")
+            run_id: str = req.query_params.get("run_id", "")
             if not run_id:
                 return JSONResponse(
                     content={"error": "run_id required for SSE"},
