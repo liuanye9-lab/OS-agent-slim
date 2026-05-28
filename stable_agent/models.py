@@ -654,3 +654,39 @@ class EvalCase:
     source: str = "manual"
     created_from_bad_case_id: Optional[str] = None
     task_type: TaskType = TaskType.GENERAL_QA
+
+
+# ============================================================================
+# V5 新增数据类
+# ============================================================================
+
+
+@dataclass
+class StableAgentToolResult:
+    """统一 MCP 工具返回结构。
+
+    所有 V5 工具均返回此对象，确保工具调用结果的一致性和可追踪性。
+
+    Attributes:
+        ok: 工具执行是否成功。
+        run_id: 所属运行 ID。
+        tool_call_id: 工具调用 ID。
+        tool_name: 工具完整名称（如 "stableagent.memory.retrieve"）。
+        data: 结构化返回数据。
+        plain_text: 人类可读的纯文本结果。
+        warnings: 执行过程中产生的警告信息列表。
+        next_actions: 建议的后续操作列表。
+        trace_url: 可选的 trace 查看 URL。
+        is_error: 是否为错误返回。
+    """
+
+    ok: bool = False
+    run_id: str = ""
+    tool_call_id: str = ""
+    tool_name: str = ""
+    data: dict = field(default_factory=dict)
+    plain_text: str = ""
+    warnings: list[str] = field(default_factory=list)
+    next_actions: list[str] = field(default_factory=list)
+    trace_url: str = ""
+    is_error: bool = False

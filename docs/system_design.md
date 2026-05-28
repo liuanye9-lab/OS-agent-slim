@@ -1,9 +1,9 @@
-# StableAgent OS V4 — 系统设计文档
+# StableAgent OS V5 — 统一 MCP Gateway 系统设计
 
 > **作者**: Bob (Architect)
-> **版本**: 0.1.0
+> **版本**: 0.2.0
 > **日期**: 2025-05-28
-> **依赖**: V3 代码库（37 Python 文件，14 测试文件，348/348 测试通过）
+> **依赖**: V4 代码库（553/553 测试通过）
 
 ---
 
@@ -15,632 +15,252 @@
 
 | 挑战 | 分析 | 策略 |
 |------|------|------|
-| **自迭代闭环** | 12 步优化循环需要可靠的状态管理，不能丢失中间产物 | 复用 V3 的 `WorkflowState` 模式，新增 `SkillOptWorkflowState` 枚举 + JSONL 持久化 |
-| **Patch 安全性** | 错误的 skill 编辑可能破坏已有有效规则 | 严格 Validation Gate：`candidate_score > baseline_score` 才通过，平分不通过 |
-| **Skill vs Memory 边界** | 两者都是"学习到的知识"，但粒度不同 | Skill 是全局规则文档（自然语言），Memory 是细粒度事实条目。保持两套存储独立 |
-| **文本编辑精度** | 自然语言文档的 `replace/insert_after/delete` 需要准确定位 | 使用标记锚点（如 `## Section Name`）+ 行号偏移，不需要 diff 算法 |
-| **反馈信号稀疏** | 用户不总会给 explicit feedback | `user_feedback` 默认 `unknown`；显性信号（accepted/rejected）优先于评分推断 |
-| **与 V3 系统的融合** | 不能破坏 348 个已有测试 | 所有 V3 模块采用"追加模式"修改：新增枚举值、新增方法、新增可选参数；不删除/重命名任何现有接口 |
+| **工具端点分散** | V4 工具分布在 3 处：`/mcp/api/*`（7 个）、`/mcp/tools/list+call`（12 个 V3 工具）、`/mcp/tools/skillopt/*`（10 个 V4 工具），无统一命名空间 | 新建 `gateway/` 子包，14 个统一 namespaced 工具通过 JSON-RPC 2.0 单一入口 `POST /mcp` 暴露 |
+| **Dashboard 事件广播** | V4 Dashboard 通过全局 WebSocket `/ws/events` 广播所有事件，客户端无法按 `run_id` 筛选 | 新建 `observation/` 子包，提供 `GET /mcp` SSE + `/ws/runs/{run_id}` WebSocket，按 `run_id` 分发 |
+| **Trace 事件缺失** | V4 EventBus 有 `start_span/end_span` 但工具调用不自动发布 trace 事件（`mcp.call.received` → `tool.completed`） | ToolRouter 在每次工具调用时发布完整 trace 事件链，包含 `run_id/tool_call_id/trace_id/span_id/parent_span_id/avatar_state` |
+| **审批流程分散** | V4 审批通过 REST API 单独调用，不与工具调用链路耦合 | ToolRouter 内嵌审批检查：调用前检查风险等级，高风险自动创建 `ApprovalRequest` 并阻塞等待 |
+| **像素机器人状态** | V4 无非确定性状态展示 | 新增 `AVATAR_STATE_MAP`（13 种状态），trace 事件携带 `avatar_state` 字段 |
+| **与 V4 系统的融合** | 不能破坏 553 个已有测试 | 旧 REST 端点保留为 legacy fallback；所有新代码放在 `gateway/` 和 `observation/` 子包中；不删除/重命名现有接口 |
 
 #### 1.2 框架与库选择
 
 | 组件 | 选择 | 理由 |
 |------|------|------|
-| 数据模型 | `@dataclass` | 与 V3 一致，零额外依赖 |
-| 持久化 | SQLite (sqlite3) | 复用 V3 `StableAgentStorage`，新增表 |
-| 事件系统 | 现有 `EventBus` | 新增 `skillopt.*` 事件类型 |
-| 状态机 | 现有 `WorkflowEngine` 模式 | 新增 `SKILL_OPTIMIZATION_WORKFLOW` 状态组 |
-| 文档存储 | 文件系统 (.md + .jsonl) | Skill 文档天然是 Markdown，版本历史用 JSONL |
-| 测试框架 | pytest（与 V3 一致） | 全部测试放在 `tests/` 目录 |
+| 协议层 | JSON-RPC 2.0 | MCP 标准协议，单一 `POST /mcp` 入口 |
+| SSE 流 | `sse-starlette` | FastAPI 原生 SSE 支持，按 `run_id` 过滤事件 |
+| WebSocket | FastAPI WebSocket | 与 V4 一致，新增 per-run 实例 |
+| 数据模型 | `@dataclass` | 与 V4 一致，零额外依赖 |
+| 事件系统 | 现有 `EventBus` | 扩展 `EventStream`（按 run_id 过滤的包装器） |
+| 审批 | 现有 `ApprovalManager` + `SecurityPolicy` | ToolRouter 内嵌调用，不改变审批模型 |
+| 测试 | pytest + pytest-asyncio | 与 V4 一致 |
 
 #### 1.3 架构模式
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                  StableAgentOrchestrator              │
-│  ┌──────────────┐  ┌─────────────────────────────┐   │
-│  │ V3 Workflow  │  │ V4 SkillOptimizationEngine  │   │
-│  │   Engine     │  │  (新增，独立引擎)             │   │
-│  └──────────────┘  └──────────────┬──────────────┘   │
-│                                    │                   │
-│         ┌──────────────────────────┼───────┐          │
-│         │     skill_optimizer/     │intent/│          │
-│         │  17 个模块组成优化流水线   │4 模块 │          │
-│         └──────────────────────────┴───────┘          │
-│                                    │                   │
-│         ┌──────────────────────────┼───────┐          │
-│         │  mcp/skillopt_tools.py   │ evals/│          │
-│         │  10 个 MCP 工具           │3 模块 │          │
-│         └──────────────────────────┴───────┘          │
-└──────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      web/server.py                          │
+│  ┌──────────────────────┐  ┌───────────────────────────┐    │
+│  │ POST /mcp (JSON-RPC) │  │ GET /mcp (SSE)            │    │
+│  │ GET /ws/runs/{id}    │  │ /runs/{id} (Dashboard)    │    │
+│  └──────────┬───────────┘  └─────────────┬─────────────┘    │
+│             │                            │                   │
+│  ┌──────────▼────────────────────────────▼─────────────┐    │
+│  │               MCPGateway (gateway/mcp_gateway.py)    │    │
+│  │  ┌──────────────┐ ┌──────────────┐ ┌─────────────┐  │    │
+│  │  │JSONRPCHandler│ │  ToolRouter  │ │RespAdapter  │  │    │
+│  │  │(jsonrpc)     │ │  (routing+   │ │(result→MCP) │  │    │
+│  │  │              │ │   approval+  │ │             │  │    │
+│  │  │              │ │   events)    │ │             │  │    │
+│  │  └──────────────┘ └──────┬───────┘ └─────────────┘  │    │
+│  │                          │                            │    │
+│  │  ┌───────────────────────▼────────────────────────┐  │    │
+│  │  │      UnifiedToolRegistry (14 tools)            │  │    │
+│  │  │  stableagent.task.* / context.* / memory.*     │  │    │
+│  │  │  rag.* / eval.* / badcase.* / skillopt.*      │  │    │
+│  │  │  trace.* / approval.*                          │  │    │
+│  │  └────────────────────────────────────────────────┘  │    │
+│  └──────────────────────────────────────────────────────┘    │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │          observation/ (per-run 事件基础设施)          │    │
+│  │  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ │    │
+│  │  │  RunStore    │ │ EventStream  │ │DashboardSync │ │    │
+│  │  │(run+events)  │ │(per-run bus) │ │(per-run WS)  │ │    │
+│  │  └──────────────┘ └──────────────┘ └──────────────┘ │    │
+│  └──────────────────────────────────────────────────────┘    │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │  V4 遗留 REST (保留为 fallback)                       │    │
+│  │  /mcp/api/*  + /mcp/tools/* + /mcp/tools/skillopt/*  │    │
+│  └──────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 **核心设计决策**：
-- SkillOptimizationEngine 是独立引擎，不嵌入 WorkflowEngine 内部
-- 通过 `skillopt.*` 事件与现有 EventBus 通信
-- 通过 `StableAgentStorage` 新增表进行持久化
-- Skill 文档版本管理通过文件系统 + JSONL 实现
+- `MCPGateway` 是 V5 的统一入口，组合 JSONRPCHandler + ToolRouter + ResponseAdapter
+- `UnifiedToolRegistry` 注册全部 14 个 namespaced 工具，替代 V4 的 `MCPToolRegistry` + `SkillOptMCPTools`
+- `ToolRouter` 负责路由→审批检查→事件发布→工具调用→结果适配 全流程
+- `observation/` 提供按 `run_id` 的事件分发能力，Dashboard 从全局广播升级到 per-run 订阅
+- 旧 REST 端点保留在 `/mcp/` 下，标记为 legacy，不删除
 
 ---
 
 ### 2. File List
 
-#### 2.1 新增目录与文件（48 个文件）
+#### 2.1 新增目录与文件（15 个文件）
 
 ```
 stable_agent/
-  skill_optimizer/                    # 新建包
-    __init__.py                       # 包初始化，导出核心类
-    models.py                         # V4 数据模型（SkillDocument, RolloutTrajectory, SkillEdit, SkillPatch, ValidationResult）
-    skill_document_store.py           # SkillDocumentStore — 文档 CRUD + 版本管理
-    rollout_collector.py              # RolloutCollector — 轨迹收集与成功/失败拆分
-    trajectory_sampler.py             # TrajectorySampler — 轨迹抽样策略
-    intent_signal_extractor.py        # IntentSignalExtractor — 意图信号提取
-    success_failure_analyzer.py       # SuccessFailureAnalyzer — 成功/失败模式分析
-    patch_proposer.py                 # PatchProposer — 单个编辑提案生成
-    patch_merger.py                   # PatchMerger — 编辑合并与冲突解决
-    patch_ranker.py                   # PatchRanker — 编辑排序
-    patch_applier.py                  # PatchApplier — 编辑应用
-    validation_gate.py                # ValidationGate — 验证门
-    rejected_edit_buffer.py           # RejectedEditBuffer — 被拒绝编辑缓冲
-    slow_meta_update.py               # SlowMetaUpdater — 慢速元更新
-    optimizer_memory.py               # OptimizerMemory — 优化器自省记忆
-    skill_exporter.py                 # SkillExporter — 导出 best_skill.md
-    skill_optimization_engine.py      # SkillOptimizationEngine — 优化总控
-    prompt_contracts.py               # PromptContracts — Skill prompt 结构契约
+  gateway/                              # 新建包 — 统一 MCP Gateway
+    __init__.py                         # 包初始化，导出 MCPGateway
+    run_context.py                      # RunContext 数据类
+    tool_schemas.py                     # 14 个工具的 JSON Schema 定义
+    unified_tool_registry.py            # UnifiedToolRegistry — 工具注册/调用
+    tool_router.py                      # ToolRouter — 路由+审批+事件发布
+    response_adapter.py                 # ResponseAdapter — StableAgentToolResult→MCP content
+    jsonrpc_handler.py                  # JSONRPCHandler — JSON-RPC 2.0 消息处理
+    mcp_gateway.py                      # MCPGateway — 主入口，组合所有组件
 
-  intent/                             # 新建包
-    __init__.py                       # 包初始化
-    user_intent_profile.py            # UserIntentProfile — 用户意图画像
-    intent_taxonomy.py                # IntentTaxonomy — 意图分类体系
-    intent_alignment_evaluator.py     # IntentAlignmentEvaluator — 意图对齐评估
-    preference_drift_detector.py      # PreferenceDriftDetector — 偏好漂移检测
-
-  evals/                              # 新建包
-    __init__.py                       # 包初始化
-    validation_dataset.py             # ValidationDataset — 验证数据集管理
-    regression_suite.py               # RegressionSuite — 回归测试套件
-    rubric_judge.py                   # RubricJudge — 评分准则判定
-
-  mcp/
-    skillopt_tools.py                 # 新建：10 个 SkillOpt MCP 工具
-
-skills/                               # 新建数据目录（项目根）
-  initial_skill.md                    # 初始技能文档模板
-  best_skill.md                       # 当前最优技能文档（导出目标）
-
-data/                                 # 扩展已有目录
-  rollouts/                           # 新建：轨迹数据目录
-  validation/                         # 新建：验证数据目录
-  eval_results/                       # 新建：评估结果目录
-  skill_versions/                     # 新建：skill 版本 JSONL
-  rejected_edits.jsonl                # 新建：被拒绝编辑日志
-  optimizer_meta_skill.md             # 新建：优化器元技能
-
-tests/                                # 扩展已有目录
-  test_skill_document_store.py        # 新建
-  test_patch_applier.py               # 新建
-  test_validation_gate.py             # 新建
-  test_rejected_edit_buffer.py        # 新建
-  test_skill_optimization_engine.py   # 新建
-  test_intent_signal_extractor.py     # 新建
-  test_mcp_skillopt_tools.py          # 新建
-  test_dashboard_skillopt_events.py   # 新建
+  observation/                          # 新建包 — per-run 事件基础设施
+    __init__.py                         # 包初始化，导出 RunStore, EventStream, DashboardSync
+    run_store.py                        # RunStore — 按 run_id 存储 RunRecord + events
+    event_stream.py                     # EventStream — 按 run_id 分发事件的 EventBus 扩展
+    dashboard_sync.py                   # DashboardSync — WebSocket 按 run_id 管理连接
 ```
 
-#### 2.2 修改的现有文件（8 个）
+#### 2.2 修改文件（4 个）
 
 ```
-stable_agent/models.py                # 新增 V4 枚举 + 数据类
-stable_agent/orchestrator.py          # 实例化 SkillOptimizationEngine
-stable_agent/workflow_state_machine.py # 新增 SKILL_OPTIMIZATION_WORKFLOW 状态
-stable_agent/trace_event_bus.py       # 新增 skillopt.* 事件类型
-stable_agent/dashboard.py             # 新增 6 个 skill 学习状态解释 + 端点
-stable_agent/mcp_tools.py             # 新增 10 个 skillopt 工具注册
-stable_agent/context_budget_manager.py # 新增 skill_token_size 等预算参数
-stable_agent/eval_and_bad_case.py     # BadCase → RolloutTrajectory 自动转化
+stable_agent/
+  models.py                             # 新增: StableAgentToolResult, RunContext, AVATAR_STATE_MAP
+  trace_event_bus.py                    # 新增: EventBus.publish_trace_event(), EventBus.get_events_by_run()
+  dashboard.py                          # 修改: 使用 observation/ 的 per-run WebSocket
+web/
+  server.py                             # 修改: 挂载 MCPGateway，新增 SSE + per-run WS 路由
+```
+
+#### 2.3 新增测试文件（6 个）
+
+```
+tests/
+  test_mcp_gateway.py                   # MCPGateway 端到端测试
+  test_unified_tool_registry.py         # UnifiedToolRegistry 注册/调用测试
+  test_dashboard_sync.py                # DashboardSync per-run WebSocket 测试
+  test_mcp_response_adapter.py          # ResponseAdapter 转换测试
+  test_tool_trace_integration.py        # Trace 事件链路集成测试
+  test_approval_mcp_flow.py             # 审批 MCP 流程测试
 ```
 
 ---
 
 ### 3. Data Structures and Interfaces
 
-#### 3.1 V4 新增枚举
+#### 3.1 V5 新增数据模型 (models.py)
 
 ```python
-class SkillDocumentStatus(StrEnum):
-    DRAFT = "draft"
-    CURRENT = "current"
-    BEST = "best"
-    REJECTED = "rejected"
-    ARCHIVED = "archived"
+@dataclass
+class RunContext:
+    """MCP 工具调用上下文。
+    
+    每次工具调用携带完整的追踪信息，由 MCPGateway 在入口处生成。
+    """
+    run_id: str                              # 运行 ID (UUID)
+    tool_call_id: str                        # 工具调用 ID (UUID)
+    trace_id: str                            # Trace ID (UUID)
+    span_id: str                             # Span ID (UUID)
+    parent_span_id: Optional[str] = None     # 父 Span ID
+    avatar_state: str = "listening"          # 像素机器人状态
 
-class SkillEditOp(StrEnum):
-    APPEND = "append"
-    INSERT_AFTER = "insert_after"
-    REPLACE = "replace"
-    DELETE = "delete"
 
-class SkillEditSourceType(StrEnum):
-    FAILURE = "failure"
-    SUCCESS = "success"
-    SLOW_UPDATE = "slow_update"
-    MANUAL = "manual"
-
-class SkillOptWorkflowState(StrEnum):
-    """Skill 优化工作流 11 个状态"""
-    IDLE = "skillopt_idle"
-    COLLECTING = "skillopt_collecting"
-    SCORING = "skillopt_scoring"
-    SPLITTING = "skillopt_splitting"
-    REFLECTING = "skillopt_reflecting"
-    PATCHING = "skillopt_patching"
-    MERGING = "skillopt_merging"
-    RANKING = "skillopt_ranking"
-    APPLYING = "skillopt_applying"
-    VALIDATING = "skillopt_validating"
-    EXPORTING = "skillopt_exporting"
-
-class UserFeedbackType(StrEnum):
-    ACCEPTED = "accepted"
-    EDITED = "edited"
-    REJECTED = "rejected"
-    UNKNOWN = "unknown"
+@dataclass  
+class StableAgentToolResult:
+    """统一工具返回结果。
+    
+    所有 14 个 unified tool 的 handler 必须返回此类型。
+    ResponseAdapter 负责将其转换为 MCP content 格式。
+    """
+    ok: bool = True
+    run_id: str = ""
+    tool_call_id: str = ""
+    tool_name: str = ""
+    data: Optional[Any] = None
+    plain_text: str = ""
+    warnings: list[str] = field(default_factory=list)
+    next_actions: list[str] = field(default_factory=list)
+    trace_url: str = ""
+    is_error: bool = False
 ```
 
-#### 3.2 新增 SpanType 条目
+#### 3.2 AVATAR_STATE_MAP
 
-在现有 `SpanType(StrEnum)` 中追加：
 ```python
-SKILLOPT_COLLECT = "skillopt_collect"
-SKILLOPT_ANALYZE = "skillopt_analyze"
-SKILLOPT_PATCH = "skillopt_patch"
-SKILLOPT_VALIDATE = "skillopt_validate"
-SKILLOPT_EXPORT = "skillopt_export"
+AVATAR_STATE_MAP: dict[str, str] = {
+    "listening": "👂 监听中",
+    "thinking": "🤔 思考中",
+    "calculating": "🧮 计算中",
+    "reading_notes": "📖 查阅笔记",
+    "searching_books": "🔍 搜索知识库",
+    "safety_check": "🛡️ 安全检查",
+    "waiting_approval": "✋ 等待审批",
+    "working": "⚙️ 工作中",
+    "grading": "📊 评分中",
+    "writing_rule": "✍️ 编写规则",
+    "examining": "🔬 检查中",
+    "archiving": "📦 归档中",
+    "sweating": "😰 遇到困难",
+    "celebrating": "🎉 完成庆祝",
+}
 ```
 
-#### 3.3 类图
+#### 3.3 Class Diagram
 
-```mermaid
-classDiagram
-    %% ── 数据模型 ──
-    class SkillDocument {
-        +str id
-        +int version
-        +str content
-        +float created_at
-        +float updated_at
-        +str source
-        +float score
-        +int parent_version
-        +str status
-    }
+See `docs/class-diagram.mermaid` for the full Mermaid class diagram.
 
-    class RolloutTrajectory {
-        +str id
-        +str task_input
-        +str task_type
-        +str user_intent_guess
-        +dict context_pack
-        +str skill_version
-        +str model_output
-        +str user_feedback
-        +dict eval_scores
-        +list~dict~ trace_events
-        +dict token_usage
-        +float created_at
-    }
-
-    class SkillEdit {
-        +str id
-        +str op
-        +str target
-        +str content
-        +str reason
-        +str source_type
-        +int support_count
-        +str risk_level
-        +float created_at
-    }
-
-    class SkillPatch {
-        +str id
-        +list~SkillEdit~ edits
-        +str reasoning
-        +list~str~ source_rollout_ids
-        +float estimated_impact
-        +float estimated_risk
-        +float created_at
-    }
-
-    class ValidationResult {
-        +str candidate_skill_version
-        +str baseline_skill_version
-        +float baseline_score
-        +float candidate_score
-        +bool passed
-        +float score_delta
-        +list~str~ regression_cases
-        +str explanation
-    }
-
-    class UserIntentProfile {
-        +str user_id
-        +dict explicit_intents
-        +dict implicit_intents
-        +dict output_preferences
-        +list~str~ rejection_signals
-        +list~str~ correction_signals
-        +float updated_at
-    }
-
-    class IntentTaxonomy {
-        +list~str~ categories
-        +dict category_rules
-    }
-
-    class RejectedEdit {
-        +str id
-        +str edit_content
-        +str reason
-        +float rejected_at
-        +int rejection_count
-    }
-
-    %% ── 服务类 ──
-    class SkillDocumentStore {
-        -str _base_path
-        -str _versions_path
-        +load_current_skill() SkillDocument
-        +load_best_skill() SkillDocument
-        +save_candidate_skill(SkillDocument) str
-        +promote_to_current(str) SkillDocument
-        +promote_to_best(str) SkillDocument
-        +list_versions() list~SkillDocument~
-        +diff_versions(str, str) str
-    }
-
-    class RolloutCollector {
-        -str _storage_dir
-        -SkillDocumentStore _skill_store
-        +collect_from_workflow_run(dict) RolloutTrajectory
-        +save_rollout(RolloutTrajectory) None
-        +load_recent_rollouts(int) list~RolloutTrajectory~
-        +split_success_failure(list~RolloutTrajectory~) tuple
-    }
-
-    class IntentSignalExtractor {
-        -IntentTaxonomy _taxonomy
-        +extract(RolloutTrajectory) dict
-    }
-
-    class SuccessFailureAnalyzer {
-        -IntentSignalExtractor _intent_extractor
-        +analyze_failures(list~RolloutTrajectory~, SkillDocument, int) SkillPatch
-        +analyze_successes(list~RolloutTrajectory~, SkillDocument, int) SkillPatch
-    }
-
-    class PatchMerger {
-        -RejectedEditBuffer _rejected_buffer
-        +merge(SkillPatch, SkillPatch, RejectedEditBuffer) SkillPatch
-        -_deduplicate(list~SkillEdit~) list~SkillEdit~
-        -_resolve_conflicts(list~SkillEdit~) list~SkillEdit~
-    }
-
-    class PatchRanker {
-        +rank(SkillPatch, int) SkillPatch
-        -_score_edit(SkillEdit) float
-    }
-
-    class PatchApplier {
-        +apply(SkillDocument, SkillPatch) SkillDocument
-        -_apply_append(str, SkillEdit) str
-        -_apply_insert_after(str, SkillEdit) str
-        -_apply_replace(str, SkillEdit) str
-        -_apply_delete(str, SkillEdit) str
-        -_protect_slow_update_region(str) tuple~str,str,str~
-    }
-
-    class ValidationGate {
-        -ValidationDataset _dataset
-        -RegressionSuite _regression
-        -RubricJudge _judge
-        +validate(SkillDocument, SkillDocument, list) ValidationResult
-        -_run_eval(SkillDocument, list) float
-        -_check_regressions(SkillDocument, SkillDocument, list) list~str~
-    }
-
-    class RejectedEditBuffer {
-        -str _buffer_path
-        +add_rejected(SkillEdit, str) None
-        +load_recent(int) list~RejectedEdit~
-        +is_similar_to_rejected(SkillEdit) bool
-    }
-
-    class SlowMetaUpdater {
-        -OptimizerMemory _memory
-        +generate_slow_update(SkillDocument, SkillDocument, list) SkillPatch
-    }
-
-    class OptimizerMemory {
-        -str _meta_skill_path
-        +load_meta_skill() str
-        +update_meta_skill(str) None
-    }
-
-    class SkillExporter {
-        -SkillDocumentStore _store
-        +export_best_skill() str
-        +export_version(str) str
-    }
-
-    class SkillOptimizationEngine {
-        -SkillDocumentStore _doc_store
-        -RolloutCollector _collector
-        -SuccessFailureAnalyzer _analyzer
-        -PatchMerger _merger
-        -PatchRanker _ranker
-        -PatchApplier _applier
-        -ValidationGate _gate
-        -RejectedEditBuffer _rej_buffer
-        -SlowMetaUpdater _slow_updater
-        -OptimizerMemory _memory
-        -SkillExporter _exporter
-        -EventBus _event_bus
-        +run_epoch(int, int, int) ValidationResult
-        +run_step(list~RolloutTrajectory~, int) ValidationResult
-        +export_best_skill() str
-        +get_status() dict
-    }
-
-    class PromptContracts {
-        +str SKILL_STRUCTURE_CONTRACT
-        +str SLOW_UPDATE_MARKER_START
-        +str SLOW_UPDATE_MARKER_END
-        +validate_structure(str) bool
-    }
-
-    %% ── V3 修改类 ──
-    class StableAgentOrchestrator {
-        +SkillOptimizationEngine skill_opt_engine
-        +run_skill_optimization_epoch() ValidationResult
-    }
-
-    class WorkflowEngine {
-        +_step_skillopt_collecting(Workflow) None
-        +_step_skillopt_scoring(Workflow) None
-    }
-
-    %% ── 关系 ──
-    SkillOptimizationEngine *-- SkillDocumentStore
-    SkillOptimizationEngine *-- RolloutCollector
-    SkillOptimizationEngine *-- SuccessFailureAnalyzer
-    SkillOptimizationEngine *-- PatchMerger
-    SkillOptimizationEngine *-- PatchRanker
-    SkillOptimizationEngine *-- PatchApplier
-    SkillOptimizationEngine *-- ValidationGate
-    SkillOptimizationEngine *-- RejectedEditBuffer
-    SkillOptimizationEngine *-- SlowMetaUpdater
-    SkillOptimizationEngine *-- OptimizerMemory
-    SkillOptimizationEngine *-- SkillExporter
-
-    RolloutCollector --> SkillDocumentStore : reads skill version
-    SuccessFailureAnalyzer --> IntentSignalExtractor : uses
-    PatchMerger --> RejectedEditBuffer : checks
-    SlowMetaUpdater --> OptimizerMemory : reads/writes
-
-    SkillPatch "1" --> "*" SkillEdit : contains
-    SkillDocumentStore --> SkillDocument : manages
-    RolloutCollector --> RolloutTrajectory : collects
-    ValidationGate --> ValidationResult : produces
-    ValidationGate --> ValidationDataset : uses
-    ValidationGate --> RegressionSuite : uses
-    ValidationGate --> RubricJudge : uses
-
-    StableAgentOrchestrator --> SkillOptimizationEngine : owns
-    StableAgentOrchestrator --> WorkflowEngine : owns
-    SkillOptimizationEngine --> "EventBus" EventBus : publishes events
-```
+Key relationships:
+- **MCPGateway** `--*` JSONRPCHandler, ToolRouter, ResponseAdapter
+- **MCPGateway** `-->` RunStore, EventStream (observation)
+- **ToolRouter** `-->` UnifiedToolRegistry, SecurityPolicy, ApprovalManager, EventBus
+- **UnifiedToolRegistry** `-->` 14 tool handlers
+- **JSONRPCHandler** `-->` ToolRouter (for tools/call)
+- **ResponseAdapter** `..>` StableAgentToolResult (converts to MCP content)
+- **DashboardSync** `-->` EventStream, RunStore
+- **EventStream** `-->` EventBus (wraps with run_id filtering)
 
 ---
 
 ### 4. Program Call Flow
 
-#### 4.1 核心优化循环（12 步完整流程）
+See `docs/sequence-diagram.mermaid` for the full sequence diagrams.
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant Orch as StableAgentOrchestrator
-    participant Engine as SkillOptimizationEngine
-    participant Collector as RolloutCollector
-    participant Extractor as IntentSignalExtractor
-    participant Analyzer as SuccessFailureAnalyzer
-    participant Merger as PatchMerger
-    participant Ranker as PatchRanker
-    participant Applier as PatchApplier
-    participant Gate as ValidationGate
-    participant Buffer as RejectedEditBuffer
-    participant Store as SkillDocumentStore
-    participant Bus as EventBus
-    participant Exporter as SkillExporter
+#### 4.1 JSON-RPC tools/call 完整流程
 
-    User->>Orch: run_skill_optimization_epoch()
-    Orch->>Engine: run_epoch(max_rollouts=40, reflection_batch_size=8, edit_budget=4)
-
-    rect rgb(240, 248, 255)
-        Note over Engine,Collector: Step 1-2: Rollout & Score
-        Engine->>Bus: publish(skillopt:epoch_started)
-        Engine->>Collector: load_recent_rollouts(40)
-        Collector-->>Engine: list[RolloutTrajectory]
-
-        loop For each trajectory
-            Engine->>Extractor: extract(trajectory)
-            Extractor-->>Engine: intent_signals dict
-            Engine->>Engine: compute overall_score
-        end
-    end
-
-    rect rgb(255, 248, 240)
-        Note over Engine,Analyzer: Step 3-4: Split & Reflect
-        Engine->>Collector: split_success_failure(trajectories)
-        Collector-->>Engine: (successes, failures)
-
-        Engine->>Store: load_current_skill()
-        Store-->>Engine: current_skill: SkillDocument
-
-        Engine->>Analyzer: analyze_failures(failures, current_skill, edit_budget)
-        Analyzer-->>Engine: failure_patch: SkillPatch
-
-        Engine->>Analyzer: analyze_successes(successes, current_skill, edit_budget)
-        Analyzer-->>Engine: success_patch: SkillPatch
-    end
-
-    rect rgb(240, 255, 240)
-        Note over Engine,Ranker: Step 5-7: Patch → Merge → Rank
-        Engine->>Buffer: load_recent(50)
-        Buffer-->>Engine: rejected_edits
-
-        Engine->>Merger: merge(failure_patch, success_patch, rejected_buffer)
-        Merger-->>Engine: merged_patch: SkillPatch
-
-        Engine->>Ranker: rank(merged_patch, edit_budget)
-        Ranker-->>Engine: ranked_patch: SkillPatch (bounded)
-    end
-
-    rect rgb(255, 240, 255)
-        Note over Engine,Gate: Step 8-9: Apply & Validate
-        Engine->>Applier: apply(current_skill, ranked_patch)
-        Applier-->>Engine: candidate_skill: SkillDocument
-
-        Engine->>Store: save_candidate_skill(candidate_skill)
-        Store-->>Engine: candidate_version_id
-
-        Engine->>Gate: validate(current_skill, candidate_skill, validation_cases)
-        Gate-->>Engine: result: ValidationResult
-
-        alt result.passed == true
-            Engine->>Store: promote_to_current(candidate_version_id)
-            Engine->>Bus: publish(skillopt:skill_updated)
-            Engine->>Bus: publish(skillopt:validation_passed)
-
-            opt candidate_score significantly better
-                Engine->>Store: promote_to_best(candidate_version_id)
-                Engine->>Exporter: export_best_skill()
-                Exporter-->>Engine: best_skill_path
-            end
-        else result.passed == false
-            Engine->>Buffer: add_rejected(each edit in ranked_patch)
-            Engine->>Bus: publish(skillopt:validation_failed)
-        end
-    end
-
-    rect rgb(248, 248, 248)
-        Note over Engine,Exporter: Step 10-11-12: Buffer → Slow Update → Export
-        Engine->>Buffer: add_rejected(edits)
-        Buffer-->>Engine: ok
-
-        opt epoch_count % 10 == 0
-            Engine->>Engine: generate_slow_update()
-        end
-
-        Engine->>Bus: publish(skillopt:epoch_completed)
-    end
-
-    Engine-->>Orch: ValidationResult
-    Orch-->>User: optimization result summary
+```
+Client POST /mcp {"method":"tools/call","params":{"name":"stableagent.task.process","arguments":{...}}}
+  → JSONRPCHandler.parse_message()
+    → 验证 JSON-RPC 2.0 格式
+    → 路由到 tools/call
+  → JSONRPCHandler.handle_tools_call()
+    → 生成 RunContext (run_id, tool_call_id, trace_id, span_id)
+    → EventBus.publish_trace_event("mcp.call.received", ctx)
+  → ToolRouter.route(ctx, tool_name, arguments)
+    → UnifiedToolRegistry.lookup(tool_name)
+    → SecurityPolicy.classify_command() / should_require_approval()
+    → if approval_required:
+        → ApprovalManager.create_request()
+        → EventBus.publish_trace_event("tool.risk_checked", ctx, "high")
+        → EventBus.publish_trace_event("tool.waiting_approval", ctx)
+        → raise ApprovalRequiredException (客户端轮询 approval.respond)
+    → EventBus.publish_trace_event("tool.started", ctx, avatar_state="working")
+    → handler(ctx, arguments) → StableAgentToolResult
+    → EventBus.publish_trace_event("tool.completed", ctx, result)
+  → ResponseAdapter.to_mcp_content(result)
+    → [{"type":"text","text":"..."}, {"type":"resource","resource":{...}}]
+  → JSON-RPC 2.0 Response {"jsonrpc":"2.0","id":1,"result":{...}}
 ```
 
-#### 4.2 Validation Gate 详细流程
+#### 4.2 SSE 事件流
 
-```mermaid
-sequenceDiagram
-    participant Engine as SkillOptimizationEngine
-    participant Gate as ValidationGate
-    participant Dataset as ValidationDataset
-    participant Regression as RegressionSuite
-    participant Judge as RubricJudge
-    participant LLM as MockLLMClient
-
-    Engine->>Gate: validate(baseline_skill, candidate_skill, validation_cases)
-    Gate->>Dataset: load_cases()
-    Dataset-->>Gate: cases: list
-
-    Note over Gate: Phase 1 — Baseline
-    loop For each case
-        Gate->>LLM: execute(case, baseline_skill)
-        LLM-->>Gate: baseline_output
-        Gate->>Judge: score(baseline_output, case.expected)
-        Judge-->>Gate: baseline_score_i
-    end
-    Gate->>Gate: baseline_score = avg(all baseline_score_i)
-
-    Note over Gate: Phase 2 — Candidate
-    loop For each case
-        Gate->>LLM: execute(case, candidate_skill)
-        LLM-->>Gate: candidate_output
-        Gate->>Judge: score(candidate_output, case.expected)
-        Judge-->>Gate: candidate_score_i
-    end
-    Gate->>Gate: candidate_score = avg(all candidate_score_i)
-
-    Note over Gate: Phase 3 — Regression Check
-    Gate->>Regression: check_regressions(baseline_skill, candidate_skill, cases)
-    Regression-->>Gate: regression_cases: list[str]
-
-    Gate->>Gate: passed = (candidate_score > baseline_score) AND (no critical regressions)
-
-    Gate-->>Engine: ValidationResult(passed, score_delta, regression_cases, explanation)
 ```
-
-#### 4.3 Patch Apply 详细流程
-
-```mermaid
-sequenceDiagram
-    participant Applier as PatchApplier
-    participant Skill as SkillDocument
-    participant Contracts as PromptContracts
-
-    Applier->>Contracts: validate_structure(skill.content)
-    Contracts-->>Applier: is_valid: bool
-
-    Applier->>Skill: get content
-    Skill-->>Applier: full_text: str
-
-    Applier->>Applier: _protect_slow_update_region(full_text)
-    Note over Applier: Extract prefix, slow_update_body, suffix
-
-    loop For each edit in patch.edits (ordered)
-        alt edit.op == "append"
-            Applier->>Applier: _apply_append(text, edit)
-        else edit.op == "insert_after"
-            Applier->>Applier: _apply_insert_after(text, edit)
-        else edit.op == "replace"
-            Applier->>Applier: _apply_replace(text, edit)
-        else edit.op == "delete"
-            Applier->>Applier: _apply_delete(text, edit)
-        end
-    end
-
-    Applier->>Applier: Reassemble: prefix + slow_update_body + suffix
-    Applier->>Skill: new SkillDocument with modified content
-
-    Applier-->>Engine: updated SkillDocument
+Client GET /mcp?run_id=xxx (Accept: text/event-stream)
+  → MCPGateway.handle_sse(run_id)
+    → EventStream.subscribe(run_id, callback)
+    → 循环: yield SSE events (按 run_id 过滤)
+    → 事件格式: event: <type>\ndata: <json>\n\n
 ```
 
 ---
 
 ### 5. Anything UNCLEAR
 
-| # | 不确定项 | 假设 | 需要确认 |
-|---|---------|------|---------|
-| 1 | **LLM 调用**：分析成功/失败模式时，`SuccessFailureAnalyzer` 是否需要真实 LLM 调用？ | 假设使用 `MockLLMClient` 的规则匹配模式（与 V3 一致），分析逻辑基于启发式规则 + 模板匹配，不依赖外部 LLM API | 团队可后续替换为真实 LLM 调用 |
-| 2 | **Validation Dataset 来源**：验证用例从哪里来？ | 假设从 `data/validation/` 目录加载 JSONL 文件，初始包含从 V3 BadCase 自动转换的用例 + 手动编写的基础用例 | 初始至少需要 5 条验证用例 |
-| 3 | **Slow/Meta Update 触发频率**：多久触发一次慢速更新？ | 假设每 10 个 epoch 触发一次（`epoch_count % 10 == 0`），可配置 | 频率可调 |
-| 4 | **Skill 文档初始内容**：`initial_skill.md` 包含什么？ | 假设包含基础的用户偏好模板：输出格式偏好、常用工具链、常见任务模式等占位内容 | 由 Product Manager 或用户填充初始内容 |
-| 5 | **Dashboard 像素动物**：狐狸形象的 6 个学习状态如何与现有动物（猫头鹰？）共存？ | 假设新增独立区域显示狐狸，6 个状态分别对应：思考中/学习中/实验中/验证中/已更新/导出中 | 需要 UI 设计师确认 |
-| 6 | **user_intent_profile 的 user_id**：意图画像如何关联用户？ | 假设使用单用户模式（`user_id = "default"`），未来可扩展多用户 | 当前为单用户场景 |
-| 7 | **BadCase → RolloutTrajectory 转化**：哪些字段自动填充？ | 假设 `task_input`←`BadCase.input_context`，`model_output`←`BadCase.output`，`eval_scores`←`BadCase.evaluation` 的各维度，`user_feedback`←`"unknown"` | 确认 user_feedback 默认值 |
+| 问题 | 假设 |
+|------|------|
+| **旧 REST 端点保留方式** | 保留在现有路径 `/mcp/api/*`、`/mcp/tools/*`、`/mcp/tools/skillopt/*`，添加 `Deprecation` warning header；不迁移到 `/mcp/legacy/` |
+| **ApprovalRequiredException 阻塞机制** | V5 中审批为异步模式：ToolRouter 抛出异常 → JSONRPCHandler 返回 `{"error":{"code":-32000,"message":"approval_required"}}` → 客户端调用 `stableagent.approval.respond` → ToolRouter 重放原始调用 |
+| **SSE 连接管理** | 每个 run_id 最多一个 SSE 连接；新连接替换旧连接；run 完成后 SSE 自动关闭并发送 `event: done` |
+| **RunContext 生成时机** | 在 JSONRPCHandler.handle_tools_call() 中生成，不依赖外部传入（客户端可选传 run_id 用于关联） |
+| **ToolRouter 审批的 SecurityPolicy 重用** | 直接调用现有 `SecurityPolicy.classify_command()` 和 `should_require_approval()`，14 个工具中只有 `stableagent.task.process` 可能触发审批（涉及命令执行） |
+| **像素机器人 Avatar 前端渲染** | AVATAR_STATE_MAP 定义在 models.py 中，Dashboard 前端通过 trace 事件的 `avatar_state` 字段切换动画；不在此次后端范围内 |
+| **TraceStorage 与 RunStore 的关系** | RunStore 是内存中按 run_id 的 RunRecord + events 索引；TraceStorage 是 JSONL 持久化层。RunStore 在启动时从 TraceStorage 回放，运行时内存优先 |
 
 ---
 
@@ -649,239 +269,165 @@ sequenceDiagram
 ### 6. Required Packages
 
 ```
-- 无新增第三方依赖（全使用 Python 标准库 + V3 已有依赖）
-- 已有依赖（V3 requirements.txt）：
-  - fastapi (Dashboard)
-  - uvicorn (Web server)
-  - pytest (测试)
-  - pytest-cov (覆盖率)
+- fastapi>=0.109.0          # Web 框架（已有）
+- uvicorn[standard]>=0.27.0 # ASGI 服务器（已有）
+- websockets>=12.0           # WebSocket 支持（已有）
+- sse-starlette>=2.0.0       # V5 新增: SSE (Server-Sent Events) 支持
+- pytest>=8.0                # 测试框架（已有）
+- pytest-asyncio>=0.23.0     # 异步测试（已有）
 ```
 
 ### 7. Task List (ordered by dependency)
 
-#### T01: 项目基础设施 + V4 数据模型
+---
 
-- **Task ID**: T01
-- **Task Name**: 项目基础设施与 V4 数据模型
-- **Source Files**:
+#### T01 — 项目基础设施 + 数据层 + 观察者基础设施
 
-  新建文件:
-  - `stable_agent/skill_optimizer/__init__.py`
-  - `stable_agent/skill_optimizer/models.py`
-  - `stable_agent/skill_optimizer/prompt_contracts.py`
-  - `stable_agent/intent/__init__.py`
-  - `stable_agent/evals/__init__.py`
-  - `stable_agent/mcp/skillopt_tools.py` (骨架)
+| 属性 | 值 |
+|------|-----|
+| **Task ID** | T01 |
+| **Priority** | P0（阻塞所有后续任务） |
+| **Dependencies** | 无 |
 
-  修改文件:
-  - `stable_agent/models.py` — 新增 V4 枚举 + 5 个数据类
-  - `stable_agent/trace_event_bus.py` — SpanType 新增 5 个 skillopt 条目
+**Source Files（7 个）：**
 
-  数据目录:
-  - `skills/initial_skill.md`
-  - `data/rollouts/` (目录)
-  - `data/validation/` (目录)
-  - `data/eval_results/` (目录)
-  - `data/skill_versions/` (目录)
+```
+stable_agent/models.py                        [MODIFY] 新增 StableAgentToolResult, RunContext, AVATAR_STATE_MAP
+stable_agent/gateway/__init__.py              [NEW] 包初始化，导出 MCPGateway
+stable_agent/gateway/run_context.py           [NEW] RunContext 数据类（run_id, tool_call_id, trace_id, span_id, parent_span_id, avatar_state）
+stable_agent/gateway/tool_schemas.py          [NEW] 14 个统一工具的 input/output JSON Schema 定义
+stable_agent/observation/__init__.py          [NEW] 包初始化，导出 RunStore, EventStream, DashboardSync
+stable_agent/observation/run_store.py         [NEW] RunStore — 按 run_id 存储 RunRecord + events，支持从 TraceStorage 回放
+stable_agent/observation/event_stream.py      [NEW] EventStream — 按 run_id 分发事件的 EventBus 包装器，支持 subscribe/unsubscribe
+```
 
-- **Dependencies**: 无（首个任务）
-- **Priority**: P0
+**关键集成点：**
+- `RunContext` 使用 `uuid.uuid4()` 生成 ID
+- `StableAgentToolResult` 的 `data` 字段类型为 `Optional[Any]`
+- `tool_schemas.py` 中 14 个 schema 需与现有 V4 handler 的输入参数精确对齐
+- `RunStore` 在 `__init__` 时接收可选的 `TraceStorage` 引用用于回放
+- `EventStream` 包装现有 `EventBus`，在 `_on_event` 回调中按 `run_id` 路由
 
-#### T02: Skill 文档核心 + Patch 引擎
+---
 
-- **Task ID**: T02
-- **Task Name**: Skill 文档存储与 Patch 编辑管线
-- **Source Files**:
+#### T02 — Gateway 核心组件
 
-  新建文件:
-  - `stable_agent/skill_optimizer/skill_document_store.py`
-  - `stable_agent/skill_optimizer/patch_applier.py`
-  - `stable_agent/skill_optimizer/patch_merger.py`
-  - `stable_agent/skill_optimizer/patch_ranker.py`
-  - `stable_agent/skill_optimizer/rejected_edit_buffer.py`
+| 属性 | 值 |
+|------|-----|
+| **Task ID** | T02 |
+| **Priority** | P0 |
+| **Dependencies** | T01（需要 RunContext, tool_schemas, RunStore, EventStream） |
 
-- **Dependencies**: T01（依赖 V4 数据模型 + PromptContracts）
-- **Priority**: P0
+**Source Files（5 个）：**
 
-#### T03: 轨迹收集 + 意图信号 + 分析管线
+```
+stable_agent/gateway/unified_tool_registry.py   [NEW] UnifiedToolRegistry — 注册 14 个 namespaced 工具，提供 lookup/call
+stable_agent/gateway/tool_router.py             [NEW] ToolRouter — 路由查找 + 审批检查（SecurityPolicy+ApprovalManager）+ 事件发布（trace 链）
+stable_agent/gateway/response_adapter.py        [NEW] ResponseAdapter — StableAgentToolResult → MCP content [{type, text}] 转换
+stable_agent/gateway/jsonrpc_handler.py         [NEW] JSONRPCHandler — JSON-RPC 2.0 消息解析（initialize/tools/list/tools/call），生成 RunContext
+stable_agent/gateway/mcp_gateway.py             [NEW] MCPGateway — 主入口类，持有 ToolRouter+JSONRPCHandler+ResponseAdapter+RunStore+EventStream
+```
 
-- **Task ID**: T03
-- **Task Name**: 轨迹收集、意图提取与分析引擎
-- **Source Files**:
+**关键集成点：**
+- `UnifiedToolRegistry` 的工具 handler 签名统一为 `(ctx: RunContext, arguments: dict) -> StableAgentToolResult`
+- `ToolRouter` 持有 `SecurityPolicy` 和 `ApprovalManager` 引用（构造函数注入）
+- `ToolRouter.route()` 的 trace 事件链：`mcp.call.received` → `tool.risk_checked` → `tool.started` → (`tool.progress`*) → `tool.completed/failed`
+- `JSONRPCHandler` 严格遵循 JSON-RPC 2.0 规范：`{"jsonrpc":"2.0","id":...,"method":"...","params":{...}}`
+- `MCPGateway` 构造函数接收所有 V4 核心模块引用（Orchestrator, EventBus, SecurityPolicy, ApprovalManager）
+- 审批阻塞机制：`ToolRouter` 检测到需要审批时发布 `approval.required` 事件 + 创建 `ApprovalRequest`，返回 `{"error":{"code":-32000,"message":"approval_required","data":{"request_id":"..."}}}`
 
-  新建文件:
-  - `stable_agent/skill_optimizer/rollout_collector.py`
-  - `stable_agent/skill_optimizer/trajectory_sampler.py`
-  - `stable_agent/skill_optimizer/intent_signal_extractor.py`
-  - `stable_agent/skill_optimizer/success_failure_analyzer.py`
-  - `stable_agent/skill_optimizer/patch_proposer.py`
-  - `stable_agent/intent/intent_taxonomy.py`
-  - `stable_agent/intent/user_intent_profile.py`
-  - `stable_agent/intent/intent_alignment_evaluator.py`
-  - `stable_agent/intent/preference_drift_detector.py`
+---
 
-- **Dependencies**: T01 + T02（依赖 SkillDocumentStore 和 SkillPatch）
-- **Priority**: P0
+#### T03 — Dashboard V5 升级 + 服务集成
 
-#### T04: 验证门 + 优化引擎 + 慢速更新 + 导出
+| 属性 | 值 |
+|------|-----|
+| **Task ID** | T03 |
+| **Priority** | P0 |
+| **Dependencies** | T01, T02（需要 observation 包 + MCPGateway） |
 
-- **Task ID**: T04
-- **Task Name**: 验证门、优化总控引擎与慢速更新
-- **Source Files**:
+**Source Files（4 个）：**
 
-  新建文件:
-  - `stable_agent/evals/validation_dataset.py`
-  - `stable_agent/evals/regression_suite.py`
-  - `stable_agent/evals/rubric_judge.py`
-  - `stable_agent/skill_optimizer/validation_gate.py`
-  - `stable_agent/skill_optimizer/optimizer_memory.py`
-  - `stable_agent/skill_optimizer/slow_meta_update.py`
-  - `stable_agent/skill_optimizer/skill_exporter.py`
-  - `stable_agent/skill_optimizer/skill_optimization_engine.py`
+```
+stable_agent/observation/dashboard_sync.py     [NEW] DashboardSync — WebSocket 按 run_id 管理连接（/ws/runs/{run_id}），订阅 EventStream
+stable_agent/dashboard.py                      [MODIFY] 新增 per-run WebSocket 端点 + /runs/{run_id} 页面路由 + 保留旧 /ws/events 兼容
+stable_agent/trace_event_bus.py                [MODIFY] EventBus 新增 publish_trace_event() + get_events_by_run()；现有接口不变
+web/server.py                                  [MODIFY] 挂载 MCPGateway（POST /mcp, GET /mcp SSE），注册 /ws/runs/{run_id}，保留旧路由
+```
 
-- **Dependencies**: T02 + T03（依赖所有前面模块）
-- **Priority**: P0
+**关键集成点：**
+- `DashboardSync` 构造函数接收 `EventStream` 引用
+- `web/server.py` 中 MCPGateway 挂载方式：直接在 FastAPI app 上注册路由（不 mount 子应用，因为需要访问 `request` 上下文）
+- `GET /mcp` SSE 端点：`MCPGateway.handle_sse(request, run_id)` 返回 `StreamingResponse`
+- `publish_trace_event()` 封装 `EventBus.publish()` ，自动注入 `run_id/tool_call_id/trace_id/span_id/parent_span_id/avatar_state` 到 payload
+- `get_events_by_run()` 从 RunStore 查询 events 列表
+- Dashboard 新增 `/runs/{run_id}` 路由渲染 per-run 页面
+- 旧 `/ws/events`（全局广播）保留但标记 deprecated，推荐使用 `/ws/runs/{run_id}`
 
-#### T05: V3 系统融合 + MCP 工具 + Dashboard + 测试
+---
 
-- **Task ID**: T05
-- **Task Name**: 与 V3 系统全面融合、MCP 工具、Dashboard 与全量测试
-- **Source Files**:
+#### T04 — V5 测试套件
 
-  修改文件:
-  - `stable_agent/orchestrator.py` — 实例化 SkillOptimizationEngine，新增 `run_skill_optimization_epoch()`
-  - `stable_agent/workflow_state_machine.py` — 新增 11 个 SKILL_OPTIMIZATION_WORKFLOW 状态 + 处理方法
-  - `stable_agent/trace_event_bus.py` — 新增 12 个 skillopt.* 事件类型映射
-  - `stable_agent/dashboard.py` — 新增 6 个狐狸学习状态解释 + `/api/skillopt/status` 端点
-  - `stable_agent/mcp/skillopt_tools.py` — 实现 10 个工具 handler
-  - `stable_agent/mcp_tools.py` — 注册 skillopt 工具到 MCPToolRegistry
-  - `stable_agent/context_budget_manager.py` — 新增 skill 相关预算参数
-  - `stable_agent/eval_and_bad_case.py` — BadCase → RolloutTrajectory 自动转化方法
+| 属性 | 值 |
+|------|-----|
+| **Task ID** | T04 |
+| **Priority** | P1 |
+| **Dependencies** | T01, T02, T03（需要所有 V5 代码完成） |
 
-  新建文件:
-  - `tests/test_skill_document_store.py`
-  - `tests/test_patch_applier.py`
-  - `tests/test_validation_gate.py`
-  - `tests/test_rejected_edit_buffer.py`
-  - `tests/test_skill_optimization_engine.py`
-  - `tests/test_intent_signal_extractor.py`
-  - `tests/test_mcp_skillopt_tools.py`
-  - `tests/test_dashboard_skillopt_events.py`
+**Source Files（6 个）：**
 
-- **Dependencies**: T01 + T02 + T03 + T04（依赖所有 V4 模块）
-- **Priority**: P0
+```
+tests/test_mcp_gateway.py                  [NEW] MCPGateway 端到端测试：initialize/tools/list/tools/call 完整 JSON-RPC 流程
+tests/test_unified_tool_registry.py        [NEW] UnifiedToolRegistry 注册验证（14 个工具名）+ 调用测试（mock handler）
+tests/test_dashboard_sync.py               [NEW] DashboardSync per-run WebSocket 连接/订阅/断开测试
+tests/test_mcp_response_adapter.py         [NEW] ResponseAdapter 转换测试：StableAgentToolResult → MCP content 各种场景
+tests/test_tool_trace_integration.py       [NEW] Trace 事件链路集成测试：验证 6 种事件顺序 + run_id 正确传递
+tests/test_approval_mcp_flow.py            [NEW] 审批 MCP 流程测试：approval_required → approval.respond → 重放
+```
+
+**关键集成点：**
+- 所有测试使用 `pytest` + `pytest-asyncio`
+- `test_mcp_gateway.py` 使用 `fastapi.testclient.TestClient` 模拟 HTTP 请求
+- `test_dashboard_sync.py` 使用 `fastapi.testclient.TestClient` 的 WebSocket 测试能力
+- 测试不依赖真实 LLM 调用（全部 mock）
+- 确保 553 个已有测试仍然通过（`pytest tests/ -x` 全量回归）
 
 ---
 
 ### 8. Shared Knowledge
 
 ```
-跨模块约定（供 Engineer 参考）：
-
-1. **时间戳**: 所有时间使用 `time.time()` float 格式（与 V3 一致）
-2. **ID 生成**: 使用 `uuid.uuid4().hex[:12]`（与 V3 一致）
-3. **文件编码**: 所有文件 UTF-8
-4. **错误处理**: 所有 I/O 操作用 try/except 包裹，不阻断主流程
-5. **事件命名**: skillopt 事件遵循 `skillopt:<action>` 格式
-6. **Skill 文档格式**: Markdown，用 `## Section Name` 做锚点
-7. **SLOW_UPDATE 标记**: `<!-- SLOW_UPDATE_START -->` / `<!-- SLOW_UPDATE_END -->`
-8. **评分阈值**: success >= 0.8, failure < 0.65, rollout 中间区域忽略（模糊地带）
-9. **编辑预算**: edit_budget 默认 4，即每轮最多修改 4 处
-10. **Validation Gate 规则**: candidate > baseline 才通过（严格大于），平分不通过
-11. **关键任务回归**: 如果任何一条验证用例的 candidate_score < baseline_score 超过 0.1，即使平均分更高也不通过
-12. **Memory ≠ Skill**: Memory 系统（MemoryItem/MemoryBank）与 Skill 系统（SkillDocument/SkillDocumentStore）完全独立，不交叉读写
-13. **测试要求**: 所有测试必须可独立运行，不依赖外部服务
-14. **向后兼容**: 不删除/重命名任何 V3 公开 API；所有修改为"追加模式"
+- 所有 JSON-RPC 2.0 响应格式: {"jsonrpc":"2.0","id":<id>,"result":{...}} 或 {"jsonrpc":"2.0","id":<id>,"error":{"code":<int>,"message":"..."}}
+- JSON-RPC error codes: -32700(parse error), -32600(invalid request), -32601(method not found), -32602(invalid params), -32000(approval required)
+- 所有工具 handler 签名: (ctx: RunContext, arguments: dict) -> StableAgentToolResult
+- Trace 事件类型: mcp.call.received, tool.risk_checked, tool.started, tool.progress, tool.completed, tool.failed
+- Trace 事件 payload 必须包含: run_id, tool_call_id, trace_id, span_id, parent_span_id, avatar_state
+- StableAgentToolResult 的 plain_text 使用中文大白话
+- 所有 UUID 使用 uuid.uuid4() 生成
+- 时间戳统一使用 time.time() float 格式
+- 旧 REST 端点保留，添加 "X-Deprecated: true" response header
+- 新增代码禁止使用裸 except（必须 except Exception）
+- 所有新增模块必须有完整的 __init__.py 导出
+- SSE 事件格式: "event: <type>\ndata: <json>\n\n"
 ```
-
----
 
 ### 9. Task Dependency Graph
 
 ```mermaid
 graph TD
-    T01["T01: 项目基础设施 + V4 数据模型<br/>models.py, __init__.py, prompt_contracts.py<br/>SpanType entries, initial_skill.md"]
-    T02["T02: Skill 文档核心 + Patch 引擎<br/>skill_document_store, patch_applier<br/>patch_merger, patch_ranker<br/>rejected_edit_buffer"]
-    T03["T03: 轨迹收集 + 意图信号 + 分析管线<br/>rollout_collector, trajectory_sampler<br/>intent_signal_extractor<br/>success_failure_analyzer, patch_proposer<br/>intent/ package (4 files)"]
-    T04["T04: 验证门 + 优化引擎 + 慢速更新<br/>validation_gate, validation_dataset<br/>regression_suite, rubric_judge<br/>optimizer_memory, slow_meta_update<br/>skill_exporter, skill_optimization_engine"]
-    T05["T05: V3 融合 + MCP + Dashboard + 测试<br/>orchestrator, workflow_state_machine<br/>trace_event_bus, dashboard<br/>mcp_tools, skillopt_tools<br/>context_budget_manager, eval_and_bad_case<br/>8 个测试文件"]
+    T01["T01: 基础设施 + 数据层<br/>7 files<br/>models.py + gateway init + observation init"]
+    T02["T02: Gateway 核心组件<br/>5 files<br/>registry + router + adapter + jsonrpc + gateway"]
+    T03["T03: Dashboard V5 + 集成<br/>4 files<br/>dashboard_sync + dashboard + trace + server"]
+    T04["T04: V5 测试套件<br/>6 files<br/>6 个新测试文件"]
 
     T01 --> T02
     T01 --> T03
     T02 --> T03
     T02 --> T04
     T03 --> T04
-    T01 --> T05
-    T02 --> T05
-    T03 --> T05
-    T04 --> T05
-```
 
----
-
-## 附录 A: V3 集成影响分析
-
-### A.1 各 V3 文件修改摘要
-
-| 文件 | 修改类型 | 修改内容 | 风险等级 |
-|------|---------|---------|---------|
-| `models.py` | 追加 | 新增 5 个枚举 + 5 个数据类 + SpanType 追加 | 低 |
-| `orchestrator.py` | 追加 | `__init__` 中实例化 SkillOptimizationEngine，新增 1 个方法 | 低 |
-| `workflow_state_machine.py` | 追加 | 新增 WorkflowState 枚举值 + 11 个 `_step_skillopt_*` 方法 | 中 |
-| `trace_event_bus.py` | 追加 | 新增 12 个事件类型映射 + SpanType 追加 | 低 |
-| `dashboard.py` | 追加 | 新增 6 个解释条目 + 1 个端点 | 低 |
-| `mcp_tools.py` | 追加 | `_register_all()` 中注册 10 个新工具 | 低 |
-| `context_budget_manager.py` | 追加 | 新增 skill_token_size 等可选参数 | 低 |
-| `eval_and_bad_case.py` | 追加 | BadCaseManager 新增 `convert_to_rollout()` 方法 | 低 |
-
-### A.2 已有测试影响分析
-
-| 测试文件 | 影响 | 说明 |
-|---------|------|------|
-| `test_models.py` | 需追加 | 新增 V4 枚举 + 数据类的测试用例 |
-| `test_p0_core.py` | 不变 | 核心模块 API 未变化 |
-| `test_p1_extensions.py` | 不变 | 扩展模块 API 未变化 |
-| `test_p2_and_orchestrator.py` | 需追加 | 新增 SkillOptimizationEngine 实例化验证 |
-| 其他 10 个测试 | 不变 | 未被 V4 改动影响 |
-
-### A.3 最终验收标准对照
-
-| # | 标准 | 验证方式 | 对应任务 |
-|---|------|---------|---------|
-| 1 | 原有 348 测试继续通过 | `pytest tests/ -k "not test_skill"` | T05 |
-| 2 | 新增 SkillOpt 模块测试通过 | `pytest tests/test_skill* tests/test_intent* tests/test_mcp_skillopt* tests/test_dashboard_skillopt*` | T05 |
-| 3 | 能生成 3 种 skill 文档 | `SkillDocumentStore` 单元测试 | T02 |
-| 4 | 能从 rollouts 拆分成功/失败 | `RolloutCollector.split_success_failure` 测试 | T03 |
-| 5 | 能提出 bounded patch | `SuccessFailureAnalyzer` + `PatchRanker` 测试 | T03 |
-| 6 | 能合并、排序、应用 patch | `PatchMerger` + `PatchRanker` + `PatchApplier` 测试 | T02 |
-| 7 | 能通过 Validation Gate 接受/拒绝 | `ValidationGate` 测试 | T04 |
-| 8 | 拒绝编辑写入 rejected buffer | `RejectedEditBuffer` 测试 | T02 |
-| 9 | 能导出 best_skill.md | `SkillExporter` 测试 | T04 |
-| 10 | Dashboard 显示 skill 学习过程 | `test_dashboard_skillopt_events.py` | T05 |
-| 11 | MCP 暴露 skill optimization tools | `test_mcp_skillopt_tools.py` | T05 |
-| 12 | 所有 skill 版本可 diff/回滚/审计 | `SkillDocumentStore.diff_versions` 测试 | T02 |
-
----
-
-## 附录 B: 实施顺序建议
-
-### Phase 对应关系
-
-| 原 6 Phase | 对应任务 | 并行可能性 |
-|-----------|---------|-----------|
-| Phase 1: Skill 文档与 Patch 基础 | T01 + T02 | T01 先，T02 紧随 |
-| Phase 2: Rollout 与意图信号 | T03（rollout 部分） | 与 T02 末段并行 |
-| Phase 3: Patch 生成与合并 | T03（分析部分） | 依赖 T02 |
-| Phase 4: 验证门与优化总控 | T04 | 依赖 T02 + T03 |
-| Phase 5: 融合现有系统 | T05（融合部分） | 依赖 T01-T04 |
-| Phase 6: 测试与文档 | T05（测试部分） | 与融合同步进行 |
-
-### 建议执行顺序
-
-```
-Day 1: T01 (数据模型 + 基础设施)
-Day 2: T02 (文档存储 + Patch 引擎)
-Day 3: T03 (轨迹收集 + 意图 + 分析)  [可与 T02 部分重叠]
-Day 4: T04 (验证门 + 引擎 + 导出)
-Day 5-6: T05 (融合 + MCP + Dashboard + 全量测试)
+    style T01 fill:#e1f5fe
+    style T02 fill:#fff3e0
+    style T03 fill:#e8f5e9
+    style T04 fill:#fce4ec
 ```

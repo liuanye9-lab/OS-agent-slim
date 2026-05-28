@@ -1,299 +1,215 @@
 classDiagram
-    %% ── 数据模型 ──
-    class SkillDocument {
-        +str id
-        +int version
-        +str content
-        +float created_at
-        +float updated_at
-        +str source
-        +float score
-        +int parent_version
+    %% ── V5 新增数据模型 (models.py) ──
+    class RunContext {
+        +str run_id
+        +str tool_call_id
+        +str trace_id
+        +str span_id
+        +Optional~str~ parent_span_id
+        +str avatar_state
+    }
+
+    class StableAgentToolResult {
+        +bool ok
+        +str run_id
+        +str tool_call_id
+        +str tool_name
+        +Optional~Any~ data
+        +str plain_text
+        +list~str~ warnings
+        +list~str~ next_actions
+        +str trace_url
+        +bool is_error
+    }
+
+    %% ── V4 已有模型 (复用) ──
+    class Event {
+        +float timestamp
+        +str type
+        +dict payload
+    }
+
+    class TraceSpan {
+        +str span_id
+        +str run_id
+        +Optional~str~ parent_span_id
+        +str name
+        +str type
         +str status
+        +float started_at
+        +Optional~float~ ended_at
+        +Optional~int~ latency_ms
     }
 
-    class RolloutTrajectory {
-        +str id
-        +str task_input
-        +str task_type
-        +str user_intent_guess
-        +dict context_pack
-        +str skill_version
-        +str model_output
-        +str user_feedback
-        +dict eval_scores
-        +list~dict~ trace_events
-        +dict token_usage
-        +float created_at
-    }
-
-    class SkillEdit {
-        +str id
-        +str op
-        +str target
-        +str content
+    class ApprovalRequest {
+        +str request_id
+        +str run_id
+        +str action
+        +str risk
         +str reason
-        +str source_type
-        +int support_count
-        +str risk_level
+        +str status
         +float created_at
+        +Optional~float~ resolved_at
     }
 
-    class SkillPatch {
-        +str id
-        +list~SkillEdit~ edits
-        +str reasoning
-        +list~str~ source_rollout_ids
-        +float estimated_impact
-        +float estimated_risk
-        +float created_at
+    class RunRecord {
+        +str run_id
+        +str user_task
+        +TaskType task_type
+        +str status
+        +float started_at
+        +Optional~float~ ended_at
     }
 
-    class ValidationResult {
-        +str candidate_skill_version
-        +str baseline_skill_version
-        +float baseline_score
-        +float candidate_score
-        +bool passed
-        +float score_delta
-        +list~str~ regression_cases
-        +str explanation
+    %% ── gateway/ 包 ──
+    class MCPGateway {
+        -ToolRouter _router
+        -JSONRPCHandler _jsonrpc
+        -ResponseAdapter _adapter
+        -RunStore _run_store
+        -EventStream _event_stream
+        +handle_jsonrpc(request) StreamingResponse
+        +handle_sse(run_id) StreamingResponse
+        +handle_ws(run_id, websocket) None
     }
 
-    class UserIntentProfile {
-        +str user_id
-        +dict explicit_intents
-        +dict implicit_intents
-        +dict output_preferences
-        +list~str~ rejection_signals
-        +list~str~ correction_signals
-        +float updated_at
+    class JSONRPCHandler {
+        -ToolRouter _router
+        -RunStore _run_store
+        +parse_message(body) dict
+        +handle_initialize(params) dict
+        +handle_tools_list() dict
+        +handle_tools_call(params) dict
+        -_generate_run_context() RunContext
     }
 
-    class IntentTaxonomy {
-        +list~str~ categories
-        +dict category_rules
-    }
-
-    class RejectedEdit {
-        +str id
-        +str edit_content
-        +str reason
-        +float rejected_at
-        +int rejection_count
-    }
-
-    %% ── 服务类 ──
-    class SkillDocumentStore {
-        -str _base_path
-        -str _versions_path
-        +load_current_skill() SkillDocument
-        +load_best_skill() SkillDocument
-        +save_candidate_skill(SkillDocument) str
-        +promote_to_current(str) SkillDocument
-        +promote_to_best(str) SkillDocument
-        +list_versions() list~SkillDocument~
-        +diff_versions(str, str) str
-    }
-
-    class RolloutCollector {
-        -str _storage_dir
-        -SkillDocumentStore _skill_store
-        +collect_from_workflow_run(dict) RolloutTrajectory
-        +save_rollout(RolloutTrajectory) None
-        +load_recent_rollouts(int) list~RolloutTrajectory~
-        +split_success_failure(list~RolloutTrajectory~) tuple
-    }
-
-    class IntentSignalExtractor {
-        -IntentTaxonomy _taxonomy
-        +extract(RolloutTrajectory) dict
-    }
-
-    class SuccessFailureAnalyzer {
-        -IntentSignalExtractor _intent_extractor
-        +analyze_failures(list~RolloutTrajectory~, SkillDocument, int) SkillPatch
-        +analyze_successes(list~RolloutTrajectory~, SkillDocument, int) SkillPatch
-    }
-
-    class PatchMerger {
-        -RejectedEditBuffer _rejected_buffer
-        +merge(SkillPatch, SkillPatch, RejectedEditBuffer) SkillPatch
-        -_deduplicate(list~SkillEdit~) list~SkillEdit~
-        -_resolve_conflicts(list~SkillEdit~) list~SkillEdit~
-    }
-
-    class PatchRanker {
-        +rank(SkillPatch, int) SkillPatch
-        -_score_edit(SkillEdit) float
-    }
-
-    class PatchApplier {
-        +apply(SkillDocument, SkillPatch) SkillDocument
-        -_apply_append(str, SkillEdit) str
-        -_apply_insert_after(str, SkillEdit) str
-        -_apply_replace(str, SkillEdit) str
-        -_apply_delete(str, SkillEdit) str
-        -_protect_slow_update_region(str) tuple~str,str,str~
-    }
-
-    class ValidationGate {
-        -ValidationDataset _dataset
-        -RegressionSuite _regression
-        -RubricJudge _judge
-        +validate(SkillDocument, SkillDocument, list) ValidationResult
-        -_run_eval(SkillDocument, list) float
-        -_check_regressions(SkillDocument, SkillDocument, list) list~str~
-    }
-
-    class RejectedEditBuffer {
-        -str _buffer_path
-        +add_rejected(SkillEdit, str) None
-        +load_recent(int) list~RejectedEdit~
-        +is_similar_to_rejected(SkillEdit) bool
-    }
-
-    class SlowMetaUpdater {
-        -OptimizerMemory _memory
-        +generate_slow_update(SkillDocument, SkillDocument, list) SkillPatch
-    }
-
-    class OptimizerMemory {
-        -str _meta_skill_path
-        +load_meta_skill() str
-        +update_meta_skill(str) None
-    }
-
-    class SkillExporter {
-        -SkillDocumentStore _store
-        +export_best_skill() str
-        +export_version(str) str
-    }
-
-    class SkillOptimizationEngine {
-        -SkillDocumentStore _doc_store
-        -RolloutCollector _collector
-        -SuccessFailureAnalyzer _analyzer
-        -PatchMerger _merger
-        -PatchRanker _ranker
-        -PatchApplier _applier
-        -ValidationGate _gate
-        -RejectedEditBuffer _rej_buffer
-        -SlowMetaUpdater _slow_updater
-        -OptimizerMemory _memory
-        -SkillExporter _exporter
+    class ToolRouter {
+        -UnifiedToolRegistry _registry
+        -SecurityPolicy _security
+        -ApprovalManager _approval
         -EventBus _event_bus
-        +run_epoch(int, int, int) ValidationResult
-        +run_step(list~RolloutTrajectory~, int) ValidationResult
-        +export_best_skill() str
-        +get_status() dict
+        +route(ctx, tool_name, args) StableAgentToolResult
+        -_check_approval(ctx, tool_name, args) None
+        -_publish_trace(event_type, ctx, payload) None
     }
 
-    class PromptContracts {
-        +str SKILL_STRUCTURE_CONTRACT
-        +str SLOW_UPDATE_MARKER_START
-        +str SLOW_UPDATE_MARKER_END
-        +validate_structure(str) bool
+    class UnifiedToolRegistry {
+        -dict _tools
+        +register(name, handler, schema) None
+        +lookup(name) ToolHandler
+        +call(ctx, name, args) StableAgentToolResult
+        +list_tools() list
+        -_register_all() None
     }
 
-    class ValidationDataset {
-        -str _data_dir
-        +load_cases() list
-        +add_case(dict) None
-        +remove_case(str) None
+    class ResponseAdapter {
+        +to_mcp_content(result) list~dict~
+        +to_jsonrpc_error(code, message) dict
+        +to_jsonrpc_result(id, result) dict
     }
 
-    class RegressionSuite {
-        +check_regressions(SkillDocument, SkillDocument, list) list~str~
+    %% ── observation/ 包 ──
+    class RunStore {
+        -dict _runs
+        -dict _events
+        -TraceStorage _storage
+        +create_run(run_id, user_task) RunRecord
+        +get_run(run_id) Optional~RunRecord~
+        +add_event(run_id, event) None
+        +get_events(run_id, limit) list~Event~
+        +update_run_status(run_id, status) None
     }
 
-    class RubricJudge {
-        +score(str, str) float
+    class EventStream {
+        -EventBus _event_bus
+        -dict _subscriptions
+        +subscribe(run_id, callback) None
+        +unsubscribe(run_id, callback) None
+        +publish_to_run(run_id, event) None
+        -_on_event(event) None
     }
 
-    %% ── V3 修改类 ──
-    class StableAgentOrchestrator {
-        +SkillOptimizationEngine skill_opt_engine
-        +run_skill_optimization_epoch() ValidationResult
+    class DashboardSync {
+        -EventStream _event_stream
+        -RunStore _run_store
+        -dict _ws_connections
+        +connect(run_id, websocket) None
+        +disconnect(run_id, websocket) None
+        +broadcast_to_run(run_id, message) None
+        -_on_run_event(run_id, event) None
     }
 
-    class WorkflowEngine {
-        +_step_skillopt_collecting(Workflow) None
-        +_step_skillopt_scoring(Workflow) None
-    }
-
+    %% ── V4 已有模块 ──
     class EventBus {
-        +publish(Event) None
-        +subscribe(Callable) None
+        -list _listeners
+        -list _events
+        -dict _spans
+        +subscribe(listener) None
+        +unsubscribe(listener) None
+        +publish(event) None
+        +publish_trace_event(type, ctx, payload) None
+        +get_events_by_run(run_id) list
+        +start_span(run_id, name, type) TraceSpan
+        +end_span(span, status, payload) None
     }
 
-    %% ── 枚举 ──
-    class SkillDocumentStatus {
-        <<enumeration>>
-        DRAFT
-        CURRENT
-        BEST
-        REJECTED
-        ARCHIVED
+    class SecurityPolicy {
+        +classify_command(command) str
+        +classify_path(path) str
+        +should_require_approval(action, risk, command, path) bool
     }
 
-    class SkillEditOp {
-        <<enumeration>>
-        APPEND
-        INSERT_AFTER
-        REPLACE
-        DELETE
+    class ApprovalManager {
+        -dict _requests
+        +create_request(run_id, action, risk, reason) ApprovalRequest
+        +approve(request_id) ApprovalRequest
+        +reject(request_id, reason) ApprovalRequest
+        +list_pending() list
+        +has_pending_for_run(run_id) bool
     }
 
-    class SkillOptWorkflowState {
-        <<enumeration>>
-        IDLE
-        COLLECTING
-        SCORING
-        SPLITTING
-        REFLECTING
-        PATCHING
-        MERGING
-        RANKING
-        APPLYING
-        VALIDATING
-        EXPORTING
+    class TraceStorage {
+        +save_event(event) None
+        +load_events(limit) list
+        +save_span(span) None
+        +load_spans(run_id, limit) list
     }
 
-    %% ── 组合关系 ──
-    SkillOptimizationEngine *-- SkillDocumentStore
-    SkillOptimizationEngine *-- RolloutCollector
-    SkillOptimizationEngine *-- SuccessFailureAnalyzer
-    SkillOptimizationEngine *-- PatchMerger
-    SkillOptimizationEngine *-- PatchRanker
-    SkillOptimizationEngine *-- PatchApplier
-    SkillOptimizationEngine *-- ValidationGate
-    SkillOptimizationEngine *-- RejectedEditBuffer
-    SkillOptimizationEngine *-- SlowMetaUpdater
-    SkillOptimizationEngine *-- OptimizerMemory
-    SkillOptimizationEngine *-- SkillExporter
+    %% ── 关系 ──
+    MCPGateway *-- JSONRPCHandler : composes
+    MCPGateway *-- ToolRouter : composes
+    MCPGateway *-- ResponseAdapter : composes
+    MCPGateway --> RunStore : uses
+    MCPGateway --> EventStream : uses
 
-    ValidationGate *-- ValidationDataset
-    ValidationGate *-- RegressionSuite
-    ValidationGate *-- RubricJudge
+    JSONRPCHandler --> ToolRouter : delegates
+    JSONRPCHandler --> RunStore : creates runs
+    JSONRPCHandler ..> RunContext : generates
 
-    %% ── 依赖关系 ──
-    RolloutCollector --> SkillDocumentStore : reads skill version
-    SuccessFailureAnalyzer --> IntentSignalExtractor : uses
-    PatchMerger --> RejectedEditBuffer : checks
-    SlowMetaUpdater --> OptimizerMemory : reads/writes
-    SkillOptimizationEngine --> EventBus : publishes events
-    StableAgentOrchestrator --> SkillOptimizationEngine : owns
-    StableAgentOrchestrator --> WorkflowEngine : owns
+    ToolRouter *-- UnifiedToolRegistry : composes
+    ToolRouter --> SecurityPolicy : checks risk
+    ToolRouter --> ApprovalManager : creates approvals
+    ToolRouter --> EventBus : publishes traces
+    ToolRouter ..> StableAgentToolResult : returns
 
-    %% ── 数据包含关系 ──
-    SkillPatch "1" --> "*" SkillEdit : contains
-    SkillDocumentStore --> SkillDocument : manages
-    RolloutCollector --> RolloutTrajectory : collects
-    ValidationGate --> ValidationResult : produces
-    RejectedEditBuffer --> RejectedEdit : stores
-    IntentSignalExtractor --> IntentTaxonomy : uses
+    UnifiedToolRegistry ..> RunContext : receives
+    UnifiedToolRegistry ..> StableAgentToolResult : returns
 
-    %% ── 枚举使用 ──
-    SkillDocument --> SkillDocumentStatus : status
-    SkillEdit --> SkillEditOp : op
+    ResponseAdapter ..> StableAgentToolResult : converts
+
+    EventStream --> EventBus : wraps
+    EventStream ..> Event : filters by run_id
+
+    RunStore --> TraceStorage : persists
+    RunStore ..> RunRecord : manages
+    RunStore ..> Event : indexes
+
+    DashboardSync --> EventStream : subscribes
+    DashboardSync --> RunStore : queries
+
+    EventBus --> TraceStorage : persists via
+    EventBus ..> Event : publishes
+    EventBus ..> TraceSpan : manages
+
+    SecurityPolicy ..> ApprovalRequest : informs
+    ApprovalManager ..> ApprovalRequest : manages

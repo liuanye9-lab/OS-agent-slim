@@ -68,22 +68,27 @@ class Dashboard:
     订阅 EventBus 获取事件，通过 WebSocket 推送到浏览器客户端，
     同时提供 REST API 用于查询事件的大白话解释。
 
-    V3 新增：
-    - orchestrator: 可选依赖，用于查询 run trace/bad cases/approvals/summary。
-    - 5 个新 REST 端点
+V3 新增：
+- orchestrator: 可选依赖，用于查询 run trace/bad cases/approvals/summary。
+- 5 个新 REST 端点
 
-    Attributes:
-        event_bus: 事件总线实例（注入）。
-        app: FastAPI 应用实例。
-        _ws_clients: 已连接的 WebSocket 客户端列表。
-        orchestrator: 可选的 orchestrator 引用。
-    """
+V5 新增：
+- dashboard_sync: 可选的 DashboardSync 实例，管理 per-run WebSocket。
+
+Attributes:
+    event_bus: 事件总线实例（注入）。
+    app: FastAPI 应用实例。
+    _ws_clients: 已连接的 WebSocket 客户端列表。
+    orchestrator: 可选的 orchestrator 引用。
+    dashboard_sync: 可选的 DashboardSync 实例。
+"""
 
     def __init__(
         self,
         event_bus: EventBus,
         orchestrator: Optional[object] = None,
         skillopt_engine: Optional[object] = None,
+        dashboard_sync: Optional[object] = None,
     ) -> None:
         """初始化 Dashboard。
 
@@ -94,11 +99,13 @@ class Dashboard:
             event_bus: 事件总线实例。
             orchestrator: 可选的 StableAgentOrchestrator 引用（V3 新增）。
             skillopt_engine: 可选的 SkillOptimizationEngine 引用（V4 新增）。
+            dashboard_sync: 可选的 DashboardSync 实例（V5 新增）。
         """
         self.event_bus: EventBus = event_bus
         self._ws_clients: list[WebSocket] = []
         self.orchestrator: Optional[object] = orchestrator
         self.skillopt_engine: Optional[object] = skillopt_engine
+        self.dashboard_sync: Optional[object] = dashboard_sync
 
         # 创建 FastAPI app
         self.app: FastAPI = FastAPI(title="StableAgent Dashboard", version="0.2.0")
@@ -485,8 +492,19 @@ class Dashboard:
         使用 FastAPI 的 app.mount 机制将本 dashboard 作为子应用
         挂载到指定前缀路径下。
 
+        V5 新增：如果 dashboard_sync 已注入，同时挂载 per-run
+        WebSocket 子应用（/ws/runs/{run_id}）。
+
         Args:
             main_app: 主 FastAPI 应用实例。
             prefix: 挂载路径前缀，默认 "/dashboard"。
         """
         main_app.mount(prefix, self.app)
+
+        # V5: 挂载 per-run WebSocket
+        if self.dashboard_sync:
+            main_app.mount(
+                f"{prefix}",
+                self.dashboard_sync.create_app(),
+                name="dashboard_sync",
+            )

@@ -1,0 +1,162 @@
+"""MCPGateway — V5 统一 MCP Gateway 入口。
+
+封装所有 V5 组件（UnifiedToolRegistry、ToolRouter、ResponseAdapter、
+JSONRPCHandler、RunStore、EventStream），提供 FastAPI 路由注册。
+
+通过 create_fastapi_app() 创建包含 /mcp 端点的 FastAPI app：
+- POST /mcp: JSON-RPC 2.0 端点（initialize/tools/list/tools/call）
+- GET /mcp: SSE 事件流端点（按 run_id 筛选）
+
+用法::
+
+    gateway = MCPGateway(orchestrator)
+    app = gateway.create_fastapi_app()
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from typing import Any, TYPE_CHECKING
+
+from stable_agent.gateway.unified_tool_registry import UnifiedToolRegistry
+from stable_agent.gateway.tool_router import ToolRouter
+from stable_agent.gateway.response_adapter import ResponseAdapter
+from stable_agent.gateway.jsonrpc_handler import JSONRPCHandler
+from stable_agent.observation.run_store import RunStore
+from stable_agent.observation.event_stream import EventStream
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+
+
+class MCPGateway:
+    """V5 统一 MCP Gateway 入口。
+
+    封装所有 V5 组件，提供 FastAPI 路由注册。自动从 orchestrator
+    获取 security_policy、approval_manager、event_bus。
+    自动创建 RunStore 和 EventStream。
+
+    Attributes:
+        run_store: RunStore 实例。
+        event_stream: EventStream 实例。
+        registry: UnifiedToolRegistry 实例。
+        router: ToolRouter 实例。
+        adapter: ResponseAdapter 实例。
+        jsonrpc: JSONRPCHandler 实例。
+        _orchestrator: StableAgentOrchestrator 引用。
+    """
+
+    def __init__(self, orchestrator: Any = None) -> None:
+        """初始化 MCPGateway。
+
+        创建所有内部组件（UnifiedToolRegistry、ToolRouter、
+        ResponseAdapter、JSONRPCHandler、RunStore、EventStream）。
+
+        Args:
+            orchestrator: StableAgentOrchestrator 实例，用于注入各组件。
+                          None 时创建独立运行的 Gateway（部分功能受限）。
+        """
+        self._orchestrator: Any = orchestrator
+
+        # 创建独立组件
+        self.run_store: RunStore = RunStore()
+        self.event_stream: EventStream = EventStream()
+
+        # 创建工具注册中心
+        self.registry: UnifiedToolRegistry = UnifiedToolRegistry(orchestrator)
+
+        # 创建工具路由器
+        self.router: ToolRouter = ToolRouter(
+            registry=self.registry,
+            security_policy=getattr(orchestrator, 'security_policy', None) if orchestrator else None,
+            approval_manager=getattr(orchestrator, 'approval_manager', None) if orchestrator else None,
+            run_store=self.run_store,
+            event_stream=self.event_stream,
+            event_bus=getattr(orchestrator, 'event_bus', None) if orchestrator else None,
+        )
+
+        # 创建适配器和 JSON-RPC 处理器
+        self.adapter: ResponseAdapter = ResponseAdapter()
+        self.jsonrpc: JSONRPCHandler = JSONRPCHandler(
+            self.registry, self.router, self.adapter,
+        )
+
+    # ------------------------------------------------------------------
+    # 公共 API
+    # ------------------------------------------------------------------
+
+    def create_fastapi_app(self) -> "FastAPI":
+        """创建包含 /mcp 端点的 FastAPI app。
+
+        POST /mcp — JSON-RPC 2.0 端点，处理 initialize/tools/list/tools/call。
+        GET /mcp — SSE 事件流端点，按 ?run_id=xxx 筛选实时事件。
+
+        Returns:
+            配置好路由的 FastAPI 应用实例。
+        """
+        from fastapi import FastAPI, Request
+        from fastapi.responses import StreamingResponse, JSONResponse
+
+        app: FastAPI = FastAPI(title="StableAgent MCP Gateway")
+
+        @app.post("/mcp")
+        async def mcp_post(request: Request) -> JSONResponse:
+            """JSON-RPC 2.0 端点。
+
+            接收 JSON-RPC 请求，路由到 JSONRPCHandler 处理，
+            返回 JSON-RPC 响应。
+
+            Args:
+                request: FastAPI Request 对象。
+
+            Returns:
+                JSONResponse 包含 JSON-RPC 2.0 响应。
+            """
+            body: dict[str, Any] = await request.json()
+            result: dict[str, Any] = self.jsonrpc.handle(body)
+            return JSONResponse(content=result)
+
+        @app.get("/mcp")
+        async def mcp_get(request: Request) -> "StreamingResponse | JSONResponse":
+            """SSE 事件流端点。
+
+            按 run_id 筛选事件流。客户端通过 EventSource 连接，接收
+            实时推送的工具调用事件。
+
+            Args:
+                request: FastAPI Request 对象，需包含 ?run_id=xxx 查询参数。
+
+            Returns:
+                StreamingResponse（SSE 格式）或 JSONResponse（参数错误）。
+            """
+            run_id: str = request.query_params.get("run_id", "")
+            if not run_id:
+                return JSONResponse(
+                    content={"error": "run_id required for SSE"},
+                    status_code=400,
+                )
+
+            async def event_generator():
+                """SSE 事件生成器。
+
+                订阅指定 run_id 的事件流，持续产出 SSE 格式事件。
+                客户端断开连接时自动取消订阅。
+                """
+                queue = await self.event_stream.subscribe(run_id)
+                try:
+                    while True:
+                        event: dict[str, Any] = await queue.get()
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    self.event_stream.unsubscribe(run_id, queue)
+
+            return StreamingResponse(
+                event_generator(),
+                media_type="text/event-stream",
+            )
+
+        return app

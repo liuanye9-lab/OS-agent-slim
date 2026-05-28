@@ -952,3 +952,67 @@ function resetAvatar() {
 document.addEventListener('DOMContentLoaded', () => {
   PixelAgent.init();
 });
+
+// ============================================================================
+// V5: 新的事件到状态映射（用于 /runs/{run_id} per-run 页面）
+// ============================================================================
+
+const V5_AVATAR_STATES = {
+  'listening': 'thinking',
+  'thinking': 'thinking',
+  'calculating': 'thinking',
+  'reading_notes': 'searching',
+  'searching_books': 'searching',
+  'safety_check': 'idle',
+  'waiting_approval': 'idle',
+  'working': 'working',
+  'grading': 'working',
+  'writing_rule': 'skill_patching',
+  'examining': 'skill_validating',
+  'archiving': 'skill_exported',
+  'sweating': 'idle',
+  'celebrating': 'celebrate',
+  'idle': 'idle',
+};
+
+const V5_STATE_LABELS = {
+  listening: '聆听中...',
+  thinking: '思考中...',
+  calculating: '算盘中...',
+  reading_notes: '查阅记忆...',
+  searching_books: '搜索知识库...',
+  safety_check: '安全检查...',
+  waiting_approval: '等待审批...',
+  working: '工作中...',
+  grading: '评分中...',
+  writing_rule: '编写规则...',
+  examining: '考试中...',
+  archiving: '归档中...',
+  sweating: '出错了...',
+  celebrating: '庆祝中！',
+  idle: '待命中...',
+};
+
+/**
+ * V5: 按 avatar_state 名直接设置像素机器人状态。
+ *
+ * 将新的 avatar_state（如 'thinking'、'working'、'searching'）
+ * 映射到 PixelAgent 已知的动画状态并播放。
+ *
+ * @param {string} avatarState - 头像状态名（如 'thinking'、'working'）。
+ */
+window.updateAvatarByState = function (avatarState) {
+  const mappedState = V5_AVATAR_STATES[avatarState] || 'idle';
+  const label = V5_STATE_LABELS[avatarState] || avatarState;
+
+  // 使用已有的 PixelAgent API 播放动画
+  if (typeof PixelAgent !== 'undefined' && PixelAgent.play) {
+    PixelAgent.play(mappedState, null);
+  }
+
+  // 更新状态标签
+  const labelEl = document.getElementById('robot-status-label');
+  if (labelEl) {
+    labelEl.textContent = label;
+  }
+};

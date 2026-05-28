@@ -12,6 +12,10 @@ V3 升级：
 - MCPServer 接收 mcp_tools 依赖
 - Dashboard 接收 orchestrator 依赖
 
+V5 升级：
+- 挂载统一 MCP Gateway（/mcp/v5 前缀）
+- 挂载 DashboardSync（per-run WebSocket 端点）
+
 启动方式：
   python web/server.py
   uvicorn web.server:app --host 0.0.0.0 --port 8000
@@ -117,7 +121,26 @@ def create_app() -> FastAPI:
     dashboard.mount_to(app, prefix="/dashboard")
 
     # ------------------------------------------------------------------
-    # 5. 配置静态文件和模板
+    # 5. V5: 挂载统一 MCP Gateway（/mcp/v5 前缀，避免与旧 /mcp 冲突）
+    # ------------------------------------------------------------------
+    try:
+        from stable_agent.gateway.mcp_gateway import MCPGateway
+        from stable_agent.observation.dashboard_sync import DashboardSync
+
+        # 创建 Gateway
+        gateway: MCPGateway = MCPGateway(orchestrator=orchestrator)
+        v5_app = gateway.create_fastapi_app()
+        app.mount("/mcp/v5", v5_app)
+
+        # 创建 DashboardSync 并挂载（使用 gateway 的 event_stream）
+        dash_sync: DashboardSync = DashboardSync(gateway.event_stream)
+        sync_app = dash_sync.create_app()
+        app.mount("/dashboard", sync_app)
+    except ImportError:
+        pass  # V5 模块未安装时优雅跳过
+
+    # ------------------------------------------------------------------
+    # 6. 配置静态文件和模板
     # ------------------------------------------------------------------
     web_dir: str = os.path.dirname(os.path.abspath(__file__))
     static_dir: str = os.path.join(web_dir, "static")
@@ -131,7 +154,7 @@ def create_app() -> FastAPI:
     dashboard_html_path: str = os.path.join(templates_dir, "dashboard.html")
 
     # ------------------------------------------------------------------
-    # 6. 注册根路由
+    # 7. 注册根路由
     # ------------------------------------------------------------------
     @app.get("/")
     async def root():
