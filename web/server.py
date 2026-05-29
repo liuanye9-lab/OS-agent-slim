@@ -460,6 +460,60 @@ def create_app() -> FastAPI:
             return {"review_id": review_id, "status": result.status, "action": action}
         except Exception as e:
             return {"error": str(e)}
+
+    # ------------------------------------------------------------------
+    # Production Hardening: Approval pending calls API
+    # ------------------------------------------------------------------
+    @app.get("/api/approvals/pending")
+    async def api_approval_pending(workspace_id: str = "", run_id: str = ""):
+        """列出待审批的高风险工具调用。"""
+        try:
+            from stable_agent.approval.pending_tool_store import PendingToolStore
+            store = PendingToolStore()
+            name_filter: str | None = workspace_id or None
+            if run_id:
+                calls = store.list_by_run(run_id)
+            else:
+                calls = store.list_all() if name_filter else []
+            return {
+                "pending": [
+                    {
+                        "approval_id": c.approval_id,
+                        "run_id": c.run_id,
+                        "tool_name": c.tool_name,
+                        "created_at": c.created_at,
+                        "status": c.status,
+                        "workspace_id": c.workspace_id,
+                    }
+                    for c in calls
+                ]
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.post("/api/approvals/{approval_id}/approve")
+    async def api_approval_approve(approval_id: str):
+        """审批通过并恢复执行。"""
+        try:
+            from stable_agent.approval import ApprovalResumeService
+            svc = ApprovalResumeService()
+            result = svc.approve_and_resume(approval_id)
+            return result
+        except Exception as e:
+            return {"error": str(e)}
+
+    @app.post("/api/approvals/{approval_id}/reject")
+    async def api_approval_reject(approval_id: str, request: Request):
+        """审批拒绝。"""
+        body = await request.json() if request else {}
+        try:
+            from stable_agent.approval import ApprovalResumeService
+            svc = ApprovalResumeService()
+            result = svc.reject(approval_id, reason=body.get("reason", ""))
+            return result
+        except Exception as e:
+            return {"error": str(e)}
+
     # ------------------------------------------------------------------
     # SaaS: Members API
     # ------------------------------------------------------------------

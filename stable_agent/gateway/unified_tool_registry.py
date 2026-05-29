@@ -36,14 +36,15 @@ class UnifiedToolRegistry:
         _orchestrator: StableAgentOrchestrator 引用（延迟绑定）。
     """
 
-    def __init__(self, orchestrator: Any = None) -> None:
-        """初始化注册中心并注册所有 14 个工具 handler。
+    def __init__(self, orchestrator: Any = None, tool_router: Any = None) -> None:
+        """初始化注册中心并注册所有工具 handler。
 
         Args:
-            orchestrator: StableAgentOrchestrator 实例，用于访问各后端模块。
-                          None 时 handler 返回占位结果。
+            orchestrator: StableAgentOrchestrator 实例。
+            tool_router: ToolRouter 实例，供 approval.respond 恢复执行。
         """
         self._orchestrator: Any = orchestrator
+        self._tool_router: Any = tool_router
         self._handlers: dict[str, Callable[[RunContext, dict[str, Any]], StableAgentToolResult]] = {}
         self._register_all()
 
@@ -817,55 +818,93 @@ class UnifiedToolRegistry:
             )
 
     def _h_approval_respond(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
-        """处理 stableagent.approval.respond — 响应审批。
+        """处理 stableagent.approval.respond — 审批响应 + 恢复执行。
 
-        委托给 orchestrator.approval_manager.approve() 或 reject()。
+        Production Hardening: approve → ApprovalResumeService.resume()
+        恢复原始 handler 执行。reject → 标记拒绝，不执行。
 
         Args:
             ctx: RunContext。
-            args: 包含 request_id、action（approve/reject）和可选 reason 的参数字典。
+            args: approval_id, action (approve/reject), reason (可选)。
 
         Returns:
-            确认审批结果的 StableAgentToolResult。
+            确认审批结果或恢复执行结果的 StableAgentToolResult。
         """
         tool_name = "stableagent.approval.respond"
-        request_id: str = args.get("request_id", "")
+        approval_id: str = args.get("approval_id", "") or args.get("request_id", "")
         action: str = args.get("action", "approve")
         reason: str = args.get("reason", "")
 
-        if self._orchestrator is None:
+        if not approval_id:
             return self._make_result(
-                ctx, tool_name,
-                ok=False, is_error=True,
-                plain_text="Orchestrator 未注入，无法响应审批",
+                ctx, tool_name, ok=False, is_error=True,
+                plain_text="缺少 approval_id",
+                plain_text_zh="缺少 approval_id 参数",
             )
 
         try:
+            from stable_agent.approval import ApprovalResumeService
+            resume_svc = ApprovalResumeService(
+                store=None,  # 默认内存+SQLite
+                tool_router=getattr(self, '_tool_router', None),
+            )
+
             if action == "approve":
-                req = self._orchestrator.approval_manager.approve(request_id)
-                plain = f"审批请求 {request_id} 已批准"
+                # 审批通过 → 恢复执行
+                result = resume_svc.approve_and_resume(approval_id)
+                status = result.get("status", "unknown")
+                if status == "executed":
+                    return self._make_result(
+                        ctx, tool_name, ok=True,
+                        data={
+                            "approval_id": approval_id,
+                            "action": "approved_and_executed",
+                            "tool_name": result.get("tool_name", ""),
+                            "result": result.get("result", {}),
+                        },
+                        plain_text=f"审批 {approval_id} 已通过，工具已恢复执行",
+                        plain_text_zh=f"✅ 审批已通过，工具 {result.get('tool_name', '')} 已恢复执行",
+                        next_actions=["查看执行结果"],
+                    )
+                elif status == "approved_no_resume":
+                    return self._make_result(
+                        ctx, tool_name, ok=True,
+                        data=result,
+                        plain_text=f"审批 {approval_id} 已通过",
+                        plain_text_zh="⚠️ 审批已通过但无法恢复执行（ToolRouter 未连接）",
+                    )
+                else:
+                    return self._make_result(
+                        ctx, tool_name, ok=False, is_error=True,
+                        data=result,
+                        plain_text=result.get("error", "审批恢复失败"),
+                        plain_text_zh=result.get("error", "审批恢复执行失败"),
+                    )
             elif action == "reject":
-                req = self._orchestrator.approval_manager.reject(request_id, reason)
-                plain = f"审批请求 {request_id} 已拒绝" + (f"（原因：{reason}）" if reason else "")
+                result = resume_svc.reject(approval_id, reason)
+                return self._make_result(
+                    ctx, tool_name, ok=True,
+                    data={
+                        "approval_id": approval_id,
+                        "action": "rejected",
+                        "status": result.get("status", "rejected"),
+                    },
+                    plain_text=f"审批 {approval_id} 已拒绝" + (f": {reason}" if reason else ""),
+                    plain_text_zh=f"❌ 审批已拒绝：{result.get('tool_name', '')} 不会执行",
+                )
             else:
                 return self._make_result(
-                    ctx, tool_name,
-                    ok=False, is_error=True,
+                    ctx, tool_name, ok=False, is_error=True,
                     plain_text=f"无效的审批操作：{action}，仅支持 approve/reject",
                 )
-
-            return self._make_result(
-                ctx, tool_name,
-                ok=True,
-                data={
-                    "request_id": request_id,
-                    "action": action,
-                    "status": req.status,
-                    "resolved_at": req.resolved_at,
-                },
-                plain_text=plain,
-            )
         except Exception as exc:
+            logger = logging.getLogger(__name__)
+            logger.exception("审批响应失败: %s", exc)
+            return self._make_result(
+                ctx, tool_name, ok=False, is_error=True,
+                plain_text=f"审批响应失败: {exc}",
+                plain_text_zh=f"审批响应异常: {exc}",
+            )
             return self._make_result(
                 ctx, tool_name,
                 ok=False, is_error=True,
@@ -891,7 +930,7 @@ class UnifiedToolRegistry:
         mode: str = args.get("mode", "auto")
         open_dashboard: bool = args.get("open_dashboard", True)
 
-        from stable_agent.gateway.run_lifecycle import (
+        from stable_agent.runtime.run_lifecycle import (
             STAGE_PROGRESS, STAGE_LABEL_ZH, STAGE_AVATAR,
         )
 

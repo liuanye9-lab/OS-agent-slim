@@ -77,6 +77,14 @@ class ToolRouter:
         self._event_stream = event_stream
         self._event_bus = event_bus
 
+        # Production Hardening: PendingToolStore for approval resume
+        from stable_agent.approval.pending_tool_store import PendingToolStore
+        self._pending_store: PendingToolStore = PendingToolStore()
+
+        # Wire: registry knows its router for approval resume
+        if hasattr(self._registry, '_tool_router'):
+            self._registry._tool_router = self
+
     # ------------------------------------------------------------------
     # 公共 API
     # ------------------------------------------------------------------
@@ -202,6 +210,21 @@ class ToolRouter:
             self._append_to_store(ctx.run_id, blocked_event)
 
             # 硬阻断：不执行 handler，返回 waiting_approval
+            # Production Hardening: 保存 PendingToolCall 供审批恢复
+            try:
+                from stable_agent.approval.pending_tool_store import PendingToolCall
+                pending = PendingToolCall(
+                    approval_id=approval_id,
+                    run_id=ctx.run_id,
+                    tool_name=tool_name,
+                    args=dict(args),
+                    workspace_id=getattr(ctx, 'workspace_id', '') or '',
+                    project_id=getattr(ctx, 'project_id', '') or '',
+                )
+                self._pending_store.save(pending)
+            except Exception as e:
+                logger.warning("PendingToolStore.save 失败: %s", e)
+
             return StableAgentToolResult(
                 ok=False,
                 run_id=ctx.run_id,
@@ -469,3 +492,92 @@ class ToolRouter:
                 self._run_store.append_event(run_id, event_dict)
             except Exception as e:
                 logger.warning("追加事件到 RunStore 失败: %s", e)
+
+    # ------------------------------------------------------------------
+    # Production Hardening: Approval Resume
+    # ------------------------------------------------------------------
+
+    def route_resume(
+        self,
+        *,
+        tool_name: str,
+        args: dict[str, Any],
+        run_id: str,
+        workspace_id: str = "",
+        project_id: str = "",
+        approval_id: str = "",
+    ) -> StableAgentToolResult:
+        """审批通过后恢复执行被阻断的工具。
+
+        绕过风险评估直接执行 handler（审批已通过）。
+
+        Args:
+            tool_name: 工具名称。
+            args: 工具参数。
+            run_id: 原始 run_id。
+            workspace_id: 工作区 ID。
+            project_id: 项目 ID。
+            approval_id: 审批 ID。
+
+        Returns:
+            StableAgentToolResult 执行结果。
+        """
+        import time as _time
+
+        # 创建恢复执行的 RunContext
+        from stable_agent.gateway.run_context import RunContext
+        ctx = RunContext.create(
+            task_input=args.get("task_input"),
+            run_id=run_id,
+            workspace_id=workspace_id,
+            project_id=project_id,
+            mode="saas" if (workspace_id and project_id) else "local",
+        )
+        ctx.tool_call_id = f"resume_{approval_id[:12]}"
+
+        # 查找 handler
+        handler = self._registry.get_handler(tool_name)
+        if handler is None:
+            return StableAgentToolResult(
+                ok=False, run_id=run_id, tool_name=tool_name,
+                plain_text=f"工具 {tool_name} 未注册", is_error=True,
+            )
+
+        # 发布恢复执行事件
+        resume_event = self._make_event_dict(
+            ctx, "approval.approved.resuming",
+            payload={"tool_name": tool_name, "approval_id": approval_id},
+            plain_text=f"审批通过，恢复执行 {tool_name}",
+        )
+        self._publish_event(resume_event)
+        self._append_to_store(run_id, resume_event)
+
+        started_event = self._make_event_dict(
+            ctx, "tool.started",
+            payload={"tool_name": tool_name},
+            plain_text=f"正在执行 {tool_name}（审批恢复）",
+        )
+        self._publish_event(started_event)
+        self._append_to_store(run_id, started_event)
+
+        # 执行 handler
+        start = _time.time()
+        try:
+            result = handler(args, ctx)
+            elapsed = int((_time.time() - start) * 1000)
+            completed_event = self._make_event_dict(
+                ctx, "tool.completed",
+                payload={"tool_name": tool_name, "elapsed_ms": elapsed},
+                plain_text=f"工具 {tool_name} 执行完成（审批恢复）",
+            )
+            self._publish_event(completed_event)
+            self._append_to_store(run_id, completed_event)
+            return result
+        except Exception as exc:
+            logger.exception("审批恢复执行失败: tool=%s, approval=%s", tool_name, approval_id)
+            return StableAgentToolResult(
+                ok=False, run_id=run_id, tool_name=tool_name,
+                plain_text=f"审批恢复执行失败: {exc}",
+                plain_text_zh=f"审批恢复执行失败: {exc}",
+                is_error=True,
+            )

@@ -1,8 +1,4 @@
-"""Run Lifecycle — 向后兼容 Re-export。
-
-Production Hardening: 主模块已迁移至 stable_agent.runtime.run_lifecycle。
-此文件保留向后兼容，所有导入自动转发到新位置。
-"""
+"""Runtime package — 统一运行时抽象。"""
 
 from stable_agent.runtime.run_lifecycle import (
     RunStage,
