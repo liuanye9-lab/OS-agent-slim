@@ -68,6 +68,12 @@ class SaasRepository:
             self.conn.execute("PRAGMA journal_mode=WAL")
         return self.conn
 
+    def close(self) -> None:
+        """关闭数据库连接（测试环境必须调用来避免 ResourceWarning）。"""
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
+
     # ------------------------------------------------------------------
     # 初始化
     # ------------------------------------------------------------------

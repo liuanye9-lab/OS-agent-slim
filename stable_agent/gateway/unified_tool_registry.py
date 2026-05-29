@@ -891,6 +891,36 @@ class UnifiedToolRegistry:
         mode: str = args.get("mode", "auto")
         open_dashboard: bool = args.get("open_dashboard", True)
 
+        from stable_agent.gateway.run_lifecycle import (
+            STAGE_PROGRESS, STAGE_LABEL_ZH, STAGE_AVATAR,
+        )
+
+        def _emit_stage(name: str, extra: dict | None = None) -> None:
+            """发布阶段事件到 EventStream。"""
+            pct = STAGE_PROGRESS.get(name, 0)
+            label = STAGE_LABEL_ZH.get(name, name)
+            avatar = STAGE_AVATAR.get(name, "listening")
+            ctx.current_stage = name
+            ctx.progress_pct = pct
+            ctx.status_text_zh = label
+            ctx.status_text_en = name.replace("_", " ").title()
+            ctx.avatar_state = avatar
+            payload = {
+                "stage": name, "stage_label_zh": label,
+                "progress_pct": pct, "avatar_state": avatar,
+                "status_text_zh": label,
+                "decision_summary_zh": f"正在进行：{label}",
+                "why_zh": f"任务需要 {label}",
+            }
+            if extra:
+                payload.update(extra)
+            try:
+                if hasattr(ctx, '_publish_event'):
+                    ctx._publish_event(f"task.{name}", payload)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).debug("_emit_stage publish skipped: %s", name)
+
         if self._orchestrator is None:
             return self._make_result(
                 ctx, tool_name, ok=False, is_error=True,
@@ -900,28 +930,26 @@ class UnifiedToolRegistry:
             )
 
         try:
-            from stable_agent.observation.progress_model import ProgressTracker
-            tracker = ProgressTracker()
+            # 阶段流水线：逐阶段发布事件
+            _emit_stage("created")
+            _emit_stage("received", {"task_input": task_input[:200]})
+            _emit_stage("intent_parsing")
+            _emit_stage("context_budgeting")
+            _emit_stage("memory_retrieving")
+            _emit_stage("context_building")
+            _emit_stage("planning")
 
-            # 阶段 1: 接收任务
-            stage = tracker.get_stage("mcp_received")
-            ctx.current_stage = stage.label_zh
-            ctx.progress_pct = stage.pct
-            ctx.status_text_zh = stage.status_text_zh
-            ctx.status_text_en = stage.status_text_en
-
-            # 阶段 2: 执行任务
+            # 执行任务（核心阶段）
+            _emit_stage("acting")
             raw_result: Any = self._orchestrator.process_task(task_input)
             result = self._json_safe(raw_result)
             if not isinstance(result, dict):
                 result = {"output": str(result)}
 
-            # 阶段 3: 完成
-            stage = tracker.get_stage("completed")
-            ctx.current_stage = stage.label_zh
-            ctx.progress_pct = stage.pct
-            ctx.status_text_zh = stage.status_text_zh
-            ctx.status_text_en = stage.status_text_en
+            # 后处理阶段
+            _emit_stage("observing")
+            _emit_stage("evaluating")
+            _emit_stage("completed")
 
             return self._make_result(
                 ctx, tool_name,
@@ -929,10 +957,11 @@ class UnifiedToolRegistry:
                 data={
                     "run_id": ctx.run_id,
                     "dashboard_url": f"/runs/{ctx.run_id}" if open_dashboard else "",
-                    "current_stage": stage.label_zh,
-                    "progress_pct": stage.pct,
-                    "status_text_zh": stage.status_text_zh,
-                    "status_text_en": stage.status_text_en,
+                    "current_stage": "completed",
+                    "progress_pct": 100,
+                    "status_text_zh": "完成任务",
+                    "status_text_en": "Completed",
+                    "avatar_state": "done",
                     "task_output": result,
                     "mode": mode,
                     "next_actions": ["查看 Dashboard", "查看决策时间线"],
@@ -947,6 +976,7 @@ class UnifiedToolRegistry:
             import logging
             logger = logging.getLogger(__name__)
             logger.exception("os_agent 执行失败: %s", exc)
+            _emit_stage("failed")
             return self._make_result(
                 ctx, tool_name,
                 ok=False, is_error=True,

@@ -29,7 +29,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from stable_agent.explanation.explanation_templates import (
@@ -161,7 +161,7 @@ class DecisionNarrator:
             token_budget=payload.get("token_budget", 0),
             quality_score=payload.get("quality_score"),
             avatar_state=avatar_state,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             raw_payload=dict(payload),
         )
         return trace
