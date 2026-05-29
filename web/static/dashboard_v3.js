@@ -259,6 +259,82 @@
   // 启动
   document.addEventListener('DOMContentLoaded', init);
 
+  // ====== 键盘快捷键 ======
+  document.addEventListener('keydown', function(e) {
+    // 忽略在输入框内的按键
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+    if (e.target.isContentEditable) return;
+
+    var key = e.key.toLowerCase();
+    var ctrl = e.ctrlKey || e.metaKey;
+    var shift = e.shiftKey;
+
+    // 全局
+    if (key === 'f5') { e.preventDefault(); location.reload(); return; }
+    if (key === 'escape') { e.preventDefault(); clearSelection(); return; }
+    if (key === '?' && !ctrl) { e.preventDefault(); toggleShortcutHelp(); return; }
+
+    // 导航
+    if (key === '1') { e.preventDefault(); window.location.href = '/dashboard/v3'; }
+    if (key === '2') { e.preventDefault(); window.location.href = '/dashboard/usage'; }
+    if (key === '3') { e.preventDefault(); window.location.href = '/dashboard/apikeys'; }
+    if (key === '4') { e.preventDefault(); window.location.href = '/dashboard/billing'; }
+    if (key === '5') { e.preventDefault(); window.location.href = '/dashboard/team'; }
+    if (key === '6') { e.preventDefault(); window.location.href = '/dashboard/skills'; }
+    if (key === '7') { e.preventDefault(); window.location.href = '/dashboard/review'; }
+    if (key === 'h') { e.preventDefault(); window.location.href = '/'; }
+    if (key === 'l') { e.preventDefault(); window.location.href = '/login'; }
+    if (key === 'c') { e.preventDefault(); window.location.href = '/connect'; }
+
+    // Dashboard 操作
+    if (ctrl && key === 'enter' && currentRunId) {
+      e.preventDefault();
+      submitCurrentTask();
+    }
+    if (key === ' ') {
+      e.preventDefault();
+      toggleAutoScroll();
+    }
+
+    // 更新底部快捷键栏高亮
+    showKeyPress(key, ctrl);
+  });
+
+  function clearSelection() {
+    if (document.activeElement) document.activeElement.blur();
+  }
+
+  function toggleShortcutHelp() {
+    var el = document.getElementById('shortcut-help');
+    if (!el) return;
+    el.style.display = el.style.display === 'none' || !el.style.display ? 'flex' : 'none';
+  }
+
+  function submitCurrentTask() {
+    alert('任务已提交（通过 MCP stableagent.task.process 触发）');
+  }
+
+  var _autoScroll = true;
+  function toggleAutoScroll() {
+    _autoScroll = !_autoScroll;
+    var bar = document.getElementById('shortcut-bar');
+    if (bar) bar.style.opacity = _autoScroll ? '1' : '0.6';
+  }
+
+  function showKeyPress(key, ctrl) {
+    var bars = document.querySelectorAll('.kbd-key[data-key="' + key + '"]');
+    bars.forEach(function(el) {
+      el.style.background = 'var(--accent)';
+      el.style.color = '#fff';
+      el.style.transform = 'scale(0.9)';
+      setTimeout(function() {
+        el.style.background = '';
+        el.style.color = '';
+        el.style.transform = '';
+      }, 200);
+    });
+  }
+
   // 暴露 API 供外部调用
   window.DashboardV3 = {
     applyEvent,
