@@ -81,6 +81,10 @@ class ToolRouter:
         from stable_agent.approval.pending_tool_store import PendingToolStore
         self._pending_store: PendingToolStore = PendingToolStore()
 
+        # Production Hardening: DecisionTraceBuilder for event enrichment
+        from stable_agent.observation.decision_trace_builder import DecisionTraceBuilder
+        self._trace_builder: DecisionTraceBuilder = DecisionTraceBuilder()
+
         # Wire: registry knows its router for approval resume
         if hasattr(self._registry, '_tool_router'):
             self._registry._tool_router = self
@@ -433,7 +437,7 @@ class ToolRouter:
             包含所有标准字段的事件字典。
         """
         child = ctx.child_span()
-        return {
+        event: dict[str, Any] = {
             "run_id": ctx.run_id,
             "tool_call_id": ctx.tool_call_id,
             "trace_id": ctx.trace_id,
@@ -451,6 +455,28 @@ class ToolRouter:
             "status_text_zh": ctx.status_text_zh,
             "status_text_en": ctx.status_text_en,
         }
+
+        # Production Hardening Phase 4: 注入 DecisionTrace 字段
+        # 不允许 chain_of_thought / hidden_reasoning，只输出可观察决策摘要
+        try:
+            trace_dict = self._trace_builder.build_for_dashboard(
+                run_id=ctx.run_id,
+                stage=ctx.current_stage or self._get_stage(event_type),
+                event_type=event_type,
+                payload={**(payload or {}), "run_id": ctx.run_id},
+            )
+            event["decision_summary_zh"] = trace_dict.get("decision_summary_zh", plain_text)
+            event["decision_summary_en"] = trace_dict.get("decision_summary_en", plain_text)
+            event["why_zh"] = trace_dict.get("why_zh", "")
+            event["why_en"] = trace_dict.get("why_en", "")
+            event["next_step_zh"] = trace_dict.get("next_step_zh", "")
+            event["next_step_en"] = trace_dict.get("next_step_en", "")
+            event["stage_label_zh"] = trace_dict.get("stage_label_zh", "")
+            event["stage_label_en"] = trace_dict.get("stage_label_en", "")
+        except Exception:
+            pass  # 决策字段非关键，静默降级
+
+        return event
 
     def _publish_event(self, event_dict: dict[str, Any]) -> None:
         """通过 EventBus 和 EventStream 发布事件。

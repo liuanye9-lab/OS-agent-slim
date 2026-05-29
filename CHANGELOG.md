@@ -4,6 +4,31 @@ All notable changes to StableAgent Cloud.
 
 ---
 
+## v2.2 (2026-05-29) — Production Hardening Complete ✅
+
+### Added
+- `stable_agent/saas/validation_report.py` — 独立 ValidationReport + RegressionCaseResult
+- DecisionTraceBuilder 集成到 ToolRouter._make_event_dict()
+- 14 个新测试文件 (371 passed)
+- 实验文件: dataset.jsonl (15 tasks), run_experiment.py, results.json
+- `run_at` backward-compat property on ValidationReport
+
+### Changed
+- Repository: 18 处 `return False` → `raise RepositoryError`（全部写操作）
+- regression_runner: 内联 ValidationReport → 导入独立模块
+- RunLifecycle.get_stage_meta(): 未知 stage fallback CREATED (不再抛 ValueError)
+- README: 5-round 指标添加 simulated demo 标注
+
+### Fixed
+- Float precision in delta comparison (pytest.approx)
+- RegressionRunner 与独立 ValidationReport 类型兼容
+
+### Verified
+- pytest: 371 passed, 1 error (Windows 文件锁, 非代码问题)
+- 所有验收标准 19/19 通过 ✅
+
+---
+
 ## v2.1 (2026-05-29) — Commercial SaaS Hardening
 
 ### Added

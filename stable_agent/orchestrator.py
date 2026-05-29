@@ -108,7 +108,7 @@ class StableAgentOrchestrator:
         trace_storage: 事件持久化存储。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, evaluator: "Evaluator | None" = None, llm_client: "Any | None" = None) -> None:
         """初始化 StableAgentOrchestrator。
 
         实例化所有核心模块，建立模块间的连接：
@@ -116,6 +116,10 @@ class StableAgentOrchestrator:
         - EventBus 订阅 TraceStorage 实现自动持久化
         - 预填充示例记忆到 MemoryBank 用于演示
         - V3: 实例化所有新模块并连接
+
+        Args:
+            evaluator: 预配置的 Evaluator 实例（可带 LLM 客户端）。
+            llm_client: LLM 客户端实例，注入 Evaluator 和 WorkflowEngine。
         """
         # ------------------------------------------------------------------
         # 实例化核心模块
@@ -125,7 +129,7 @@ class StableAgentOrchestrator:
         self.budget_manager: ContextBudgetManager = ContextBudgetManager()
         self.memory_bank: MemoryBank = MemoryBank()
         self.memory_router: MemoryRouter = MemoryRouter(self.memory_bank)
-        self.evaluator: Evaluator = Evaluator()
+        self.evaluator: Evaluator = evaluator if evaluator is not None else Evaluator(llm_client=llm_client)
         self.bad_case_manager: BadCaseManager = BadCaseManager()
         self.rag_manager: RagContextManager = RagContextManager()
         self.knowledge_graph: TemporalKnowledgeGraph = TemporalKnowledgeGraph()
@@ -148,7 +152,11 @@ class StableAgentOrchestrator:
         self.plain_language: PlainLanguageExplainer = PlainLanguageExplainer()
         self.security_policy: SecurityPolicy = SecurityPolicy()
         self.approval_manager: ApprovalManager = ApprovalManager(self.storage)
-        self.llm_client: MockLLMClient = MockLLMClient()
+        if llm_client is not None:
+            self.llm_client = llm_client
+        else:
+            from stable_agent.llm_factory import get_llm_client
+            self.llm_client = get_llm_client()
         self.eval_dataset_mgr: EvalDatasetManager = EvalDatasetManager()
 
         # MCP 工具注册中心（延迟绑定 orchestrator 自身）

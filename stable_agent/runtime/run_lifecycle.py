@@ -148,7 +148,10 @@ def get_stage_meta(stage: str | RunStage) -> RunStageMeta:
     Returns:
         RunStageMeta: 阶段元信息。如 stage 不存在则返回 CREATED。
     """
-    s = RunStage(stage) if isinstance(stage, str) else stage
+    try:
+        s = RunStage(stage) if isinstance(stage, str) else stage
+    except ValueError:
+        return RUN_STAGE_META[RunStage.CREATED]
     return RUN_STAGE_META.get(s, RUN_STAGE_META[RunStage.CREATED])
 
 

@@ -18,52 +18,14 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass, field
 from typing import Any
 
+from stable_agent.saas.validation_report import (
+    ValidationReport,
+    RegressionCaseResult,
+)
+
 logger = logging.getLogger(__name__)
-
-
-# ============================================================================
-# ValidationReport
-# ============================================================================
-
-
-@dataclass
-class ValidationReport:
-    """Skill Patch 验证报告。"""
-
-    patch_id: str = ""
-    baseline_score: float = 0.0
-    candidate_score: float = 0.0
-    delta: float = 0.0
-    passed: bool = False
-    case_results: list[dict[str, Any]] = field(default_factory=list)
-    failure_summary: str = ""
-    recommendation: str = ""
-    run_at: float = field(default_factory=time.time)
-
-    @property
-    def improvement_pct(self) -> float:
-        """提升百分比。"""
-        if self.baseline_score == 0:
-            return 0.0
-        return (self.delta / self.baseline_score) * 100
-
-    def to_dict(self) -> dict[str, Any]:
-        """转为可序列化字典。"""
-        return {
-            "patch_id": self.patch_id,
-            "baseline_score": round(self.baseline_score, 4),
-            "candidate_score": round(self.candidate_score, 4),
-            "delta": round(self.delta, 4),
-            "passed": self.passed,
-            "improvement_pct": round(self.improvement_pct, 1),
-            "case_results": self.case_results,
-            "failure_summary": self.failure_summary,
-            "recommendation": self.recommendation,
-            "run_at": self.run_at,
-        }
 
 
 # ============================================================================

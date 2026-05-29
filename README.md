@@ -104,6 +104,8 @@ graph LR
 </table>
 
 > 📈 **5 rounds**: Score +54% · Hallucination -71% · Token -45% → **The agent literally gets better with every run.**
+>
+> ⚠️ **Disclaimer**: 当前指标为 simulated demo result，不代表生产基准。完整复现见 `experiments/self_iteration_5_rounds/`。
 
 ---
 

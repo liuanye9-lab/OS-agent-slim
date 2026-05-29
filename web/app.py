@@ -31,6 +31,13 @@ logger = logging.getLogger("uvicorn")
 def create_app() -> FastAPI:
     """创建完整的 StableAgent Cloud 应用。"""
     # ------------------------------------------------------------------
+    # 0. LLM Client — 全局注入，所有模块共享
+    # ------------------------------------------------------------------
+    from stable_agent.llm_factory import get_llm_client
+    llm_client = get_llm_client()
+    logger.info("LLM 客户端: %s", type(llm_client).__name__)
+
+    # ------------------------------------------------------------------
     # 1. Core modules
     # ------------------------------------------------------------------
     from stable_agent.context_decision_engine import ContextDecisionEngine
@@ -45,20 +52,25 @@ def create_app() -> FastAPI:
     decision_engine = ContextDecisionEngine()
     budget_manager = ContextBudgetManager()
     memory_router = MemoryRouter(MemoryBank())
-    evaluator = Evaluator()
+    evaluator = Evaluator(llm_client=llm_client)
     bad_case_manager = BadCaseManager()
     workflow_engine = WorkflowEngine(
         decision_engine=decision_engine, budget_manager=budget_manager,
         memory_router=memory_router, evaluator=evaluator,
         bad_case_manager=bad_case_manager, event_bus=event_bus,
+        llm_client=llm_client,  # 注入真实 LLM 客户端
     )
 
     orchestrator = None
     try:
         from stable_agent.orchestrator import StableAgentOrchestrator
-        orchestrator = StableAgentOrchestrator()
-    except Exception:
-        pass
+        orchestrator = StableAgentOrchestrator(
+            evaluator=evaluator,
+            llm_client=llm_client,
+        )
+        logger.info("Orchestrator 已创建 (LLM: %s)", type(llm_client).__name__)
+    except Exception as e:
+        logger.warning("Orchestrator 创建失败 (网关模式): %s", e)
 
     mcp_tools = None
     try:

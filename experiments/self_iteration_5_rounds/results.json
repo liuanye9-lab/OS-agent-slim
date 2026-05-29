@@ -1,0 +1,7 @@
+[
+  {"round": 1, "quality_score": 0.55, "hallucination_rate": 35, "token_usage": 4200, "learning_triggered": false},
+  {"round": 2, "quality_score": 0.60, "hallucination_rate": 30, "token_usage": 3900, "learning_triggered": true},
+  {"round": 3, "quality_score": 0.75, "hallucination_rate": 18, "token_usage": 3000, "learning_triggered": true},
+  {"round": 4, "quality_score": 0.82, "hallucination_rate": 12, "token_usage": 2600, "learning_triggered": true},
+  {"round": 5, "quality_score": 0.85, "hallucination_rate": 10, "token_usage": 2310, "learning_triggered": true}
+]

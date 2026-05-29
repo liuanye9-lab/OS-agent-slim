@@ -1,0 +1,15 @@
+{"id": "task_001", "type": "simple", "task": "解释 Python 装饰器的原理", "expected_score_range": [0.7, 1.0]}
+{"id": "task_002", "type": "simple", "task": "写一个冒泡排序算法", "expected_score_range": [0.8, 1.0]}
+{"id": "task_003", "type": "complex", "task": "设计一个支持百万并发的聊天系统架构", "expected_score_range": [0.6, 0.9]}
+{"id": "task_004", "type": "simple", "task": "列举 5 个常见的 Python 性能优化技巧", "expected_score_range": [0.7, 1.0]}
+{"id": "task_005", "type": "creative", "task": "为一款 AI 产品写一段 200 字的产品介绍", "expected_score_range": [0.5, 0.9]}
+{"id": "task_006", "type": "complex", "task": "对比 REST、GraphQL 和 gRPC 的优缺点", "expected_score_range": [0.6, 0.95]}
+{"id": "task_007", "type": "simple", "task": "实现一个 LRU Cache", "expected_score_range": [0.7, 1.0]}
+{"id": "task_008", "type": "complex", "task": "解释分布式事务的 2PC 和 Saga 模式", "expected_score_range": [0.5, 0.9]}
+{"id": "task_009", "type": "creative", "task": "设计一个 AgentOps 平台的用户画像", "expected_score_range": [0.5, 0.85]}
+{"id": "task_010", "type": "simple", "task": "写一个正则表达式匹配邮箱地址", "expected_score_range": [0.8, 1.0]}
+{"id": "task_011", "type": "complex", "task": "设计一套微服务的可观测性方案", "expected_score_range": [0.5, 0.9]}
+{"id": "task_012", "type": "simple", "task": "解释 Python GIL 的机制和影响", "expected_score_range": [0.7, 1.0]}
+{"id": "task_013", "type": "creative", "task": "为一款 SaaS 产品设计定价策略", "expected_score_range": [0.4, 0.85]}
+{"id": "task_014", "type": "complex", "task": "分析 Kubernetes Pod 调度策略", "expected_score_range": [0.5, 0.9]}
+{"id": "task_015", "type": "simple", "task": "用 Python 实现 TCP 端口扫描", "expected_score_range": [0.7, 1.0]}

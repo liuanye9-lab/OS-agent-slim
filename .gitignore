@@ -44,3 +44,8 @@ htmlcov/
 !data/validation/__init__.py
 !data/eval_results/__init__.py
 !skills/skill_versions/__init__.py
+
+# Secrets and test artifacts
+start.ps1
+data/*.json
+data/*.backup

@@ -969,25 +969,17 @@ class UnifiedToolRegistry:
             )
 
         try:
-            # 阶段流水线：逐阶段发布事件
-            _emit_stage("created")
-            _emit_stage("received", {"task_input": task_input[:200]})
-            _emit_stage("intent_parsing")
-            _emit_stage("context_budgeting")
-            _emit_stage("memory_retrieving")
-            _emit_stage("context_building")
-            _emit_stage("planning")
-
-            # 执行任务（核心阶段）
+            # 简化流程：直接执行任务，orchestrator 内部已有完整 workflow
             _emit_stage("acting")
             raw_result: Any = self._orchestrator.process_task(task_input)
             result = self._json_safe(raw_result)
             if not isinstance(result, dict):
                 result = {"output": str(result)}
 
-            # 后处理阶段
-            _emit_stage("observing")
-            _emit_stage("evaluating")
+            # 提取关键信息
+            task_type = result.get("task_type", "unknown")
+            workflow_state = result.get("workflow_state", "unknown")
+
             _emit_stage("completed")
 
             return self._make_result(
@@ -998,18 +990,18 @@ class UnifiedToolRegistry:
                     "dashboard_url": f"/runs/{ctx.run_id}" if open_dashboard else "",
                     "current_stage": "completed",
                     "progress_pct": 100,
-                    "status_text_zh": "完成任务",
-                    "status_text_en": "Completed",
+                    "status_text_zh": "千问AI任务完成",
+                    "status_text_en": "Task completed by Qwen AI",
                     "avatar_state": "done",
+                    "task_type": str(task_type),
+                    "workflow_state": str(workflow_state),
                     "task_output": result,
                     "mode": mode,
-                    "next_actions": ["查看 Dashboard", "查看决策时间线"],
                 },
-                plain_text=f"OS Agent 任务完成：{task_input[:80]}",
-                plain_text_zh=f"OS Agent 任务完成：{task_input[:80]}",
-                plain_text_en=f"OS Agent task completed: {task_input[:80]}",
+                plain_text=f"千问AI处理完成: {task_input[:80]}",
+                plain_text_zh=f"千问AI任务完成: {task_input[:80]}",
+                plain_text_en=f"Qwen AI completed: {task_input[:80]}",
                 dashboard_url=f"/runs/{ctx.run_id}" if open_dashboard else "",
-                next_actions=["查看 Dashboard", "查看决策时间线"],
             )
         except Exception as exc:
             import logging

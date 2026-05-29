@@ -54,7 +54,7 @@ class Evaluator:
         "根据", "参照", "参考", "引自", "来源",
     ]
 
-    def __init__(self) -> None:
+    def __init__(self, llm_client=None) -> None:
         """初始化评估器。
 
         设置各评估维度的权重：
@@ -68,6 +68,9 @@ class Evaluator:
         - format_quality: 0.10
         - safety_score: 0.10
         - retrieval_quality: 0.10
+
+        Args:
+            llm_client: 可选的 LLM 客户端，用于 AI 增强评分。
         - memory_quality: 0.10
         - tool_quality: 0.10
 
@@ -80,6 +83,7 @@ class Evaluator:
             "hallucination_score": 0.25,
             "user_preference_score": 0.15,
         }
+        self._llm_client = llm_client
 
         # V3 三层评测权重
         self._v3_weights: dict[str, float] = {
@@ -547,18 +551,10 @@ class Evaluator:
         hits: int = sum(1 for kw in keywords if kw in out_lower)
         return round(hits / len(keywords), 4)
 
-    @staticmethod
-    def _compute_hallucination_score(model_output: str) -> float:
-        """基于启发式规则估算幻觉分数。
+    def _compute_hallucination_score(self, model_output: str) -> float:
+        """基于启发式规则 + AI 增强的幻觉检测。
 
-        策略：
-        - 如果输出包含 "抱歉"、"不知道"、"不确定" 等词 → 表示模型
-          意识到了知识边界，幻觉风险低，高分（0.95）
-        - 如果输出包含 "绝对"、"一定"、"必然" 等绝对词 → 可能过度
-          自信，有幻觉风险，中等分（0.6）
-        - 默认 0.75
-
-        # STUB: 真实集成应使用专门的幻觉检测模型或 NLI 检查。
+        优先使用 LLM 客户端进行深度检查，LLM 不可用时回退到启发式规则。
 
         Args:
             model_output: 模型输出文本。
@@ -566,9 +562,15 @@ class Evaluator:
         Returns:
             幻觉评分，1.0 表示无幻觉。
         """
-        output_lower: str = model_output.lower()
+        # AI 增强路径
+        if self._llm_client is not None:
+            try:
+                return self._ai_hallucination_check(model_output)
+            except Exception:
+                pass  # 降级到启发式
 
-        # 意识到知识边界 → 低幻觉
+        # 启发式回退
+        output_lower: str = model_output.lower()
         humility_keywords: list[str] = [
             "抱歉", "不知道", "不确定", "无法确认",
             "建议您", "请参考", "可能", "might",
@@ -578,7 +580,6 @@ class Evaluator:
             if kw in output_lower:
                 return 0.95
 
-        # 绝对化表述 → 可能有幻觉
         absolute_keywords: list[str] = [
             "绝对", "一定", "必然", "毫无疑问",
             "100%", "肯定",
@@ -587,8 +588,41 @@ class Evaluator:
             if kw in output_lower:
                 return 0.6
 
-        # 默认：中等偏上的信心
         return 0.75
+
+    def _ai_hallucination_check(self, model_output: str) -> float:
+        """使用 LLM 进行幻觉检测。
+
+        让 LLM 自己判断输出内容是否包含不确定的断言。
+
+        Args:
+            model_output: 模型输出文本。
+
+        Returns:
+            幻觉评分，1.0 表示无幻觉。
+        """
+        prompt = (
+            "请评估以下 AI 输出是否存在幻觉（编造了不存在的事实）。"
+            "只返回一个 0.0 到 1.0 之间的数字，1.0 表示完全可信，0.0 表示完全编造。\n\n"
+            f"AI 输出:\n{model_output[:2000]}\n\n"
+            "评分 (0.0-1.0):"
+        )
+        try:
+            result = self._llm_client.complete(
+                prompt=prompt,
+                system_prompt="你是幻觉检测专家。只返回数字。",
+                max_tokens=10,
+                temperature=0.1,
+            )
+            score_text = result["text"].strip()
+            # 尝试提取数字
+            import re
+            match = re.search(r'(0?\.?\d+)', score_text)
+            if match:
+                return min(1.0, max(0.0, float(match.group(1))))
+        except Exception:
+            pass
+        return 0.75  # LLM 失败时回退
 
 
 # ============================================================================

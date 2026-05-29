@@ -16,6 +16,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from stable_agent.saas.errors import ConflictError, NotFoundError, RepositoryError
 from stable_agent.saas.models import (
     AgentProfile,
     AgentRun,
@@ -406,6 +407,7 @@ class SaasRepository:
     # ------------------------------------------------------------------
 
     def create_workspace(self, ws: Workspace) -> bool:
+        """创建工作空间。成功返回 True，失败抛 RepositoryError。"""
         try:
             conn = self._get_conn()
             conn.execute(
@@ -417,8 +419,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("create_workspace failed: %s", e)
-            return False
+            logger.exception("create_workspace 失败: %s", e)
+            raise RepositoryError(f"创建工作空间失败: {e}", details={"workspace_id": ws.id}) from e
 
     def get_workspace(self, ws_id: str) -> Workspace | None:
         try:
@@ -462,6 +464,7 @@ class SaasRepository:
     # ------------------------------------------------------------------
 
     def create_project(self, proj: Project) -> bool:
+        """创建项目。成功返回 True，失败抛 RepositoryError。"""
         try:
             conn = self._get_conn()
             conn.execute(
@@ -473,8 +476,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("create_project failed: %s", e)
-            return False
+            logger.exception("create_project 失败: %s", e)
+            raise RepositoryError(f"创建项目失败: {e}", details={"project_id": proj.id}) from e
 
     def get_project(self, proj_id: str) -> Project | None:
         try:
@@ -543,8 +546,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("save_run failed: %s", e)
-            return False
+            logger.exception("save_run 失败: %s", e)
+            raise RepositoryError(f"保存 Run 失败: {e}", details={"run_id": run.run_id}) from e
 
     def get_run(self, run_id: str) -> AgentRun | None:
         try:
@@ -633,8 +636,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("save_usage_event failed: %s", e)
-            return False
+            logger.exception("save_usage_event 失败: %s", e)
+            raise RepositoryError(f"保存用量事件失败: {e}", details={"event_id": evt.id}) from e
 
     def list_usage_events(self, project_id: str, limit: int = 100) -> list[UsageEventRecord]:
         try:
@@ -695,8 +698,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("save_regression_case failed: %s", e)
-            return False
+            logger.exception("save_regression_case 失败: %s", e)
+            raise RepositoryError(f"save_regression_case 失败: {e}") from e
 
     def list_regression_cases(self, project_id: str) -> list[RegressionCaseRecord]:
         try:
@@ -741,8 +744,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("create_human_review failed: %s", e)
-            return False
+            logger.exception("create_human_review 失败: %s", e)
+            raise RepositoryError(f"create_human_review 失败: {e}") from e
 
     def get_human_review(self, review_id: str) -> HumanReviewRecord | None:
         try:
@@ -774,8 +777,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("update_human_review failed: %s", e)
-            return False
+            logger.exception("update_human_review 失败: %s", e)
+            raise RepositoryError(f"update_human_review 失败: {e}") from e
 
     # ------------------------------------------------------------------
     # ApiKey
@@ -793,8 +796,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("create_api_key failed: %s", e)
-            return False
+            logger.exception("create_api_key 失败: %s", e)
+            raise RepositoryError(f"create_api_key 失败: {e}") from e
 
     def get_api_key_by_hash(self, key_hash: str) -> ApiKeyRecord | None:
         try:
@@ -825,8 +828,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("revoke_api_key failed: %s", e)
-            return False
+            logger.exception("revoke_api_key 失败: %s", e)
+            raise RepositoryError(f"revoke_api_key 失败: {e}") from e
 
     def list_api_keys(self, workspace_id: str) -> list[ApiKeyRecord]:
         try:
@@ -867,8 +870,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("save_skill failed: %s", e)
-            return False
+            logger.exception("save_skill 失败: %s", e)
+            raise RepositoryError(f"save_skill 失败: {e}") from e
 
     def get_skill(self, skill_id: str) -> SkillRecord | None:
         try:
@@ -915,8 +918,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("save_skill_patch failed: %s", e)
-            return False
+            logger.exception("save_skill_patch 失败: %s", e)
+            raise RepositoryError(f"save_skill_patch 失败: {e}") from e
 
     def get_skill_patch(self, patch_id: str) -> SkillPatchRecord | None:
         try:
@@ -959,8 +962,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("update_skill_patch_status failed: %s", e)
-            return False
+            logger.exception("update_skill_patch_status 失败: %s", e)
+            raise RepositoryError(f"update_skill_patch_status 失败: {e}") from e
 
     # ------------------------------------------------------------------
     # ValidationRun
@@ -981,8 +984,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("save_validation_run failed: %s", e)
-            return False
+            logger.exception("save_validation_run 失败: %s", e)
+            raise RepositoryError(f"save_validation_run 失败: {e}") from e
 
     def get_validation_run(self, patch_id: str) -> ValidationRunRecord | None:
         try:
@@ -1029,8 +1032,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("save_billing_plan failed: %s", e)
-            return False
+            logger.exception("save_billing_plan 失败: %s", e)
+            raise RepositoryError(f"save_billing_plan 失败: {e}") from e
 
     def get_billing_plan(self, workspace_id: str) -> BillingPlanRecord | None:
         try:
@@ -1075,8 +1078,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("save_audit_log failed: %s", e)
-            return False
+            logger.exception("save_audit_log 失败: %s", e)
+            raise RepositoryError(f"save_audit_log 失败: {e}") from e
 
     def list_audit_logs(
         self, workspace_id: str, limit: int = 50,
@@ -1120,8 +1123,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("save_workspace_member failed: %s", e)
-            return False
+            logger.exception("save_workspace_member 失败: %s", e)
+            raise RepositoryError(f"save_workspace_member 失败: {e}") from e
 
     def list_workspace_members(self, workspace_id: str) -> list[WorkspaceMember]:
         try:
@@ -1194,8 +1197,8 @@ class SaasRepository:
                 conn.commit()
                 return True
             except Exception as e:
-                logger.warning("save_eval_result failed: %s", e)
-                return False
+                logger.exception("save_eval_result 失败: %s", e)
+            raise RepositoryError(f"save_eval_result 失败: {e}") from e
 
     # ------------------------------------------------------------------
     # SaaS v1.5: User 认证
@@ -1212,8 +1215,8 @@ class SaasRepository:
             conn.commit()
             return True
         except Exception as e:
-            logger.warning("save_user failed: %s", e)
-            return False
+            logger.exception("save_user 失败: %s", e)
+            raise RepositoryError(f"save_user 失败: {e}") from e
 
     def get_user_by_email(self, email: str) -> Any | None:
         """按邮箱查找用户。"""
