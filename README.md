@@ -211,7 +211,7 @@ Connect any MCP-compatible client in 3 steps:
 {
   "mcpServers": {
     "stableagent": {
-      "url": "http://localhost:8000/mcp/v5",
+      "url": "http://localhost:8000/mcp",
       "transport": "http"
     }
   }

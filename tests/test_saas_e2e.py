@@ -121,7 +121,7 @@ class TestSaaSE2E:
 
         # 17. Skill Patch 提交
         # 先通过 MCP 工具提交 patch
-        r = client.post("/mcp/v5/mcp", json={
+        r = client.post("/mcp", json={
             "jsonrpc": "2.0", "method": "tools/call", "id": 1,
             "params": {
                 "name": "stableagent.skill.patch_propose",

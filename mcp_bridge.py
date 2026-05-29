@@ -6,7 +6,7 @@ StableAgent OS — MCP stdio-to-HTTP 桥接器
 从 stdin 读取 JSON-RPC 请求 → 转发到本地 HTTP MCP Gateway → stdout 返回。
 
 用法：
-    python mcp_bridge.py [--url http://localhost:8000/mcp/v5/mcp]
+    python mcp_bridge.py [--url http://localhost:8000/mcp]
 
 在 OpenCode/claude 的 mcp.json 中配置：
     {
@@ -25,7 +25,7 @@ import http.client
 from urllib.parse import urlparse
 
 
-MCP_URL = "http://localhost:8000/mcp/v5/mcp"  # V5.6: V5 gateway 挂载在 /mcp/v5
+MCP_URL = "http://localhost:8000/mcp"  # V5.6: V5 gateway 挂载在 /mcp/v5
 
 
 def forward(request: dict, url: str) -> dict:

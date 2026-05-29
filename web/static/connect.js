@@ -1,5 +1,5 @@
 // connect.js — StableAgent OS 一键接入页面
-const MCP_URL = window.location.origin + '/mcp/v5/mcp';
+const MCP_URL = window.location.origin + '/mcp';
 const HEALTH_URL = window.location.origin + '/api/connect/health';
 
 function showToast(msg) {

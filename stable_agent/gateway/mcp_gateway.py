@@ -90,9 +90,9 @@ class MCPGateway:
 
     def create_fastapi_app(self) -> FastAPI:
         """创建包含 /mcp 端点的 FastAPI app。"""
-        app: FastAPI = FastAPI(title="StableAgent MCP Gateway")
+        app: FastAPI = FastAPI(title="StableAgent Cloud — MCP Gateway")
 
-        @app.post("/mcp")
+        @app.post("/")
         async def mcp_post(req: Request):
             body: dict[str, Any] = await req.json()
             result: dict[str, Any] = self.jsonrpc.handle(body)
@@ -115,7 +115,7 @@ class MCPGateway:
             result = self._serialize_dataclasses(result)
             return JSONResponse(content=result)
 
-        @app.get("/mcp")
+        @app.get("/")
         async def mcp_get(req: Request):
             run_id: str = req.query_params.get("run_id", "")
             if not run_id:

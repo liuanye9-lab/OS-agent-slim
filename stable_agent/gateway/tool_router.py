@@ -160,32 +160,66 @@ class ToolRouter:
             self._append_to_store(ctx.run_id, failed_event)
             return forbidden_result
 
-        # 高风险 → 创建审批请求（STUB：简化处理，标记需要审批但继续执行）
+        # 高风险 → 硬阻断，不执行 handler (Commercial SaaS P0)
         needs_approval: bool = risk_level == "high"
-        if needs_approval and self._approval_manager is not None:
+        if needs_approval:
+            approval_id = ""
             try:
-                approval_req = self._approval_manager.create_request(
-                    run_id=ctx.run_id,
-                    action=f"执行高风险工具 {tool_name}",
-                    risk=risk_level,
-                    reason=f"工具 {tool_name} 被风险评估为高风险",
-                    details={"tool_name": tool_name, "args": args},
-                )
-                # 发布审批事件
-                approval_event: dict[str, Any] = self._make_event_dict(
-                    ctx, "approval.required",
-                    payload={
-                        "tool_name": tool_name,
-                        "request_id": approval_req.request_id,
-                        "risk": risk_level,
-                    },
-                    plain_text=f"高风险工具 {tool_name} 需要审批（request_id={approval_req.request_id}）",
-                )
-                self._publish_event(approval_event)
-                self._append_to_store(ctx.run_id, approval_event)
+                if self._approval_manager is not None:
+                    approval_req = self._approval_manager.create_request(
+                        run_id=ctx.run_id,
+                        action=f"执行高风险工具 {tool_name}",
+                        risk=risk_level,
+                        reason=f"工具 {tool_name} 被风险评估为高风险",
+                        details={"tool_name": tool_name, "args": args},
+                    )
+                    approval_id = approval_req.request_id
+                elif self._event_stream is not None:
+                    # 无 approval_manager 时生成占位 ID
+                    import uuid
+                    approval_id = f"approval_{uuid.uuid4().hex[:12]}"
             except Exception as e:
-                # 审批创建失败不阻塞执行
-                logger.warning("审批请求创建失败，继续执行: %s", e)
+                logger.warning("审批请求创建失败，仍阻断执行: %s", e)
+                import uuid
+                approval_id = f"approval_{uuid.uuid4().hex[:12]}"
+
+            # 发布审批事件
+            approval_event: dict[str, Any] = self._make_event_dict(
+                ctx, "approval.required",
+                payload={"tool_name": tool_name, "approval_id": approval_id, "risk": risk_level},
+                plain_text=f"高风险工具 {tool_name} 需要审批（审批ID={approval_id}）",
+            )
+            self._publish_event(approval_event)
+            self._append_to_store(ctx.run_id, approval_event)
+
+            # 发布 tool.blocked 事件
+            blocked_event: dict[str, Any] = self._make_event_dict(
+                ctx, "tool.blocked.waiting_approval",
+                payload={"tool_name": tool_name, "approval_id": approval_id, "risk": risk_level},
+                plain_text=f"工具 {tool_name} 已暂停，等待审批",
+            )
+            self._publish_event(blocked_event)
+            self._append_to_store(ctx.run_id, blocked_event)
+
+            # 硬阻断：不执行 handler，返回 waiting_approval
+            return StableAgentToolResult(
+                ok=False,
+                run_id=ctx.run_id,
+                tool_call_id=ctx.tool_call_id,
+                tool_name=tool_name,
+                plain_text=f"高风险工具 {tool_name} 需要审批（审批ID={approval_id}）",
+                plain_text_zh=f"⏳ {tool_name} 需要你在 Review 面板审批后才能执行",
+                plain_text_en=f"⏳ {tool_name} requires approval before execution",
+                trace_url=f"/runs/{ctx.run_id}",
+                dashboard_url=f"/runs/{ctx.run_id}",
+                data={
+                    "approval_required": True,
+                    "approval_id": approval_id,
+                    "risk_level": risk_level,
+                },
+                next_actions=["在 Review 面板审批此操作"],
+                is_error=False,
+            )
 
         # 5. 发布 tool.risk_checked 事件
         risk_checked_event: dict[str, Any] = self._make_event_dict(

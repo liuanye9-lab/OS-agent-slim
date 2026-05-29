@@ -22,7 +22,7 @@ class SetupDetector:
 
     def get_endpoint(self) -> str:
         """返回 MCP 端点 URL。"""
-        return f"http://{self._host}:{self._port}/mcp/v5/mcp"
+        return f"http://{self._host}:{self._port}/mcp"
 
     def get_dashboard_url(self) -> str:
         """返回 Dashboard URL。"""

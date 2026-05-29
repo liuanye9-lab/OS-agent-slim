@@ -111,7 +111,10 @@ def create_app() -> FastAPI:
     )
 
     # ------------------------------------------------------------------
-    # 3. V5: 先挂载统一 MCP Gateway（必须放在 /mcp 之前，避免被旧 /mcp 遮蔽）
+    # 3. Commercial SaaS: 统一 MCP 入口
+    #    /mcp        → V5/V6 Gateway (生产主入口)
+    #    /mcp/legacy → 旧 MCPServer (向后兼容)
+    #    /mcp/v5     → V5 Gateway alias (deprecated, 重定向到 /mcp)
     # ------------------------------------------------------------------
     try:
         from stable_agent.gateway.mcp_gateway import MCPGateway
@@ -121,7 +124,11 @@ def create_app() -> FastAPI:
         gateway: MCPGateway = MCPGateway(orchestrator=orchestrator)
         gateway_run_store = gateway.run_store
         v5_app = gateway.create_fastapi_app()
-        app.mount("/mcp/v5", v5_app)
+
+        # 生产主入口: /mcp
+        app.mount("/mcp", v5_app)
+        # Legacy alias: /mcp/v5 (保留向后兼容)
+        # 注意: /mcp/v5 别名通过 connect API 自动指向 /mcp 即可
 
         # 创建 DashboardSync 并挂载（使用 gateway 的 event_stream）
         dash_sync: DashboardSync = DashboardSync(gateway.event_stream)
@@ -133,7 +140,7 @@ def create_app() -> FastAPI:
         logging.getLogger("uvicorn").warning(f"V5 MCP Gateway mount skipped: {e}")
 
     # ------------------------------------------------------------------
-    # 4. 挂载 MCP Server（/mcp 前缀）
+    # 4. Legacy MCPServer（/mcp/legacy 前缀 — 向后兼容）
     # ------------------------------------------------------------------
     mcp_server: MCPServer = MCPServer(
         decision_engine=decision_engine,
@@ -145,7 +152,7 @@ def create_app() -> FastAPI:
         event_bus=event_bus,
         mcp_tools=mcp_tools,
     )
-    app.mount("/mcp", mcp_server.app)
+    app.mount("/mcp/legacy", mcp_server.app)
 
     # ------------------------------------------------------------------
     # 5. 配置静态文件和模板
@@ -570,7 +577,7 @@ def create_app() -> FastAPI:
             import httpx
             async with httpx.AsyncClient(timeout=5) as client:
                 resp = await client.post(
-                    "http://127.0.0.1:8000/mcp/v5/mcp",
+                    "http://127.0.0.1:8000/mcp",
                     json={"jsonrpc": "2.0", "method": "tools/list", "id": 1},
                 )
                 data = resp.json()

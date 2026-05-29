@@ -10,7 +10,7 @@ class ConfigGenerator:
     def __init__(self, host: str = "127.0.0.1", port: int = 8000):
         self._host = host
         self._port = port
-        self._mcp_url = f"http://{host}:{port}/mcp/v5/mcp"
+        self._mcp_url = f"http://{host}:{port}/mcp"
 
     def claude_config(self) -> dict[str, Any]:
         """为 Claude Code 生成配置。"""

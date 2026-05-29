@@ -67,7 +67,7 @@ code{background:rgba(0,0,0,.06);padding:2px 6px;border-radius:4px;font-size:13px
     <div class="step"><span class="num">1</span>打开 Codex</div>
     <div class="step"><span class="num">2</span>粘贴这段提示词</div>
     <textarea style="width:100%;height:80px;border-radius:8px;border:1px solid var(--gb);padding:8px;font-size:12px;resize:vertical;background:rgba(0,0,0,.03)" readonly id="codexPrompt">请帮我连接 StableAgent OS MCP Server。
-端点: http://127.0.0.1:8000/mcp/v5/mcp
+端点: http://127.0.0.1:8000/mcp
 连接后调用 tools/list，然后调用 stableagent.task.os_agent。
 每次用大白话告诉我: Agent在做什么 / 进度% / 下一步是什么。
 不要伪造数据，只用 MCP 返回的 structuredContent。</textarea>
@@ -96,7 +96,7 @@ code{background:rgba(0,0,0,.06);padding:2px 6px;border-radius:4px;font-size:13px
   "mcpServers": {
     "stableagent": {
       "transport": "streamable_http",
-      "url": "http://127.0.0.1:8000/mcp/v5/mcp"
+      "url": "http://127.0.0.1:8000/mcp"
     }
   }
 }</textarea>
