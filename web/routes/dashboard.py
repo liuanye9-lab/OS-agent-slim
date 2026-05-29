@@ -1,0 +1,68 @@
+"""Dashboard 页面路由 — /, /dashboard/*, /runs/{id}, /login, /connect."""
+from __future__ import annotations
+
+import os
+from fastapi import Request
+from fastapi.responses import HTMLResponse
+
+
+def _serve_html(path: str) -> HTMLResponse:
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    return HTMLResponse(content="<h1>Page not found</h1>", status_code=404)
+
+
+def register_pages(app, templates_dir: str) -> None:
+    """注册所有页面路由。"""
+    _dash = os.path.join(templates_dir, "dashboard.html")
+    _dash_v2 = os.path.join(templates_dir, "dashboard_v2.html")
+    _dash_v3 = os.path.join(templates_dir, "dashboard_v3.html")
+    _usage = os.path.join(templates_dir, "usage.html")
+    _apikeys = os.path.join(templates_dir, "apikeys.html")
+    _billing = os.path.join(templates_dir, "billing.html")
+    _team = os.path.join(templates_dir, "team.html")
+    _skills = os.path.join(templates_dir, "skills.html")
+    _review = os.path.join(templates_dir, "review.html")
+    _login = os.path.join(templates_dir, "login.html")
+    _connect = os.path.join(templates_dir, "connect.html")
+
+    @app.get("/")
+    async def root():
+        if os.path.exists(_dash):
+            with open(_dash, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read())
+        return HTMLResponse(content="<h1>Dashboard not found</h1>", status_code=404)
+
+    @app.get("/dashboard/v2")
+    async def dashboard_v2(): return _serve_html(_dash_v2)
+
+    @app.get("/runs/{run_id}")
+    async def run_page(run_id: str):
+        if os.path.exists(_dash_v3):
+            with open(_dash_v3, "r", encoding="utf-8") as f:
+                html = f.read()
+            html = html.replace("<head>", f'<head>\n    <meta name="run-id" content="{run_id}">')
+            return HTMLResponse(content=html)
+        return _serve_html(_dash_v2)
+
+    @app.get("/dashboard/v3")
+    async def dashboard_v3(): return _serve_html(_dash_v3)
+
+    # SaaS pages
+    @app.get("/dashboard/usage")
+    async def saas_usage(): return _serve_html(_usage)
+    @app.get("/dashboard/apikeys")
+    async def saas_apikeys(): return _serve_html(_apikeys)
+    @app.get("/dashboard/billing")
+    async def saas_billing(): return _serve_html(_billing)
+    @app.get("/dashboard/team")
+    async def saas_team(): return _serve_html(_team)
+    @app.get("/dashboard/skills")
+    async def saas_skills(): return _serve_html(_skills)
+    @app.get("/dashboard/review")
+    async def saas_review(): return _serve_html(_review)
+    @app.get("/login")
+    async def login_page(): return _serve_html(_login)
+    @app.get("/connect")
+    async def connect_page(): return _serve_html(_connect)
