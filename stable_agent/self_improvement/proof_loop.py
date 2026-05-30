@@ -51,6 +51,7 @@ from stable_agent.self_improvement.regression_validation_runner import (
 )
 from stable_agent.self_improvement.validation_report import ValidationReport
 from stable_agent.self_improvement.human_review_queue import HumanReviewQueue  # V6.3
+from stable_agent.self_improvement.feishu_notifier import FeishuNotifier  # V7.1
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,9 @@ class SelfImprovementProofLoop:
 
         # V6.3: Human Review Queue（真实审核通道）
         self.review_queue: HumanReviewQueue = HumanReviewQueue()
+
+        # V7.1: Feishu Notifier
+        self.feishu: FeishuNotifier = FeishuNotifier()
 
     # ------------------------------------------------------------------
     # 公共方法
@@ -234,6 +238,16 @@ class SelfImprovementProofLoop:
                             len(review_req.to_notification()),
                         )
                     logger.info("patch %s validation passed, → waiting_review", entry.patch_id)
+                    # V7.1: 飞书通知
+                    if review_req:
+                        self.feishu.send_review_notification(
+                            patch_id=entry.patch_id,
+                            review_id=review_req.review_id,
+                            action="submitted",
+                            failure_mode=failure_mode,
+                            new_rule_preview=patch.new_rule[:100] if patch else "",
+                            risk_level=patch.risk_level if patch else "low",
+                        )
                 else:
                     # 验证失败 → 标记但状态不同
                     validation_passed = False
@@ -429,9 +443,7 @@ class SelfImprovementProofLoop:
         return self._export_best_skill()
 
     def _notify_feishu(self, patch_id: str, review_id: str, action: str) -> str:
-        """V7.1: 飞书通知。
-
-        通过 lark-im 发送审核通知。需要飞书机器人已配置。
+        """V7.1: 飞书通知（真实发送）。
 
         Args:
             patch_id: Patch ID。
@@ -439,28 +451,22 @@ class SelfImprovementProofLoop:
             action: "submitted" / "approved" / "rejected"。
 
         Returns:
-            通知结果消息（成功/失败）。
+            发送结果。
         """
         queue = self.review_queue
         req = queue.get(review_id)
         if req is None:
             return "review not found"
 
-        action_zh = {"submitted": "待审核", "approved": "已通过", "rejected": "已拒绝"}
-        label = action_zh.get(action, action)
-
-        msg = (
-            f"🔔 Skill Patch 审核 {label}\n"
-            f"Patch: {patch_id}\n"
-            f"失败模式: {req.failure_mode}\n"
-            f"风险等级: {req.risk_level}\n"
-            f"新规则: {req.new_rule[:100]}...\n"
-            f"\nAPI 审批: POST /api/reviews/{review_id}/approve|reject"
+        success = self.feishu.send_review_notification(
+            patch_id=patch_id,
+            review_id=review_id,
+            action=action,
+            failure_mode=req.failure_mode,
+            new_rule_preview=req.new_rule[:100],
+            risk_level=req.risk_level,
         )
-
-        logger.info("Feishu notification prepared: %s", review_id)
-        # 实际发送需要 lark-im connector（外部依赖）
-        return f"notification prepared for {review_id}: {msg[:80]}..."
+        return f"feishu sent: {success}" if success else "feishu skipped (not configured)"
 
     @property
     def stats(self) -> dict:

@@ -27,6 +27,15 @@ import time
 import uuid
 from typing import Optional
 
+# V7.1: 加载 .env 环境变量（飞书凭证等）
+try:
+    from dotenv import load_dotenv
+    import os as _os
+    _env_path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))), ".env")
+    load_dotenv(_env_path)
+except ImportError:
+    pass  # python-dotenv 未安装，使用系统环境变量
+
 logger = logging.getLogger(__name__)
 
 from stable_agent.models import (
