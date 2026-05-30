@@ -168,9 +168,7 @@ class StableAgentOrchestrator:
             self.llm_client = get_llm_client()
         self.eval_dataset_mgr: EvalDatasetManager = EvalDatasetManager()
 
-        # MCP 工具注册中心（延迟绑定 orchestrator 自身）
-        from stable_agent.mcp_tools import MCPToolRegistry
-        self.mcp_tools: MCPToolRegistry = MCPToolRegistry(self)
+        # V6.2: MCPToolRegistry (V3) 已物理删除。工具注册走 gateway/unified_tool_registry.py
 
         # V6.0: Self-Improvement Proof Loop
         self.proof_loop: SelfImprovementProofLoop = SelfImprovementProofLoop(

@@ -3,7 +3,6 @@
 本包提供运行时的观察与追踪能力：
 - RunStore: 按 run_id 索引的内存存储，管理事件和运行状态
 - EventStream: 异步事件流，支持按 run_id 的多订阅者发布/订阅
-- ProgressModel: V6.5 后端统一进度模型（11 标准化阶段）
 - DecisionTraceBuilder: 从 event payload 构建 DecisionTrace
 - RunInsightGenerator: 任务结束后生成用户可读总结
 - LearningEvidence: SkillOpt 学习证据
@@ -25,9 +24,7 @@ from stable_agent.observation.dashboard_projection import DashboardProjection
 from stable_agent.observation.user_feedback_signal import (
     UserFeedbackSignal, FEEDBACK_TYPES, FEEDBACK_LABELS,
 )
-from stable_agent.observation.progress_model import (
-    ProgressTracker, ProgressStage, PROGRESS_STAGES,
-)
+# V6.2: ProgressModel 已移除导出 — 被 runtime/run_lifecycle.py 的 22 阶段 RunLifecycle 替代
 
 __all__ = [
     "RunStore",
@@ -44,7 +41,4 @@ __all__ = [
     "UserFeedbackSignal",
     "FEEDBACK_TYPES",
     "FEEDBACK_LABELS",
-    "ProgressTracker",
-    "ProgressStage",
-    "PROGRESS_STAGES",
 ]

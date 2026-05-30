@@ -99,10 +99,8 @@ def create_app() -> FastAPI:
     except Exception as e:
         logger.warning(f"V5 MCP Gateway mount skipped: {e}")
 
-    # V6.0: V3/V4 MCP Legacy 已断连
-    # mcp_server.py 和 mcp_tools.py 文件保留（mark deprecated），
-    # 但 /mcp/legacy 路由不再挂载。计划 V7.0 物理删除。
-    logger.info("V6.0: /mcp/legacy 路由已断连，V3/V4 MCP deprecated")
+    # V6.2: V3/V4 MCP 已物理删除（mcp_server.py, mcp_tools.py, mcp/skillopt_tools.py）
+    logger.info("V6.2: /mcp/legacy 及相关 V3/V4 MCP 已物理删除")
 
     # ------------------------------------------------------------------
     # 4. Static files + templates

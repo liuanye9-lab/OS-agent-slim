@@ -30,25 +30,37 @@ def register_pages(app, templates_dir: str) -> None:
 
     @app.get("/")
     async def root():
-        if os.path.exists(_dash):
-            with open(_dash, "r", encoding="utf-8") as f:
+        # V6.2: 默认首页重定向到 run_observer（推荐入口）
+        if os.path.exists(_observer):
+            with open(_observer, "r", encoding="utf-8") as f:
                 return HTMLResponse(content=f.read())
-        return HTMLResponse(content="<h1>Dashboard not found</h1>", status_code=404)
+        return _serve_html(_dash)
+
+    @app.get("/dashboard")
+    async def dashboard_legacy(): return _serve_html(_dash)
 
     @app.get("/dashboard/v2")
     async def dashboard_v2(): return _serve_html(_dash_v2)
 
     @app.get("/runs/{run_id}")
     async def run_page(run_id: str):
-        if os.path.exists(_dash_v3):
-            with open(_dash_v3, "r", encoding="utf-8") as f:
-                html = f.read()
-            html = html.replace("<head>", f'<head>\n    <meta name="run-id" content="{run_id}">')
-            return HTMLResponse(content=html)
-        return _serve_html(_dash_v2)
+        # V6.2: /runs/{id} 改为 redirect 到 observer
+        return HTMLResponse(
+            content=f'<html><head><meta http-equiv="refresh" content="0;url=/observe/{run_id}"></head>'
+            f'<body><p>重定向到 <a href="/observe/{run_id}">实时观察器</a>...</p></body></html>',
+            status_code=302,
+            headers={"Location": f"/observe/{run_id}"},
+        )
 
     @app.get("/dashboard/v3")
-    async def dashboard_v3(): return _serve_html(_dash_v3)
+    async def dashboard_v3():
+        # V6.2: 重定向到 observer
+        return HTMLResponse(
+            content='<html><head><meta http-equiv="refresh" content="0;url=/observer"></head>'
+            '<body><p>重定向到 <a href="/observer">实时观察器</a>...</p></body></html>',
+            status_code=302,
+            headers={"Location": "/observer"},
+        )
 
     # SaaS pages
     @app.get("/dashboard/usage")
