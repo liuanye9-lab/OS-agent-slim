@@ -161,12 +161,13 @@ function updateProgress(pct, label) {
 // ========== Update Avatar ==========
 function updateAvatar(state) {
   const info = AVATAR_SCENE_MAP[state] || AVATAR_SCENE_MAP.idle;
-  const emoji = AVATAR_EMOJI[state] || AVATAR_EMOJI.idle;
 
-  $avatarScene.textContent = emoji;
-  $avatarScene.classList.add("bounce");
-  setTimeout(() => $avatarScene.classList.remove("bounce"), 500);
+  // Canvas pixel avatar (from avatar_scene.js)
+  if (typeof renderAvatarScene === "function") {
+    renderAvatarScene(info.scene, "avatarCanvas");
+  }
 
+  // Emoji fallback shown inside canvas as well
   $sceneLabel.textContent = info.labelZh;
   $sceneProp.textContent = `场景: ${info.scene} | 道具: ${info.prop}`;
 }

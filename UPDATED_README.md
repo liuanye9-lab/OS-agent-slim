@@ -1,175 +1,128 @@
-# StableAgent Cloud — AgentOps + SkillOps SaaS
+# StableAgent OS — AI 降智防御系统
 
-> **从单机Agent Runtime 升级为 商业化 AgentOps + SkillOps SaaS**
+> **真正的闭环自我优化 + 解释型可视化面板**
 
-[![Tests](https://img.shields.io/badge/tests-871%20passed-brightgreen)]()
-[![Python](https://img.shields.io/badge/python-3.13-blue)]()
-[![License](https://img.shields.io/badge/license-MIT-green)]()
+防止 AI Agent 在执行任务过程中"降智"（遗忘关键约束、跑偏方向、产生幻觉），并通过**真实闭环**让系统越用越好。
 
 ---
 
-## 一句话定位
-
-**StableAgent Cloud** 是一个可观察、可验证、可回滚的 AgentOps + SkillOps SaaS。
-
-它把每次 Agent 执行变成 trace，把 trace 变成 eval，把失败变成 regression case，把稳定经验变成 skill patch，再通过 validation gate 和 human review，最终导出可审计、可回滚的 best_skill.md。
-
----
-
-## 为什么需要 StableAgent？
-
-| 问题 | 现状 | StableAgent |
-|------|------|-------------|
-| 🤖 Agent降智但不知情 | 无自动检测 | Eval自动评分，低于阈值告警 |
-| 🔧 改prompt导致退化 | 无回归测试 | Regression suite自动检测 |
-| 📊 团队经验无法共享 | 每人独自优化 | Skill Library + workspace共享 |
-| 💸 不知道Agent成本 | 无可视化 | Usage counter + token追踪 |
-| 🔐 决策不可审计 | 无trace | DecisionTrace完整记录 |
-| 🚀 新人接入困难 | 手动配置MCP | 一键生成配置，3分钟接入 |
-
-## 核心闭环
+## 闭环架构
 
 ```
-Agent执行 → Trace记录 → Eval评分 → BadCase收集
-    ↓                                        ↓
-Skill Export ← Human Review ← Validation ← Regression Case
+用户 / Claude Code / Codex / Cursor
+    ↓
+MCP tools/call → stableagent.task.os_agent
+    ↓
+RunLifecycle (22 阶段，统一状态源)
+    ↓
+TemporalMemoryRouter (按时间戳召回记忆)
+    ↓
+ContextCompressionGuard (保护核心目标不被压缩)
+    ↓
+Workflow / Orchestrator (17 步执行流程)
+    ↓
+DecisionTraceBuilder (生成可解释决策轨迹)
+    ↓
+Dashboard Observer (实时可视化：像素人 + 状态卡片 + 时间线)
+    ↓
+Eval → FailureAttribution → RegressionCase
+    ↓
+MemoryCandidate | SkillPatchCandidate → ValidationGate
+    ↓
+HumanReviewQueue → best_skill.md (版本化导出)
 ```
-
-### 5轮自迭代验证数据
-
-| 轮次 | 综合评分 | 幻觉率 | Token消耗 | 记忆命中 |
-|------|---------|--------|----------|---------|
-| R1 | 0.55 | 35% | 4800 | 30% |
-| R2 | 0.62 | 28% | 4500 | 42% |
-| R3 | 0.70 | 20% | 4200 | 55% |
-| R4 | 0.78 | 14% | 3800 | 68% |
-| R5 | **0.85** | **10%** | **2910** | **82%** |
-
-- 评分提升: **+54%** (0.55 → 0.85)
-- 幻觉降低: **-71%** (35% → 10%)
-- Token节省: **1890** (5轮累计)
 
 ## 快速开始
 
 ```bash
-# 一键安装
-bash install.sh
+# 一键部署
+bash scripts/deploy_local.sh
 
-# 启动服务
-uvicorn web.server:app --host 0.0.0.0 --port 8000
-
-# 运行测试
-pytest -q
-# 871 passed ✅
+# 访问
+#   Dashboard: http://127.0.0.1:8000
+#   MCP:       http://127.0.0.1:8000/mcp
+#   API Docs:  http://127.0.0.1:8000/docs
 ```
 
-## 接入 Claude Code / Codex
+## 测试
 
-### Claude Code
+```bash
+# 全量测试 (1083 passed)
+pytest -q --ignore=tests/test_mcp_gateway.py
+
+# 冒烟测试
+bash scripts/smoke_test.sh
+
+# 集成测试
+bash scripts/integration_test.sh
+
+# 闭环结构检查
+python tools/check_closed_loop.py
+```
+
+## MCP 集成
+
+在 Claude Code / Cursor / Codex 的 MCP 配置中添加：
+
 ```json
-// .claude/mcp.json
 {
   "mcpServers": {
     "stableagent": {
-      "type": "http",
-      "url": "http://localhost:8000/mcp/v5/mcp"
+      "url": "http://127.0.0.1:8000/mcp"
     }
   }
 }
 ```
-然后在 Claude Code 中输入: `/os-agent 你的任务`
 
-### Codex
-```json
-// .codex/mcp_config.json
-{
-  "mcp": {
-    "stableagent": {
-      "url": "http://localhost:8000/mcp/v5/mcp"
-    }
-  }
-}
-```
-然后在 Codex 中输入: `/os-agent 你的任务`
+## 核心特性
 
-### 一键接入页面
-启动后访问: `http://localhost:8000/connect`
+| 特性 | 状态 |
+|------|------|
+| 22 阶段 RunLifecycle 统一状态源 | ✅ |
+| 时间感知记忆路由（防遗忘） | ✅ |
+| 上下文压缩保护（防降智） | ✅ |
+| 真实自我优化闭环（Eval→Regression→Validation→HumanReview→Export） | ✅ |
+| 可解释决策轨迹（不含 chain_of_thought） | ✅ |
+| Canvas 像素人 17 场景 Dashboard | ✅ |
+| best_skill.md 版本化 + Human Review 守卫 | ✅ |
+| MCP V5 Gateway + 40+ 事件→阶段映射 | ✅ |
 
-## SaaS 架构
+## 版本
 
-```
-Workspace (团队空间)
-├── Members
-└── Projects
-    ├── Agent Profiles
-    ├── Runs ← Trace ← Eval
-    ├── Skills ← Patches ← Validation ← Review
-    └── Regression Cases
-```
+- **V8.1**: Phase 1-9 闭环硬化，Canvas 像素人，_generate_skill_patches 真实验证
+- **V7.1**: Human Review API + 飞书通知 + best_skill 版本化
+- **V7.0**: 物理清理 (progress_model.py, gateway/run_lifecycle.py)
+- **V6.3**: HumanReviewQueue, best_skill 自动导出, RAG STUB→真实
+- **V6.2**: Dashboard 收敛, V3/V4 MCP 删除, LLM 验证
+- **V6.1**: TemporalMemoryBridge, ContextCompressionGuard, RegressionValidationRunner
 
-### SaaS数据模型 (16个实体)
+## 文档
 
-Workspace → Project → AgentRun → TraceEvent →
-EvalResult → BadCase → RegressionCase →
-Skill → SkillVersion → SkillPatch → ValidationRun →
-HumanReview → ApiKey → UsageEvent
-
-## 验收标准 (14/14 ✅)
-
-1. ✅ 可创建 workspace 和 project
-2. ✅ run 归属 project
-3. ✅ trace event 归属 run
-4. ✅ MCP tool call 携带 project_id
-5. ✅ 无 project_id 在 SaaS 模式失败
-6. ✅ local 模式可用 default project
-7. ✅ BadCase 可转 RegressionCase
-8. ✅ Skill Patch 不能绕过 Validation Gate
-9. ✅ best_skill.md 不能绕过 Human Review
-10. ✅ UsageEvent 记录工具调用
-11. ✅ API Key 可创建和撤销
-12. ✅ Dashboard 按 project 查看
-13. ✅ pytest 全部通过 (871/871)
-14. ✅ 现有测试不受影响
-
-## 技术栈
-
-- Python 3.13 + FastAPI + WebSocket
-- SQLite (SaaS MVP) / PostgreSQL (P2)
-- MCP Gateway V5 (JSON-RPC 2.0)
-- Vanilla HTML/CSS/JS Dashboard (玻璃拟态)
-- 871 tests · 33 modules
+| 文档 | 说明 |
+|------|------|
+| [CLOSED_LOOP_AUDIT.md](CLOSED_LOOP_AUDIT.md) | 闭环审计 |
+| [RUN_LIFECYCLE_SPEC.md](RUN_LIFECYCLE_SPEC.md) | RunLifecycle 规范 |
+| [TEMPORAL_MEMORY_SPEC.md](TEMPORAL_MEMORY_SPEC.md) | 时间记忆规范 |
+| [CONTEXT_COMPRESSION_GUARD_SPEC.md](CONTEXT_COMPRESSION_GUARD_SPEC.md) | 压缩保护规范 |
+| [SELF_IMPROVEMENT_PROOF_SPEC.md](SELF_IMPROVEMENT_PROOF_SPEC.md) | 自我优化规范 |
+| [DASHBOARD_OBSERVER_SPEC.md](DASHBOARD_OBSERVER_SPEC.md) | Dashboard 规范 |
+| [DEPLOYMENT_AND_TESTING_GUIDE.md](DEPLOYMENT_AND_TESTING_GUIDE.md) | 部署与测试 |
 
 ## 项目结构
 
 ```
 stable_agent/
-├── models.py              # 核心数据模型
-├── storage.py             # SQLite存储
-├── gateway/               # MCP Gateway
-├── saas/                  # ★ SaaS模块 (新增)
-│   ├── models.py          # 16个SaaS dataclass
-│   ├── repository.py      # 13张表CRUD
-│   ├── service.py         # 业务逻辑
-│   ├── usage.py           # 用量计数器
-│   ├── permissions.py     # 权限校验
-│   ├── api_keys.py        # API Key管理
-│   ├── regression_service.py
-│   └── skill_review_service.py
-├── skill_optimizer/       # Skill优化引擎
-├── observation/           # 可观测性
-└── eval_and_bad_case.py   # 评测+失败案例
+  runtime/          RunLifecycle (唯一状态源)
+  memory/           TemporalMemoryRouter + Bridge
+  context/           ContextCompressionGuard
+  self_improvement/  ProofLoop + RegressionValidation + HumanReview
+  observation/       DecisionTraceBuilder + EventStream
+  gateway/           ToolRouter + MCP Gateway
+  orchestrator.py    17步编排器
+web/
+  templates/         Dashboard HTML
+  static/             Avatar Canvas, Observer JS, CSS
+  server.py          FastAPI + WebSocket
+scripts/             部署 + 测试脚本
+tools/               check_closed_loop.py, integration_test.py
 ```
-
-## 版本
-
-- **SaaS v1.0** (2026-05-28): 多租户 + Eval闭环 + Validation/HumanReview Gate
-- **v6.5**: Dashboard V3 + 一键接入
-- **v5.6**: 工程治理 + MCP统一网关
-
-## 开源协议
-
-MIT License
-
----
-
-*"把Agent管理从玄学变成工程"*

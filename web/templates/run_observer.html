@@ -139,23 +139,14 @@
   }
 
   .avatar-scene {
-    width: 200px;
-    height: 200px;
+    width: 220px;
+    height: 220px;
     margin: 0 auto 12px;
-    border-radius: 50%;
+    border-radius: 20px;
     overflow: hidden;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 80px;
-    transition: transform 0.3s ease;
-  }
-
-  .avatar-scene.bounce { animation: avatarBounce 0.5s ease }
-
-  @keyframes avatarBounce {
-    0%, 100% { transform: scale(1) }
-    50% { transform: scale(1.05) }
+    display: block;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
   }
 
   .avatar-scene-scene { font-size: 64px; opacity: 0.6 }
@@ -410,7 +401,7 @@
   <!-- Left: Avatar Scene -->
   <aside class="left-col">
     <div class="avatar-card" id="avatarCard">
-      <div class="avatar-scene" id="avatarScene">👤</div>
+      <canvas id="avatarCanvas" width="220" height="220" class="avatar-scene"></canvas>
       <div class="scene-label" id="sceneLabel">等待任务</div>
       <div class="scene-prop" id="sceneProp">--</div>
     </div>
@@ -526,6 +517,7 @@
   </div>
 </div>
 
+<script src="/static/avatar_scene.js"></script>
 <script src="/static/run_observer.js"></script>
 </body>
 </html>

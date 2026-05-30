@@ -611,13 +611,9 @@ class SelfImprovementProofLoop:
             status="candidate",
         )
 
-        # 自动推进到 validating → validated（简化流程，真实场景应调用 LLM）
-        self.patch_store.start_validation(patch.patch_id)
-        self.patch_store.mark_validated(patch.patch_id, f"auto_validation_{run_id}")
-        entry.status = "validated"
-
-        # 自动提交审核
-        self.patch_store.submit_for_review(patch.patch_id)
-        entry.status = "waiting_review"
+        # V8.0: 不自动推进状态线。验证由 evaluate_and_learn() 中的
+        # RegressionValidationRunner.validate_patch() 驱动，
+        # 审核由 HumanReviewQueue 守卫。
+        # 旧行为：start_validation → mark_validated → submit_for_review（已移除）
 
         return [entry]
