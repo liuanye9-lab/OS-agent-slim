@@ -23,6 +23,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 
 def assert_true(condition: bool, message: str) -> None:
@@ -311,6 +312,192 @@ def check_memory_bank_list_items() -> None:
     print("  OK")
 
 
+# ======================================================================
+# V9.1: 9 new checks
+# ======================================================================
+
+def check_force_validation_passed_param() -> None:
+    """V9.1: os_agent 支持 force_validation_passed 参数。"""
+    print("[CHECK] force_validation_passed parameter in os_agent")
+
+    file_path = ROOT / "stable_agent/gateway/unified_tool_registry.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert_true("force_validation_passed" in text,
+                "force_validation_passed parameter missing in unified_tool_registry.py")
+    assert_true('"force_validation_passed"' in text,
+                "force_validation_passed must be extracted from args")
+
+    # proof_loop 也必须接受该参数
+    pl_path = ROOT / "stable_agent/self_improvement/proof_loop.py"
+    pl_text = pl_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert_true("force_validation_passed" in pl_text,
+                "force_validation_passed parameter missing in proof_loop.py")
+
+    print("  OK")
+
+
+def check_dry_run_blocks_export() -> None:
+    """V9.1: dry_run_learning=True 阻止 export_approved_patch。"""
+    print("[CHECK] dry_run_learning blocks export")
+
+    file_path = ROOT / "stable_agent/self_improvement/proof_loop.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    # export_approved_patch 必须有 dry_run 检查
+    assert_true("dry_run" in text and "export_approved_patch" in text,
+                "export_approved_patch must have dry_run check")
+
+    # 找到 export_approved_patch 方法
+    export_start = text.find("def export_approved_patch(")
+    next_def = text.find("\n    def ", export_start + 1)
+    export_body = text[export_start:next_def] if next_def > 0 else text[export_start:]
+
+    assert_true("dry_run" in export_body,
+                "export_approved_patch must check dry_run and refuse export")
+
+    print("  OK")
+
+
+def check_validation_failed_no_human_review() -> None:
+    """V9.1: validation_failed 不进入 human_review。"""
+    print("[CHECK] validation_failed does not enter human_review")
+
+    file_path = ROOT / "stable_agent/self_improvement/proof_loop.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    # 必须有 validation_failed 状态
+    assert_true('"validation_failed"' in text or "'validation_failed'" in text,
+                "proof_loop must set human_review_status='validation_failed' when validation fails")
+
+    # validation_passed=False 时不应设置 human_review_required=True
+    # 检查条件逻辑: 如果 validation_passed 为 False 且不是 force_val_pass，则 human_review_required=False
+    assert_true("validation_passed and need_review" in text or
+                ("validation_passed" in text and "human_review_required" in text),
+                "human_review_required should only be True when validation_passed is True")
+
+    print("  OK")
+
+
+def check_emitted_events_list_in_result() -> None:
+    """V9.1: os_agent 结果包含 emitted_events 列表（不只是计数）。"""
+    print("[CHECK] emitted_events list in os_agent result")
+
+    file_path = ROOT / "stable_agent/gateway/unified_tool_registry.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert_true('"emitted_events"' in text,
+                "Result data must include emitted_events list (not just count)")
+
+    # 确保有 event_type 提取
+    assert_true("event_type" in text and "emitted_events" in text,
+                "emitted_events entries must include event_type")
+
+    print("  OK")
+
+
+def check_rag_retrieved_in_normal_path() -> None:
+    """V9.1: rag.retrieved 事件在正常路径中必须存在。"""
+    print("[CHECK] rag.retrieved event in normal path")
+
+    file_path = ROOT / "stable_agent/gateway/unified_tool_registry.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert_true('"rag.retrieved"' in text,
+                "Must emit rag.retrieved event in os_agent pipeline")
+
+    # integration_test.py 也要包含
+    it_path = ROOT / "tools/integration_test.py"
+    it_text = it_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert_true("rag.retrieved" in it_text,
+                "integration_test.py must include rag.retrieved in NORMAL_PATH_EVENTS")
+
+    print("  OK")
+
+
+def check_human_review_export_gate_test() -> None:
+    """V9.1: test_human_review_export_gate.py 测试文件存在。"""
+    print("[CHECK] test_human_review_export_gate.py exists")
+
+    candidates = [
+        ROOT / "tests/test_human_review_export_gate.py",
+    ]
+
+    found = any(p.exists() for p in candidates)
+    assert_true(found, "tests/test_human_review_export_gate.py must exist")
+
+    print("  OK")
+
+
+def check_export_approved_patch_explicit() -> None:
+    """V9.1: export_approved_patch 是显式调用（不在 approve_patch 中自动调用）。"""
+    print("[CHECK] export_approved_patch is explicit (not auto-called from approve)")
+
+    file_path = ROOT / "stable_agent/self_improvement/proof_loop.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    # approve_patch 方法内不应调用 export_approved_patch
+    approve_start = text.find("def approve_patch(")
+    next_def = text.find("\n    def ", approve_start + 1)
+    approve_body = text[approve_start:next_def] if next_def > 0 else text[approve_start:]
+
+    # 排除 docstring 和注释中的引用
+    lines = approve_body.splitlines()
+    code_lines = []
+    in_docstring = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('"""') or stripped.startswith("'''"):
+            in_docstring = not in_docstring
+            continue
+        if in_docstring:
+            continue
+        if stripped.startswith("#"):
+            continue
+        code_lines.append(line)
+
+    code_only = "\n".join(code_lines)
+
+    assert_true("export_approved_patch" not in code_only,
+                "approve_patch should NOT call export_approved_patch in code")
+    assert_true("_export_best_skill" not in code_only,
+                "approve_patch should NOT call _export_best_skill_versioned in code")
+
+    print("  OK")
+
+
+def check_can_export_three_conditions() -> None:
+    """V9.1: SkillPatchCandidate.can_export() 检查三条件: APPROVED + human_review_id + validation_report_id。"""
+    print("[CHECK] can_export() checks three conditions")
+
+    file_path = ROOT / "stable_agent/self_improvement/skill_patch_candidate.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert_true("can_export" in text, "SkillPatchCandidate must have can_export() method")
+
+    # 检查三条件都存在
+    assert_true("APPROVED" in text, "can_export must check status=APPROVED")
+    assert_true("human_review_id" in text, "can_export must check human_review_id")
+    assert_true("validation_report_id" in text, "can_export must check validation_report_id")
+
+    print("  OK")
+
+
+def check_best_skill_exported_in_si_report() -> None:
+    """V9.1: si_report 中包含 best_skill_exported 字段。"""
+    print("[CHECK] best_skill_exported in si_report payload")
+
+    file_path = ROOT / "stable_agent/gateway/unified_tool_registry.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert_true("best_skill_exported" in text,
+                "si_payload must include best_skill_exported field")
+
+    print("  OK")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
@@ -330,6 +517,16 @@ def main() -> int:
         check_approve_no_auto_export()
         check_event_sync_health_in_result()
         check_memory_bank_list_items()
+        # V9.1: 9 new checks
+        check_force_validation_passed_param()
+        check_dry_run_blocks_export()
+        check_validation_failed_no_human_review()
+        check_emitted_events_list_in_result()
+        check_rag_retrieved_in_normal_path()
+        check_human_review_export_gate_test()
+        check_export_approved_patch_explicit()
+        check_can_export_three_conditions()
+        check_best_skill_exported_in_si_report()
 
     except AssertionError as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)

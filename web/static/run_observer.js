@@ -291,6 +291,7 @@ function updateSIReport(report) {
     "approved": "✅ 已通过",
     "rejected": "❌ 已拒绝",
     "validation_failed": "⚠️ 验证失败",
+    "dry_run": "🧪 试运行",
     "none": "无需审核",
   };
   reviewEl.querySelector(".si-value").textContent = reviewLabelMap[hrStatus] || hrStatus;

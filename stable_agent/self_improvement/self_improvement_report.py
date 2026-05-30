@@ -95,7 +95,7 @@ class SelfImprovementReport:
     validation_reports: list = field(default_factory=list)  # V6.1: list[ValidationReport]
     human_review_required: bool = False
     human_review_id: str = ""
-    human_review_status: str = "pending"  # pending / approved / rejected / validation_failed / none
+    human_review_status: str = "pending"  # pending / approved / rejected / validation_failed / dry_run / none
     best_skill_exported: bool = False
 
     # 摘要

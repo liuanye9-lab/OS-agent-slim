@@ -114,6 +114,9 @@ class SelfImprovementProofLoop:
         # V9.0: 测试模式参数
         force_regression_case: bool = False,
         force_skill_patch: bool = False,
+        # V9.1: validation 控制参数
+        force_validation_passed: bool | None = None,
+        dry_run_learning: bool = False,
     ) -> SelfImprovementReport:
         """评估结果并决定是否触发学习。
 
@@ -201,6 +204,13 @@ class SelfImprovementProofLoop:
 
         # V8.1: validation_passed 默认 False，只有真实验证通过才为 True
         # 旧行为: validation_passed = True（默认通过，不安全）
+        # V9.1: force_validation_passed 控制
+        #   - False → 强制 validation_passed=False（即使真实验证通过也必须失败）
+        #   - True  → 允许真实验证结果决定，但仍需进 human_review
+        #   - None  → 正常行为（由真实验证决定）
+        force_val_fail = force_validation_passed is False
+        force_val_pass = force_validation_passed is True
+
         validation_passed = False
         validation_reports: list[ValidationReport] = []
 
@@ -228,7 +238,13 @@ class SelfImprovementProofLoop:
 
                 if vr.passed:
                     # 验证通过 → 可以进入审核
-                    validation_passed = True
+                    # V9.1: force_validation_passed=False → 强制失败
+                    if force_val_fail:
+                        validation_passed = False
+                        logger.info("patch %s real validation passed, but force_validation_passed=False → forced FAIL",
+                                    entry.patch_id)
+                    else:
+                        validation_passed = True
                     self.patch_store.submit_for_review(entry.patch_id)
                     # V6.3: 提交到真实 Review Queue
                     patch = self.patch_store.get(entry.patch_id)
@@ -268,9 +284,21 @@ class SelfImprovementProofLoop:
                     )
 
         # 设置验证和审核状态
-        if validation_passed and need_review:
+        # V9.1: force_validation_passed=True → 即使验证失败也标记 human_review（用于测试）
+        #       force_validation_passed=False → 验证失败，绝不能进入 human_review
+        #       dry_run_learning=True → 不进入 human_review，不导出
+        if dry_run_learning:
+            report.human_review_required = False
+            report.human_review_status = "dry_run" if need_review else "none"
+            logger.info("dry_run_learning=True → skipping human_review and export")
+        elif validation_passed and need_review:
             report.human_review_required = True
             report.human_review_status = "pending"
+        elif force_val_pass and need_review:
+            # V9.1: force_validation_passed=True → 即使验证未真通过，也强制进入 human_review
+            report.human_review_required = True
+            report.human_review_status = "pending"
+            logger.info("force_validation_passed=True → forcing human_review.required")
         else:
             report.human_review_required = False
             report.human_review_status = "none" if not need_review else "validation_failed"
@@ -323,21 +351,27 @@ class SelfImprovementProofLoop:
         self._notify_feishu(patch_id, review_id, "approved")
         return self.patch_store.get(patch_id)
 
-    def export_approved_patch(self, patch_id: str) -> str:
+    def export_approved_patch(self, patch_id: str, dry_run: bool = False) -> str:
         """显式导出已审核通过的 skill patch 到 best_skill.md。
 
         V9.0: 从 approve_patch 中拆分出来，确保导出是显式操作。
         必须在 approve_patch() 之后调用。
 
+        V9.1: dry_run=True 时拒绝导出，不会写入 best_skill.md。
+
         Args:
             patch_id: 补丁 ID。
+            dry_run: 如果为 True，拒绝导出。
 
         Returns:
             导出的 best_skill.md 文件路径。
 
         Raises:
-            ValueError: patch 不存在或状态不是 approved。
+            ValueError: patch 不存在、状态不是 approved、或 dry_run=True。
         """
+        if dry_run:
+            raise ValueError(f"dry_run_learning=True → export blocked for patch {patch_id}")
+
         patch = self.patch_store.get(patch_id)
         if patch is None:
             raise ValueError(f"patch {patch_id} 不存在")

@@ -918,6 +918,7 @@ class UnifiedToolRegistry:
         V9.0: 显式阶段流水线，每阶段发布事件到 EventStream + RunStore。
         支持 force_eval_failed / force_failure_mode / force_regression_case /
         force_skill_patch / dry_run_learning 测试模式参数。
+        V9.1: 新增 force_validation_passed 参数控制验证结果。
         事件同步健康检查: emitted_events / sync_errors / event_sync_ok。
         """
         tool_name = "stableagent.task.os_agent"
@@ -931,6 +932,10 @@ class UnifiedToolRegistry:
         force_regression_case: bool = args.get("force_regression_case", False)
         force_skill_patch: bool = args.get("force_skill_patch", False)
         dry_run_learning: bool = args.get("dry_run_learning", False)
+        # V9.1: validation 控制参数
+        # False → 强制 validation_failed（不进 human_review）
+        # True  → 允许验证通过（进 human_review.required，不自动 export）
+        force_validation_passed: bool | None = args.get("force_validation_passed", None)
 
         from stable_agent.runtime.run_lifecycle import (
             RunStage, RunStageMeta, get_stage_meta, STAGE_PROGRESS,
@@ -1140,6 +1145,7 @@ class UnifiedToolRegistry:
                 proof = self._orchestrator.proof_loop
 
                 # V9.0: force_regression_case / force_skill_patch 测试参数
+                # V9.1: force_validation_passed / dry_run_learning 测试参数
                 # 传递给 evaluate_and_learn，由 proof_loop 内部处理
                 si_report = proof.evaluate_and_learn(
                     run_id=ctx.run_id,
@@ -1151,6 +1157,9 @@ class UnifiedToolRegistry:
                     # V9.0: 测试模式参数
                     force_regression_case=force_regression_case,
                     force_skill_patch=force_skill_patch,
+                    # V9.1: validation 控制参数
+                    force_validation_passed=force_validation_passed,
+                    dry_run_learning=dry_run_learning,
                 )
 
                 si_payload = {
@@ -1160,6 +1169,9 @@ class UnifiedToolRegistry:
                     "memory_candidates": len(si_report.memory_candidates),
                     "skill_patches": len(si_report.skill_patches),
                     "human_review_status": si_report.human_review_status,
+                    "human_review_required": si_report.human_review_required,
+                    # V9.1: best_skill_exported — 只有显式 export_approved_patch 后才为 True
+                    "best_skill_exported": False,
                 }
 
                 if si_report.learning_triggered:
@@ -1222,10 +1234,17 @@ class UnifiedToolRegistry:
                     "mode": mode,
                     # V9.0: 事件同步健康
                     "emitted_event_count": len(emitted_events),
+                    "emitted_events": [
+                        {"event_type": e.get("event_type"), "stage": e.get("stage"),
+                         "progress_pct": e.get("progress_pct"), "_emit_ok": e.get("_emit_ok")}
+                        for e in emitted_events
+                    ],
                     "event_sync_ok": event_sync_ok,
                     "sync_errors": sync_errors,
                     # V9.0: dry_run_learning 标记
                     "dry_run_learning": dry_run_learning,
+                    # V9.1: force_validation_passed 参数回显
+                    "force_validation_passed": force_validation_passed,
                 },
                 plain_text=f"任务完成: {task_input[:80]}",
                 plain_text_zh=f"任务完成: {task_input[:80]}",

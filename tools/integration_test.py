@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""StableAgent Cloud Integration Test — V9.0 Final Closed-Loop Hardening.
+"""StableAgent Cloud Integration Test — V9.1 Final Closed-Loop Hardening.
 
-测试两条核心路径:
-1. 正常路径: 完整基础事件链
-2. 失败学习路径: self-improvement 事件链
+测试三条核心路径:
+1. MCP tools/list: 验证工具注册完整
+2. 正常路径: 完整基础事件链（含 rag.retrieved）
+3. 失败学习路径: self-improvement 事件链（含 force_validation_passed 控制）
 
-V9.0 强化:
-- 强事件字段验收: 缺 progress_pct / status_text_zh / why_zh / avatar_state / stage → FAIL
-- 事件同步健康检查: event_sync_ok 必须为 True
-- 失败学习路径: 必须包含 regression.generated / skill.patch.proposed / validation.checked
-- best_skill.md 安全导出: approve 不自动写文件
+V9.1 强化:
+- 三条路径: tools/list + normal + failed learning
+- 正常路径: rag.retrieved 为必须事件
+- 失败学习路径: force_validation_passed=False → validation_failed, 不进 human_review
+- 失败学习路径: force_validation_passed=True → human_review.required, 不自动 export
+- dry_run_learning=true → 拒绝 export
+- emitted_events 列表（非仅计数）在 result
+- best_skill_exported 在 si_report 中
 """
 
 from __future__ import annotations
@@ -67,11 +71,12 @@ def extract_structured_content(data: dict[str, Any]) -> dict[str, Any]:
 
 
 # ======================================================================
-# Phase 1: MCP tools/list
+# Path 1: MCP tools/list
 # ======================================================================
 
-def call_tools_list(base_url: str) -> None:
-    print("[1/8] MCP tools/list")
+def call_tools_list(base_url: str) -> list[str]:
+    """V9.1: MCP tools/list — 验证工具注册完整。"""
+    print("[1/10] MCP tools/list")
     status, data = post_json(
         f"{base_url}/mcp",
         {
@@ -82,11 +87,25 @@ def call_tools_list(base_url: str) -> None:
         },
     )
     assert_true(200 <= status < 500, f"tools/list returned HTTP {status}: {data}")
-    print("  OK")
+
+    # 提取工具名列表
+    tool_names: list[str] = []
+    if "result" in data and isinstance(data["result"], dict):
+        tools = data["result"].get("tools", [])
+        tool_names = [t.get("name", "") for t in tools if isinstance(t, dict)]
+
+    # 必须包含 os_agent
+    assert_true(
+        any("os_agent" in name for name in tool_names),
+        f"tools/list must include stableagent.task.os_agent, got: {tool_names[:10]}"
+    )
+
+    print(f"  OK — {len(tool_names)} tools registered, os_agent found")
+    return tool_names
 
 
 # ======================================================================
-# Phase 2: 正常路径
+# Path 2: 正常路径
 # ======================================================================
 
 NORMAL_PATH_EVENTS = [
@@ -94,6 +113,7 @@ NORMAL_PATH_EVENTS = [
     "intent.parsed",
     "context.budgeted",
     "temporal_memory.retrieved",
+    "rag.retrieved",          # V9.1: 强制要求
     "context.compression_guard.checked",
     "context.built",
     "workflow.plan.created",
@@ -118,8 +138,8 @@ REQUIRED_EVENT_FIELDS = [
 
 
 def call_os_agent_normal(base_url: str) -> dict[str, Any]:
-    """正常路径: 测试完整基础事件链。"""
-    print("[2/8] Calling os_agent (NORMAL path)")
+    """正常路径: 测试完整基础事件链（含 rag.retrieved）。"""
+    print("[2/10] Calling os_agent (NORMAL path)")
     payload = {
         "jsonrpc": "2.0",
         "id": "os-agent-normal",
@@ -147,7 +167,7 @@ def call_os_agent_normal(base_url: str) -> dict[str, Any]:
 
 
 # ======================================================================
-# Phase 3: 失败学习路径
+# Path 3: 失败学习路径 — force_validation_passed=False
 # ======================================================================
 
 FAILURE_PATH_EVENTS = [
@@ -164,23 +184,24 @@ FAILURE_PATH_EVENTS = [
 ]
 
 
-def call_os_agent_failure(base_url: str) -> dict[str, Any]:
-    """失败学习路径: 强制 eval_failed, 生成回归/skill patch。"""
-    print("[3/8] Calling os_agent (FAILURE LEARNING path)")
+def call_os_agent_failure_val_failed(base_url: str) -> dict[str, Any]:
+    """失败学习路径 (validation_failed): force_validation_passed=False → 不进 human_review。"""
+    print("[3/10] Calling os_agent (FAILURE → validation_failed path)")
     payload = {
         "jsonrpc": "2.0",
-        "id": "os-agent-failure",
+        "id": "os-agent-failure-val-fail",
         "method": "tools/call",
         "params": {
             "name": "stableagent.task.os_agent",
             "arguments": {
-                "task_input": "测试失败学习路径",
+                "task_input": "测试失败学习路径 - validation_failed",
                 "mode": "auto",
                 "open_dashboard": True,
                 "force_eval_failed": True,
                 "force_failure_mode": "intent_drift",
                 "force_regression_case": True,
                 "force_skill_patch": True,
+                "force_validation_passed": False,   # V9.1: 强制验证失败
                 "dry_run_learning": True,
             },
         },
@@ -203,25 +224,100 @@ def call_os_agent_failure(base_url: str) -> dict[str, Any]:
     # 验证 dry_run_learning 标记
     assert_true(sc.get("dry_run_learning") is True, "dry_run_learning should be True")
 
+    # V9.1: 验证 force_validation_passed 参数回显
+    assert_true(sc.get("force_validation_passed") is False, "force_validation_passed should be False")
+
+    # V9.1: 验证 si_report 中 validation_failed 不进 human_review
+    si_report = sc.get("si_report")
+    if si_report:
+        hr_status = si_report.get("human_review_status", "")
+        hr_required = si_report.get("human_review_required", False)
+        # force_validation_passed=False + dry_run_learning=True → dry_run 状态
+        assert_true(
+            hr_status in ("validation_failed", "dry_run", "none"),
+            f"force_validation_passed=False: human_review_status should be validation_failed/dry_run/none, got {hr_status}"
+        )
+        # best_skill_exported 必须为 False
+        assert_true(
+            si_report.get("best_skill_exported") is not True,
+            "best_skill_exported should NOT be True when validation_failed"
+        )
+
     # 验证事件同步健康
     event_sync_ok = sc.get("event_sync_ok", False)
     assert_true(event_sync_ok is True, f"event_sync_ok should be True, sync_errors={sc.get('sync_errors', [])}")
 
-    # 验证事件数量 > 0
-    emitted_count = sc.get("emitted_event_count", 0)
-    assert_true(emitted_count > 0, f"Should have emitted events, got {emitted_count}")
+    # 验证 emitted_events 列表存在（V9.1）
+    assert_true("emitted_events" in sc, "emitted_events list must be in result (V9.1)")
 
-    print(f"  OK run_id={run_id}, eval_passed={eval_passed}, score={eval_score}")
+    print(f"  OK run_id={run_id}, val_failed={si_report.get('validation_passed') if si_report else 'N/A'}")
     return sc
 
 
 # ======================================================================
-# Phase 4: 事件字段强验收
+# Path 3b: 失败学习路径 — force_validation_passed=True
+# ======================================================================
+
+def call_os_agent_failure_val_pass(base_url: str) -> dict[str, Any]:
+    """失败学习路径 (validation_passed + human_review): force_validation_passed=True → 进 human_review。"""
+    print("[4/10] Calling os_agent (FAILURE → validation_passed + human_review path)")
+    payload = {
+        "jsonrpc": "2.0",
+        "id": "os-agent-failure-val-pass",
+        "method": "tools/call",
+        "params": {
+            "name": "stableagent.task.os_agent",
+            "arguments": {
+                "task_input": "测试失败学习路径 - validation_passed",
+                "mode": "auto",
+                "open_dashboard": True,
+                "force_eval_failed": True,
+                "force_failure_mode": "intent_drift",
+                "force_regression_case": True,
+                "force_skill_patch": True,
+                "force_validation_passed": True,    # V9.1: 强制验证通过
+                "dry_run_learning": True,           # 阻止实际导出
+            },
+        },
+    }
+
+    status, data = post_json(f"{base_url}/mcp", payload, timeout=60)
+    assert_true(200 <= status < 500, f"os_agent failure val-pass path returned HTTP {status}: {data}")
+
+    sc = extract_structured_content(data)
+
+    run_id = sc.get("run_id")
+    assert_true(bool(run_id), f"Missing run_id: {json.dumps(sc, ensure_ascii=False)[:300]}")
+
+    # V9.1: force_validation_passed=True 回显
+    assert_true(sc.get("force_validation_passed") is True, "force_validation_passed should be True")
+
+    si_report = sc.get("si_report")
+    if si_report:
+        # V9.1: validation_passed=True 但不自动 export
+        # dry_run_learning=True → human_review_status=dry_run
+        hr_status = si_report.get("human_review_status", "")
+        assert_true(
+            hr_status in ("pending", "dry_run"),
+            f"force_validation_passed=True: human_review_status should be pending/dry_run, got {hr_status}"
+        )
+        # best_skill_exported 必须为 False（dry_run_learning=True 阻止导出）
+        assert_true(
+            si_report.get("best_skill_exported") is not True,
+            "best_skill_exported must be False (dry_run_learning=True)"
+        )
+
+    print(f"  OK run_id={run_id}, hr_status={si_report.get('human_review_status') if si_report else 'N/A'}")
+    return sc
+
+
+# ======================================================================
+# Phase 5: 事件字段强验收
 # ======================================================================
 
 def check_event_fields_strict(events: list[dict[str, Any]], path_name: str) -> None:
     """V9.0: 严格事件字段验收 — 缺字段即 FAIL。"""
-    print(f"[4/8] Checking event fields ({path_name})")
+    print(f"[5/10] Checking event fields ({path_name})")
 
     if not events:
         raise AssertionError(f"No events returned for {path_name}")
@@ -238,12 +334,12 @@ def check_event_fields_strict(events: list[dict[str, Any]], path_name: str) -> N
 
 
 # ======================================================================
-# Phase 5: 事件链完整性
+# Phase 6: 事件链完整性
 # ======================================================================
 
 def check_event_chain(events: list[dict[str, Any]], required_events: list[str], path_name: str) -> None:
     """验证事件链包含所有必要事件类型。"""
-    print(f"[5/8] Checking event chain ({path_name})")
+    print(f"[6/10] Checking event chain ({path_name})")
 
     event_types = [evt.get("event_type", "") for evt in events]
     missing = [e for e in required_events if e not in event_types]
@@ -256,12 +352,12 @@ def check_event_chain(events: list[dict[str, Any]], required_events: list[str], 
 
 
 # ======================================================================
-# Phase 6: 失败学习路径特有验证
+# Phase 7: 失败学习路径特有验证
 # ======================================================================
 
 def check_failure_learning_details(sc: dict[str, Any], events: list[dict[str, Any]]) -> None:
     """验证失败学习路径的特殊事件和 si_report。"""
-    print("[6/8] Checking failure learning details")
+    print("[7/10] Checking failure learning details")
 
     event_types = [evt.get("event_type", "") for evt in events]
 
@@ -279,25 +375,27 @@ def check_failure_learning_details(sc: dict[str, Any], events: list[dict[str, An
     if si_report:
         assert_true(si_report.get("learning_triggered") is True, "si_report.learning_triggered must be True")
         assert_true(si_report.get("validation_passed") is not None, "si_report.validation_passed must not be None")
+        assert_true("best_skill_exported" in si_report, "si_report must have best_skill_exported field (V9.1)")
+        assert_true("human_review_required" in si_report, "si_report must have human_review_required field (V9.1)")
 
         # human_review_status 检查
         hr_status = si_report.get("human_review_status", "")
         if si_report.get("validation_passed"):
-            assert_true(hr_status in ("pending", "approved"),
-                        f"When validation passed, human_review_status should be pending/approved, got {hr_status}")
+            assert_true(hr_status in ("pending", "approved", "dry_run"),
+                        f"When validation passed, human_review_status should be pending/approved/dry_run, got {hr_status}")
         else:
-            assert_true(hr_status in ("validation_failed", "none"),
-                        f"When validation failed, human_review_status should be validation_failed/none, got {hr_status}")
+            assert_true(hr_status in ("validation_failed", "none", "dry_run"),
+                        f"When validation failed, human_review_status should be validation_failed/none/dry_run, got {hr_status}")
 
     print("  OK — failure learning chain verified")
 
 
 # ======================================================================
-# Phase 7: Dashboard Observer 可访问
+# Phase 8: Dashboard Observer 可访问
 # ======================================================================
 
 def check_observer_page(base_url: str, run_id: str) -> None:
-    print("[7/8] Checking Dashboard Observer page")
+    print("[8/10] Checking Dashboard Observer page")
 
     candidates = [
         f"{base_url}/runs/{run_id}",
@@ -320,25 +418,73 @@ def check_observer_page(base_url: str, run_id: str) -> None:
 
 
 # ======================================================================
-# Phase 8: 事件同步健康检查
+# Phase 9: 事件同步健康检查
 # ======================================================================
 
 def check_event_sync_health(sc: dict[str, Any]) -> None:
-    """V9.0: 验证 event_sync_ok 在 MCP structuredContent 中。"""
-    print("[8/8] Checking event sync health")
+    """V9.1: 验证 event_sync_ok + emitted_events 列表。"""
+    print("[9/10] Checking event sync health")
 
     assert_true("event_sync_ok" in sc, "Missing event_sync_ok in structuredContent")
     assert_true("emitted_event_count" in sc, "Missing emitted_event_count in structuredContent")
     assert_true("sync_errors" in sc, "Missing sync_errors in structuredContent")
+    assert_true("emitted_events" in sc, "Missing emitted_events list in structuredContent (V9.1)")
 
     event_sync_ok = sc.get("event_sync_ok")
     emitted_count = sc.get("emitted_event_count", 0)
     sync_errors = sc.get("sync_errors", [])
+    emitted_events = sc.get("emitted_events", [])
 
     assert_true(event_sync_ok is True, f"event_sync_ok should be True, errors={sync_errors}")
     assert_true(emitted_count > 0, f"Should have emitted events, got {emitted_count}")
+    assert_true(len(emitted_events) > 0, f"emitted_events list should not be empty (V9.1)")
 
-    print(f"  OK — emitted={emitted_count}, sync_ok={event_sync_ok}")
+    # 每个事件必须有 event_type
+    for i, evt in enumerate(emitted_events):
+        assert_true("event_type" in evt, f"emitted_events[{i}] missing event_type")
+
+    print(f"  OK — emitted={emitted_count}, events_list={len(emitted_events)}, sync_ok={event_sync_ok}")
+
+
+# ======================================================================
+# Phase 10: Validation Gate 验证
+# ======================================================================
+
+def check_validation_gate(sc_val_fail: dict[str, Any], sc_val_pass: dict[str, Any]) -> None:
+    """V9.1: 验证 validation gate 规则:
+    - force_validation_passed=False → validation_failed, 不进 human_review
+    - force_validation_passed=True → human_review.required, 不自动 export
+    - dry_run_learning=True → 不导出 best_skill.md
+    """
+    print("[10/10] Checking validation gate rules")
+
+    # Path 3a: force_validation_passed=False
+    si_fail = sc_val_fail.get("si_report", {})
+    if si_fail:
+        hr_status_fail = si_fail.get("human_review_status", "")
+        assert_true(
+            hr_status_fail in ("validation_failed", "dry_run", "none"),
+            f"force_validation_passed=False: hr_status should be validation_failed/dry_run/none, got {hr_status_fail}"
+        )
+        assert_true(
+            si_fail.get("best_skill_exported") is not True,
+            "force_validation_passed=False: best_skill_exported must NOT be True"
+        )
+
+    # Path 3b: force_validation_passed=True
+    si_pass = sc_val_pass.get("si_report", {})
+    if si_pass:
+        hr_status_pass = si_pass.get("human_review_status", "")
+        assert_true(
+            hr_status_pass in ("pending", "dry_run"),
+            f"force_validation_passed=True: hr_status should be pending/dry_run, got {hr_status_pass}"
+        )
+        assert_true(
+            si_pass.get("best_skill_exported") is not True,
+            "force_validation_passed=True + dry_run: best_skill_exported must NOT be True"
+        )
+
+    print("  OK — validation gate rules verified")
 
 
 # ======================================================================
@@ -406,11 +552,14 @@ def main() -> int:
 
     base_url = args.base_url.rstrip("/")
 
+    sc_val_fail = None
+    sc_val_pass = None
+
     try:
-        # 1. tools/list
+        # Path 1: tools/list
         call_tools_list(base_url)
 
-        # 2. 正常路径
+        # Path 2: 正常路径
         sc_normal = call_os_agent_normal(base_url)
         run_id_normal = sc_normal["run_id"]
 
@@ -420,14 +569,13 @@ def main() -> int:
         events_normal = fetch_run_events(base_url, run_id_normal)
         if not events_normal:
             print("  WARN: No events from API, using emitted events from MCP response")
-            # 从 MCP 响应中提取事件信息
             events_normal = []
 
         # 正常路径: 事件字段强验收
         check_event_fields_strict(events_normal, "NORMAL") if events_normal else \
             print("  SKIP: event field check (no events from API)")
 
-        # 正常路径: 事件链完整性
+        # 正常路径: 事件链完整性 (含 rag.retrieved)
         check_event_chain(events_normal, NORMAL_PATH_EVENTS, "NORMAL") if events_normal else \
             print("  SKIP: event chain check (no events from API)")
 
@@ -437,34 +585,44 @@ def main() -> int:
         # 事件同步健康
         check_event_sync_health(sc_normal)
 
-        # 3. 失败学习路径
+        # Path 3: 失败学习路径
         if not args.skip_failure_path:
-            sc_failure = call_os_agent_failure(base_url)
-            run_id_failure = sc_failure["run_id"]
+            # Path 3a: force_validation_passed=False
+            sc_val_fail = call_os_agent_failure_val_failed(base_url)
+            run_id_fail = sc_val_fail["run_id"]
 
             time.sleep(1.5)
 
-            events_failure = fetch_run_events(base_url, run_id_failure)
-            if not events_failure:
-                print("  WARN: No events from API for failure path")
+            events_fail = fetch_run_events(base_url, run_id_fail)
+            if not events_fail:
+                print("  WARN: No events from API for failure path (val_failed)")
 
-            # 失败路径: 事件字段强验收
-            check_event_fields_strict(events_failure, "FAILURE") if events_failure else \
+            check_event_fields_strict(events_fail, "FAILURE-VAL-FAIL") if events_fail else \
                 print("  SKIP: event field check (no events from API)")
 
-            # 失败路径: 事件链完整性
-            check_event_chain(events_failure, FAILURE_PATH_EVENTS, "FAILURE") if events_failure else \
+            check_event_chain(events_fail, FAILURE_PATH_EVENTS, "FAILURE-VAL-FAIL") if events_fail else \
                 print("  SKIP: event chain check (no events from API)")
 
-            # 失败路径: 特有验证
-            check_failure_learning_details(sc_failure, events_failure) if events_failure else \
+            check_failure_learning_details(sc_val_fail, events_fail) if events_fail else \
                 print("  SKIP: failure learning details (no events from API)")
 
-            # Dashboard Observer for failure path
-            check_observer_page(base_url, run_id_failure)
+            check_observer_page(base_url, run_id_fail)
+            check_event_sync_health(sc_val_fail)
 
-            # 事件同步健康 for failure path
-            check_event_sync_health(sc_failure)
+            # Path 3b: force_validation_passed=True
+            sc_val_pass = call_os_agent_failure_val_pass(base_url)
+            run_id_pass = sc_val_pass["run_id"]
+
+            time.sleep(1.5)
+
+            events_pass = fetch_run_events(base_url, run_id_pass)
+            if not events_pass:
+                print("  WARN: No events from API for failure path (val_passed)")
+
+            check_event_sync_health(sc_val_pass)
+
+            # V9.1: Validation Gate 规则验证
+            check_validation_gate(sc_val_fail, sc_val_pass)
 
         # Trace quality
         if events_normal:
@@ -478,7 +636,7 @@ def main() -> int:
         return 1
 
     print("")
-    print("[PASS] StableAgent integration test completed (V9.0 final hardening).")
+    print("[PASS] StableAgent integration test completed (V9.1 final hardening).")
     return 0
 
 
