@@ -1,5 +1,10 @@
 """DashboardSync — Dashboard per-run WebSocket 同步管理器。
 
+# @deprecated V6.3: 事件广播已归一到 EventStream.publish_sync()。
+#   DashboardSync 的 WebSocket 管理保留供兼容，但推荐新代码
+#   直接通过 RunStore (REST) + EventStream (WebSocket) 两路消费。
+#   计划 V7.0 归一为单一路径。
+
 管理 /ws/runs/{run_id} WebSocket 端点，将 EventStream 的事件按 run_id
 推送到对应前端，实现 per-run 的实时 Dashboard 数据同步。
 

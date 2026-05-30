@@ -467,19 +467,37 @@ class WorkflowEngine:
     def _step_retrieve_knowledge(self, workflow: Workflow) -> None:
         """RETRIEVE_KNOWLEDGE → PLAN: 检索外部知识库。
 
-        # STUB: 后续 P1 RAG 模块实现。当前仅标记该步骤并发布事件。
+        V6.3: 接入真实 RAG 检索（替换 STUB []）。
         """
-        # 根据任务类型选择 RAG 来源（为 P1 模块预留）
+        # 根据任务类型选择 RAG 来源
         rag_sources: list[str] = self.decision_engine.select_rag_sources(
             workflow.task_type
         )
 
+        # V6.3: 真实 RAG 检索
+        rag_results: list[dict] = []
+        try:
+            if hasattr(self, '_rag_manager') and self._rag_manager is not None:
+                task_text = workflow.context_pack.get("task_input", "")
+                raw = self._rag_manager.retrieve_rich(task_text)
+                if isinstance(raw, list):
+                    rag_results = raw[:8]  # 最多 8 条
+                    logger.info("RAG retrieved %d results for task %s",
+                               len(rag_results), workflow.task_type.value[:20])
+        except Exception as e:
+            logger.warning("RAG 检索失败，使用空结果: %s", e)
+            rag_results = []
+
         workflow.context_pack["rag_sources"] = rag_sources
-        workflow.context_pack["rag_results"] = []  # STUB: RAG 结果占位
+        workflow.context_pack["rag_results"] = rag_results
 
         self._publish_event(
             "rag:searched",
-            {"sources": rag_sources, "note": "STUB: P1 RAG module pending"},
+            {
+                "sources": rag_sources,
+                "result_count": len(rag_results),
+                "mode": "real" if rag_results else "empty",
+            },
         )
         workflow.transition_to(WorkflowState.PLAN)
 

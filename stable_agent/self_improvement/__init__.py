@@ -34,6 +34,10 @@ from stable_agent.self_improvement.validation_report import (
     ValidationReport,
     ValidationCaseResult,
 )
+from stable_agent.self_improvement.human_review_queue import (
+    HumanReviewQueue,
+    ReviewRequest,
+)
 
 __all__ = [
     "SelfImprovementProofLoop",
