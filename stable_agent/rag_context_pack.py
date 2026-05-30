@@ -227,22 +227,15 @@ class RagContextManager:
     ) -> list[dict]:
         """根据查询检索相关文档，返回结构化结果。
 
-        相比 retrieve()，返回增强的 dict 结构，包含 score、
-        why_relevant、risk 和 token_estimate 字段。
-
-        先尝试从 chunks 中检索（如果文档已被切块），
-        否则回退到关键词倒排索引检索。
+        V7.1: 升级为向量语义检索（TF-IDF 余弦相似度）。
+        优先级: chunks > 向量相似度 > 关键词倒排索引。
 
         Args:
             query: 查询字符串。
             top_k: 返回的最多文档数，默认 5。
 
         Returns:
-            结构化 chunk 列表，每项包含：
-            {chunk_id, content, source_path, score, why_relevant, risk, token_estimate}
-
-        # STUB: 真实实现应调用 embedding 模型将 query 向量化，
-        #        在向量数据库中做 ANN 搜索。
+            结构化 chunk 列表。
         """
         if not query:
             return []
@@ -251,8 +244,117 @@ class RagContextManager:
         if self.chunks:
             return self._retrieve_from_chunks(query, top_k)
 
+        # V7.1: 尝试向量语义检索
+        try:
+            vector_results = self._retrieve_by_vector_similarity(query, top_k)
+            if vector_results:
+                return vector_results
+        except Exception as e:
+            logger.debug("向量检索失败，fallback 倒排索引: %s", e)
+
         # 回退到倒排索引检索
         return self._retrieve_from_index_rich(query, top_k)
+
+    def _retrieve_by_vector_similarity(
+        self, query: str, top_k: int
+    ) -> list[dict]:
+        """V7.1: 基于 TF-IDF 余弦相似度的语义检索。
+
+        不依赖外部 embedding 库，使用纯 Python 实现。
+
+        Args:
+            query: 查询字符串。
+            top_k: 返回的最多文档数。
+
+        Returns:
+            按相似度排序的文档列表。
+        """
+        import re
+        import math
+
+        if not self.index:
+            return []
+
+        # 收集所有文档
+        doc_texts: list[str] = []
+        doc_meta: list[dict] = []
+        for docs in self.index.values():
+            for doc in docs:
+                content = doc.get("content", "")
+                if content:
+                    doc_texts.append(content)
+                    doc_meta.append(doc)
+
+        if not doc_texts:
+            return []
+
+        # TF-IDF 向量化
+        def tokenize(text: str) -> list[str]:
+            return re.findall(r'[\w\u4e00-\u9fff]+', text.lower())
+
+        query_tokens = tokenize(query)
+        all_docs_tokens = [tokenize(t) for t in doc_texts]
+
+        # 构建词汇表
+        vocab: dict[str, int] = {}
+        for tokens in all_docs_tokens:
+            for t in tokens:
+                vocab[t] = vocab.get(t, 0) + 1
+
+        # 过滤低频词
+        vocab = {k: v for k, v in vocab.items() if v >= 1}
+        if len(vocab) < 2:
+            return []  # 词汇太少，无法做有意义的向量检索
+
+        vocab_list = list(vocab.keys())
+        n_docs = len(doc_texts)
+
+        # TF-IDF 构建文档向量
+        def tfidf_vector(tokens: list[str]) -> list[float]:
+            vec = [0.0] * len(vocab_list)
+            for i, word in enumerate(vocab_list):
+                tf = tokens.count(word) / max(1, len(tokens))
+                df = sum(1 for tks in all_docs_tokens if word in tks)
+                idf = math.log((n_docs + 1) / (df + 1)) + 1
+                vec[i] = tf * idf
+            return vec
+
+        query_vec = tfidf_vector(query_tokens)
+
+        # 余弦相似度
+        def cosine_sim(a: list[float], b: list[float]) -> float:
+            dot = sum(x * y for x, y in zip(a, b))
+            norm_a = math.sqrt(sum(x * x for x in a))
+            norm_b = math.sqrt(sum(x * x for x in b))
+            if norm_a == 0 or norm_b == 0:
+                return 0.0
+            return dot / (norm_a * norm_b)
+
+        scored: list[tuple[float, int]] = []
+        for i, doc_tokens in enumerate(all_docs_tokens):
+            doc_vec = tfidf_vector(doc_tokens)
+            sim = cosine_sim(query_vec, doc_vec)
+            if sim > 0.01:
+                scored.append((sim, i))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top = scored[:top_k]
+
+        results: list[dict] = []
+        for sim, idx in top:
+            doc = doc_meta[idx]
+            content = doc.get("content", "")
+            results.append({
+                "chunk_id": doc.get("chunk_id", f"vec_{idx}"),
+                "content": content,
+                "source_path": doc.get("source_path", ""),
+                "score": round(sim, 4),
+                "why_relevant": f"语义相似度 {sim:.2f} (TF-IDF cosine)",
+                "risk": "low",
+                "token_estimate": max(1, len(content) // 2),
+            })
+
+        return results
 
     def _retrieve_from_chunks(
         self, query: str, top_k: int

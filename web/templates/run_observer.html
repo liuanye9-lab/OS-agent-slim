@@ -499,6 +499,30 @@
         <div class="si-label">摘要</div>
       </div>
     </div>
+
+    <!-- V8.0: Multi-Agent Parallel Observation Panel -->
+    <div id="multiAgentPanel" class="multi-agent-panel" style="margin-top:16px">
+      <div class="ma-header">🔄 多 Agent 并行观察 <span style="font-weight:400;font-size:12px;color:var(--text-secondary)">(V8.0)</span></div>
+      <div id="maCards" style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px">
+        <!-- dynamic content injected by JS -->
+      </div>
+    </div>
+
+    <style>
+      .multi-agent-panel { background:var(--glass-bg); backdrop-filter:blur(24px); border:1px solid var(--glass-border); border-radius:var(--card-radius); padding:16px 20px; }
+      .ma-header { font-weight:600; font-size:14px; margin-bottom:8px; }
+      .agent-card { background:var(--surface); border:1px solid var(--glass-border); border-radius:10px; padding:12px 16px; cursor:pointer; transition:all 0.2s; min-width:180px; }
+      .agent-card:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,0.1); }
+      .agent-card.primary { border-color:var(--accent); background:color-mix(in srgb,var(--accent) 5%,var(--surface)); }
+      .agent-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+      .agent-id { font-size:13px; font-weight:600; font-family:monospace; }
+      .agent-status.online { color:#22c55e; }
+      .agent-status.offline { color:#9ca3af; }
+      .agent-progress { height:4px; background:var(--glass-border); border-radius:2px; margin:6px 0; }
+      .agent-progress-bar { height:100%; background:var(--accent); border-radius:2px; transition:width 0.5s; }
+      .agent-label { font-size:12px; color:var(--text-secondary); }
+      .agent-event-count { font-size:11px; color:var(--text-tertiary); margin-top:2px; }
+    </style>
   </div>
 </div>
 

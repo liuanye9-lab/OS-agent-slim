@@ -286,3 +286,124 @@ function escapeHtml(text) {
   div.textContent = text || "";
   return div.innerHTML;
 }
+
+// ==================================================================
+// V8.0: Multi-Agent Collaboration — parallel run observation
+// ==================================================================
+
+// Active WebSocket connections (runId → WebSocket)
+const activeConnections = new Map();
+// Per-run event buffers (runId → events[])
+const runBuffers = new Map();
+
+/**
+ * Observe multiple runs in parallel.
+ * @param {string[]} runIds - list of run IDs to observe
+ */
+function observeMultipleRuns(runIds) {
+  // Close existing connections
+  for (const [id, ws] of activeConnections) {
+    if (!runIds.includes(id)) {
+      ws.close();
+      activeConnections.delete(id);
+      runBuffers.delete(id);
+    }
+  }
+
+  // Open new connections
+  for (const runId of runIds) {
+    if (!activeConnections.has(runId)) {
+      connectMultiAgentWebSocket(runId);
+    }
+  }
+
+  // Update display
+  updateMultiAgentDisplay();
+}
+
+function connectMultiAgentWebSocket(runId) {
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  const wsUrl = `${protocol}//${location.host}/dashboard-sync/ws/runs/${runId}`;
+  const ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    addLogLine("info", `[Agent ${runId.slice(0, 8)}] 已连接`);
+    activeConnections.set(runId, ws);
+    runBuffers.set(runId, []);
+  };
+
+  ws.onmessage = (e) => {
+    try {
+      const event = JSON.parse(e.data);
+      const buffer = runBuffers.get(runId) || [];
+      buffer.push(event);
+      if (buffer.length > 100) buffer.shift();
+      runBuffers.set(runId, buffer);
+
+      // If this is the "primary" run, also apply to main UI
+      if (runId === primaryRunId) {
+        applyEvent(event);
+      }
+    } catch (err) {
+      addLogLine("error", `[Agent ${runId.slice(0, 8)}] 消息解析失败`);
+    }
+  };
+
+  ws.onclose = () => {
+    addLogLine("warn", `[Agent ${runId.slice(0, 8)}] 断开`);
+    activeConnections.delete(runId);
+  };
+}
+
+let primaryRunId = null;
+
+/**
+ * Update the multi-agent display panel.
+ */
+function updateMultiAgentDisplay() {
+  const panel = document.getElementById("multiAgentPanel");
+  if (!panel) return;
+
+  let html = "";
+  for (const [runId, ws] of activeConnections) {
+    const buffer = runBuffers.get(runId) || [];
+    const lastEvent = buffer.length > 0 ? buffer[buffer.length - 1] : null;
+    const status = lastEvent ? (lastEvent.status_text_zh || lastEvent.event_type) : "connecting";
+    const progress = lastEvent ? (lastEvent.progress_pct || 0) : 0;
+
+    html += `
+      <div class="agent-card ${runId === primaryRunId ? 'primary' : ''}"
+           onclick="switchPrimaryAgent('${runId}')">
+        <div class="agent-header">
+          <span class="agent-id">${runId.slice(0, 10)}...</span>
+          <span class="agent-status ${ws.readyState === WebSocket.OPEN ? 'online' : 'offline'}">
+            ${ws.readyState === WebSocket.OPEN ? '●' : '○'}
+          </span>
+        </div>
+        <div class="agent-progress">
+          <div class="agent-progress-bar" style="width:${progress}%"></div>
+        </div>
+        <div class="agent-label">${status}</div>
+        <div class="agent-event-count">${buffer.length} events</div>
+      </div>`;
+  }
+
+  panel.innerHTML = html;
+}
+
+function switchPrimaryAgent(runId) {
+  primaryRunId = runId;
+  const buffer = runBuffers.get(runId) || [];
+
+  // Replay all events to main UI
+  for (const event of buffer) {
+    applyEvent(event);
+  }
+  // Update display
+  document.getElementById("runId").textContent = runId;
+  updateMultiAgentDisplay();
+  addLogLine("info", `切换到 Agent: ${runId.slice(0, 10)}`);
+}
+
+// Auto-refresh multi-agent display every 2 seconds
+setInterval(updateMultiAgentDisplay, 2000);

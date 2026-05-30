@@ -290,8 +290,8 @@ class SelfImprovementProofLoop:
         self.patch_store.approve(patch_id, review_id)
         logger.info("Self-improvement: patch %s 审核通过 (review=%s)", patch_id, review_id)
 
-        # V6.3: auto-export best_skill.md
-        self._export_best_skill()
+        # V6.3: auto-export best_skill.md (V7.1: 版本管理)
+        self._export_best_skill_versioned()
         return self.patch_store.get(patch_id)
 
     def reject_patch(self, patch_id: str, review_id: str, reason: str = "") -> SkillPatchCandidate | None:
@@ -398,6 +398,69 @@ class SelfImprovementProofLoop:
 
         logger.info("best_skill.md exported: %d rules → %s", rule_count, best_path)
         return best_path
+
+    def _export_best_skill_versioned(self) -> str:
+        """V7.1: 导出 best_skill.md 并保留历史版本到 skill_versions/。
+
+        Returns:
+            导出的 best_skill.md 路径。
+        """
+        import os
+        import shutil
+        import time
+
+        skills_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+            "skills",
+        )
+        versions_dir = os.path.join(skills_dir, "skill_versions")
+        os.makedirs(versions_dir, exist_ok=True)
+
+        best_path = os.path.join(skills_dir, "best_skill.md")
+
+        # 如果已有 best_skill.md，先归档
+        if os.path.exists(best_path):
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            version_name = f"best_skill_{timestamp}.md"
+            shutil.copy2(best_path, os.path.join(versions_dir, version_name))
+            logger.info("Archived previous best_skill: %s", version_name)
+
+        # 导出新版
+        return self._export_best_skill()
+
+    def _notify_feishu(self, patch_id: str, review_id: str, action: str) -> str:
+        """V7.1: 飞书通知。
+
+        通过 lark-im 发送审核通知。需要飞书机器人已配置。
+
+        Args:
+            patch_id: Patch ID。
+            review_id: Review ID。
+            action: "submitted" / "approved" / "rejected"。
+
+        Returns:
+            通知结果消息（成功/失败）。
+        """
+        queue = self.review_queue
+        req = queue.get(review_id)
+        if req is None:
+            return "review not found"
+
+        action_zh = {"submitted": "待审核", "approved": "已通过", "rejected": "已拒绝"}
+        label = action_zh.get(action, action)
+
+        msg = (
+            f"🔔 Skill Patch 审核 {label}\n"
+            f"Patch: {patch_id}\n"
+            f"失败模式: {req.failure_mode}\n"
+            f"风险等级: {req.risk_level}\n"
+            f"新规则: {req.new_rule[:100]}...\n"
+            f"\nAPI 审批: POST /api/reviews/{review_id}/approve|reject"
+        )
+
+        logger.info("Feishu notification prepared: %s", review_id)
+        # 实际发送需要 lark-im connector（外部依赖）
+        return f"notification prepared for {review_id}: {msg[:80]}..."
 
     @property
     def stats(self) -> dict:

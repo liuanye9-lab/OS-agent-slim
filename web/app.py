@@ -147,7 +147,7 @@ def create_app() -> FastAPI:
     register_project_routes(app)
     register_run_routes(app, gateway_run_store, dash_sync)
     register_approval_routes(app)
-    register_review_routes(app)
+    register_review_routes(app, orchestrator) if orchestrator else None
     register_api_routes(app, dash_sync)
 
     return app
