@@ -48,6 +48,29 @@ const AVATAR_EMOJI = {
 let logs = [];
 let timelineItems = [];
 
+// V9.0: 阶段中文标签映射
+const STAGE_LABEL_MAP = {
+  "temporal_memory_retrieving": "时间记忆",
+  "context_compressing": "上下文压缩",
+  "rag_retrieving": "RAG 检索",
+  "context_building": "构建上下文",
+  "evaluating": "评估",
+  "regression_generation": "回归用例",
+  "memory_update_candidate": "候选记忆",
+  "skill_patch_proposal": "自我优化",
+  "validation": "验证",
+  "human_review": "人工审核",
+  "exporting": "导出规则",
+  "acting": "执行",
+  "observing": "观察",
+  "planning": "规划",
+  "intent_parsing": "理解需求",
+  "context_budgeting": "预算计算",
+  "received": "接收任务",
+  "completed": "完成",
+  "failed": "失败",
+};
+
 // ========== DOM refs ==========
 const $taskName    = document.getElementById("taskName");
 const $runId       = document.getElementById("runId");
@@ -115,6 +138,11 @@ function connectWebSocket(runId) {
 function applyEvent(evt) {
   addLogLine("info", `收到事件: ${evt.event_type || evt.type || "unknown"}`);
 
+  // V9.0: 事件同步异常检查
+  if (evt.event_sync_ok === false) {
+    showSyncWarning();
+  }
+
   // 1. Update progress
   if (evt.progress_pct !== undefined) {
     updateProgress(evt.progress_pct, evt.status_text_zh || evt.stage_label_zh || "");
@@ -132,8 +160,8 @@ function applyEvent(evt) {
   appendTimeline(evt);
 
   // 5. Update Self-Improvement Report
-  if (evt.si_report || evt.self_improvement) {
-    updateSIReport(evt.si_report || evt.self_improvement);
+  if (evt.si_report || evt.self_improvement || evt.learning_triggered !== undefined) {
+    updateSIReport(evt.si_report || evt.self_improvement || evt);
   }
 
   // 6. Update task name
@@ -208,10 +236,14 @@ function appendTimeline(evt) {
   const what  = evt.what_happened_zh || evt.status_text_zh || evt.event_type || "";
   const pct   = evt.progress_pct !== undefined ? `${evt.progress_pct}%` : "";
 
+  // V9.0: 阶段中文标签
+  const stageKey = evt.stage || "";
+  const stageZhLabel = STAGE_LABEL_MAP[stageKey] || stage;
+
   const item = document.createElement("div");
   item.className = "timeline-item";
   item.innerHTML = `
-    <div class="tl-stage">${escapeHtml(stage)}</div>
+    <div class="tl-stage">${escapeHtml(stageZhLabel)}</div>
     <div class="tl-what">${escapeHtml(what)}</div>
     <div class="tl-progress">${pct}</div>
   `;
@@ -244,23 +276,42 @@ function updateSIReport(report) {
   document.getElementById("siPatches").querySelector(".si-value").textContent =
     (report.skill_patches || []).length;
 
-  document.getElementById("siValidation").querySelector(".si-value").textContent =
-    report.validation_passed ? "通过" : "未通过";
+  // V9.0: 验证状态显式显示
+  const valEl = document.getElementById("siValidation");
+  valEl.querySelector(".si-value").textContent =
+    report.validation_passed === true ? "✅ 通过" :
+    report.validation_passed === false ? "❌ 未通过" : "--";
+  valEl.className = report.validation_passed ? "si-item ok" : "si-item warn";
 
+  // V9.0: 审核状态完整展示
   const reviewEl = document.getElementById("siReview");
-  reviewEl.querySelector(".si-value").textContent =
-    report.human_review_status || "--";
-  reviewEl.className = report.human_review_status === "approved"
-    ? "si-item ok"
-    : report.human_review_status === "rejected"
-      ? "si-item warn"
-      : "si-item";
+  const hrStatus = report.human_review_status || "--";
+  const reviewLabelMap = {
+    "pending": "⏳ 等待审核",
+    "approved": "✅ 已通过",
+    "rejected": "❌ 已拒绝",
+    "validation_failed": "⚠️ 验证失败",
+    "none": "无需审核",
+  };
+  reviewEl.querySelector(".si-value").textContent = reviewLabelMap[hrStatus] || hrStatus;
+  reviewEl.className = hrStatus === "approved" ? "si-item ok"
+    : hrStatus === "rejected" || hrStatus === "validation_failed" ? "si-item warn"
+    : "si-item";
 
+  // V9.0: 导出状态 — approved 不等于已导出
   document.getElementById("siExport").querySelector(".si-value").textContent =
-    report.best_skill_exported ? "是" : "否";
+    report.best_skill_exported ? "✅ 已导出" : "未导出";
 
   document.getElementById("siSummary").querySelector(".si-value").textContent =
     report.summary_zh || "--";
+}
+
+// V9.0: 显示同步异常
+function showSyncWarning() {
+  const banner = document.getElementById("syncWarning");
+  if (banner) {
+    banner.style.display = "flex";
+  }
 }
 
 // ========== Log ==========

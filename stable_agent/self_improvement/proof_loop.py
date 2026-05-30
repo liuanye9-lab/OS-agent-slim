@@ -111,6 +111,9 @@ class SelfImprovementProofLoop:
         eval_reason: str = "",
         failure_mode: str = "",
         observations: list[dict] | None = None,
+        # V9.0: 测试模式参数
+        force_regression_case: bool = False,
+        force_skill_patch: bool = False,
     ) -> SelfImprovementReport:
         """评估结果并决定是否触发学习。
 
@@ -153,6 +156,10 @@ class SelfImprovementProofLoop:
         # 2. 生成回归用例
         regression_cases = self._generate_regression_cases(run_id, attribution)
 
+        # V9.0: force_regression_case — 确保至少 1 个回归用例
+        if force_regression_case and not regression_cases:
+            regression_cases = self._generate_regression_cases(run_id, attribution or f"force test (run={run_id})")
+
         # V6.2: 回归用例持久化
         if self._storage is not None and regression_cases:
             for rc in regression_cases:
@@ -178,7 +185,9 @@ class SelfImprovementProofLoop:
         memory_entries = self._generate_memory_candidates(run_id, attribution, observations)
 
         # 4. 生成 skill patch
-        patch_entries = self._generate_skill_patches(run_id, attribution, failure_mode)
+        # V9.0: force_skill_patch — 即使 failure_mode 为空也生成
+        effective_failure_mode = failure_mode or ("forced_test" if force_skill_patch else "")
+        patch_entries = self._generate_skill_patches(run_id, attribution, effective_failure_mode)
 
         # 5. 构建报告
         need_review = len(patch_entries) > 0
@@ -289,7 +298,8 @@ class SelfImprovementProofLoop:
     def approve_patch(self, patch_id: str, review_id: str) -> SkillPatchCandidate | None:
         """人工审核通过 skill patch。
 
-        V6.3: 审核通过后自动导出 best_skill.md。
+        V9.0: 审核通过后 **不再自动导出** best_skill.md。
+        需要显式调用 export_approved_patch() 才会写 best_skill.md。
 
         Args:
             patch_id: 补丁 ID。
@@ -304,11 +314,42 @@ class SelfImprovementProofLoop:
             return None
 
         self.patch_store.approve(patch_id, review_id)
-        logger.info("Self-improvement: patch %s 审核通过 (review=%s)", patch_id, review_id)
+        logger.info("Self-improvement: patch %s 审核通过 (review=%s), ready_to_export=True",
+                     patch_id, review_id)
 
-        # V6.3: auto-export best_skill.md (V7.1: 版本管理)
-        self._export_best_skill_versioned()
+        # V9.0: 审核通过后不再自动导出，需显式调用 export_approved_patch()
+
+        # V7.1: 审核通过后发送飞书通知
+        self._notify_feishu(patch_id, review_id, "approved")
         return self.patch_store.get(patch_id)
+
+    def export_approved_patch(self, patch_id: str) -> str:
+        """显式导出已审核通过的 skill patch 到 best_skill.md。
+
+        V9.0: 从 approve_patch 中拆分出来，确保导出是显式操作。
+        必须在 approve_patch() 之后调用。
+
+        Args:
+            patch_id: 补丁 ID。
+
+        Returns:
+            导出的 best_skill.md 文件路径。
+
+        Raises:
+            ValueError: patch 不存在或状态不是 approved。
+        """
+        patch = self.patch_store.get(patch_id)
+        if patch is None:
+            raise ValueError(f"patch {patch_id} 不存在")
+
+        can_export, reason = patch.can_export()
+        if not can_export:
+            raise ValueError(f"patch {patch_id} 不可导出: {reason}")
+
+        export_path = self._export_best_skill_versioned()
+        self.patch_store.mark_exported(patch_id)
+        logger.info("Self-improvement: patch %s 已显式导出到 %s", patch_id, export_path)
+        return export_path
 
     def reject_patch(self, patch_id: str, review_id: str, reason: str = "") -> SkillPatchCandidate | None:
         """人工审核拒绝 skill patch。

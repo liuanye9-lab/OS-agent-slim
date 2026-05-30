@@ -224,6 +224,93 @@ def check_regression_runner_no_cases_fails() -> None:
     print("  OK")
 
 
+def check_no_private_field_access() -> None:
+    """V9.0: 确认不再直接访问 memory_bank._items。"""
+    print("[CHECK] No private field access (_items)")
+
+    targets = [
+        ROOT / "stable_agent",
+    ]
+
+    violations: list[str] = []
+
+    for target in targets:
+        if not target.exists():
+            continue
+        for file in target.rglob("*.py"):
+            lines = file.read_text(encoding="utf-8", errors="ignore").splitlines()
+            for i, line in enumerate(lines, 1):
+                stripped = line.strip()
+                # 跳过注释
+                if stripped.startswith("#"):
+                    continue
+                # 检查 memory_bank._items 访问
+                if "memory_bank._items" in stripped:
+                    # 排除 list_items() 方法定义本身
+                    if "def list_items" in stripped:
+                        continue
+                    # 排除注释/文档
+                    if "不要" in stripped or "禁止" in stripped or "不再" in stripped:
+                        continue
+                    violations.append(f"{file.relative_to(ROOT)}:{i}: memory_bank._items access: {stripped[:80]}")
+
+    assert_true(not violations, "Private field _items still accessed:\n" + "\n".join(violations))
+    print("  OK")
+
+
+def check_approve_no_auto_export() -> None:
+    """V9.0: approve_patch 不自动导出 best_skill.md。"""
+    print("[CHECK] approve_patch does NOT auto-export best_skill.md")
+
+    file_path = ROOT / "stable_agent/self_improvement/proof_loop.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    # approve_patch 方法内不应调用 _export_best_skill_versioned
+    # 找到 approve_patch 方法
+    approve_start = text.find("def approve_patch(")
+    if approve_start == -1:
+        raise AssertionError("approve_patch method not found in proof_loop.py")
+
+    # 找到下一个 def
+    next_def = text.find("\n    def ", approve_start + 1)
+    approve_body = text[approve_start:next_def] if next_def > 0 else text[approve_start:]
+
+    assert_true("_export_best_skill" not in approve_body,
+                "approve_patch should NOT call _export_best_skill_versioned anymore")
+
+    # 必须有 export_approved_patch 方法
+    assert_true("def export_approved_patch(" in text,
+                "export_approved_patch method must exist")
+
+    print("  OK")
+
+
+def check_event_sync_health_in_result() -> None:
+    """V9.0: os_agent 结果包含 event_sync_ok / emitted_event_count / sync_errors。"""
+    print("[CHECK] os_agent result has event_sync_ok fields")
+
+    file_path = ROOT / "stable_agent/gateway/unified_tool_registry.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert_true("emitted_event_count" in text, "Missing emitted_event_count in unified_tool_registry.py")
+    assert_true("event_sync_ok" in text, "Missing event_sync_ok in unified_tool_registry.py")
+    assert_true("sync_errors" in text, "Missing sync_errors in unified_tool_registry.py")
+
+    print("  OK")
+
+
+def check_memory_bank_list_items() -> None:
+    """V9.0: MemoryBank 有 list_items() 方法。"""
+    print("[CHECK] MemoryBank.list_items() method exists")
+
+    file_path = ROOT / "stable_agent/memory_router.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert_true("def list_items(" in text, "MemoryBank must have list_items() method")
+
+    print("  OK")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
@@ -238,6 +325,11 @@ def main() -> int:
         check_dashboard_observer_files()
         check_scripts_exist()
         check_no_forbidden_fields()
+        # V9.0: 新增检查
+        check_no_private_field_access()
+        check_approve_no_auto_export()
+        check_event_sync_health_in_result()
+        check_memory_bank_list_items()
 
     except AssertionError as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)

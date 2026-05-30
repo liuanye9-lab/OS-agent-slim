@@ -1,8 +1,83 @@
 # IMPLEMENTATION_LOG.md — StableAgent Cloud 闭环优化实施日志
 
 **开始时间**: 2026-05-30 23:00
-**完成时间**: 2026-05-31 00:18
-**最终状态**: V8.1 — 真正闭环自我优化打通 + Dashboard Observer 完整同步
+**完成时间**: 2026-05-31 01:20
+**最终状态**: V9.0 — Final Closed-Loop Hardening
+
+---
+
+## V9.0 Final Closed-Loop Hardening (2026-05-31 00:48–01:20)
+
+### [进度 100%] 全部完成
+
+#### Phase 1: 最终审计
+- git status: clean
+- pytest: 1089 passed
+- check_closed_loop: 8/8 PASS (V8.1)
+- 生成 FINAL_CLOSED_LOOP_HARDENING_AUDIT.md
+
+#### Phase 2: os_agent 测试模式参数
+- unified_tool_registry.py: 新增 force_eval_failed / force_failure_mode / force_regression_case / force_skill_patch / dry_run_learning
+- proof_loop.py: evaluate_and_learn() 新增 force_regression_case / force_skill_patch 参数
+- force_eval_failed=true 时 eval_passed=false, eval_score=0.3
+- force_skill_patch=true 时即使 failure_mode 为空也生成 patch ("forced_test")
+- 默认生产逻辑不受影响
+
+#### Phase 3: integration_test.py 正常 + 失败路径
+- 重写 integration_test.py (V9.0)
+- 正常路径: 验证 12 个必须事件 (NORMAL_PATH_EVENTS)
+- 失败学习路径: 验证 10 个必须事件 (FAILURE_PATH_EVENTS)
+- 失败路径验证 eval_passed=false, score<=0.4
+- 验证 event_sync_ok, emitted_event_count, sync_errors
+
+#### Phase 4: 事件字段强验收
+- REQUIRED_EVENT_FIELDS: run_id, event_type, stage, progress_pct, status_text_zh, decision_summary_zh, why_zh, avatar_state, timestamp
+- 缺字段即 FAIL（不再 WARNING）
+
+#### Phase 5: 事件同步健康检查
+- _emit() 记录 emitted_events / sync_errors
+- 核心事件 (task.received, task.completed) 写入失败 → event_sync_ok=false
+- StableAgentToolResult.data 包含 emitted_event_count / event_sync_ok / sync_errors
+
+#### Phase 6: TemporalMemory 私有字段清理
+- MemoryBank 新增 list_items() 方法
+- unified_tool_registry.py: _items.values() → list_items()
+- orchestrator.py: len(_items) → len(list_items())
+- check_closed_loop.py: 新增私有字段访问检查
+
+#### Phase 7: Human Review 与 Export 解耦
+- approve_patch() 不再调用 _export_best_skill_versioned()
+- 新增 export_approved_patch(patch_id): 显式导出，检查 status==approved
+- export 后 mark_exported → status=exported
+- check_closed_loop.py: 新增 approve_no_auto_export 检查
+
+#### Phase 8: Dashboard Observer 强化
+- run_observer.html: 新增同步异常 banner
+- run_observer.js: STAGE_LABEL_MAP 中文标签, showSyncWarning()
+- SI Report: 验证状态✅/❌, 审核状态完整展示, 导出状态区分
+- 时间线: 中文阶段标签替代英文
+
+#### Phase 9: 手动测试指南
+- MANUAL_TEST_GUIDE.md: 10 个完整手动验证步骤
+
+#### Phase 10: 测试结果
+- pytest: 1100 passed (1089 + 11 new)
+- check_closed_loop: 12/12 PASS (8 + 4 new)
+- smoke_test: 需要 uvicorn 运行
+- integration_test: 需要 uvicorn 运行
+
+#### 涉及文件
+- `stable_agent/gateway/unified_tool_registry.py` (Phase 2, 3, 4, 5 — 重写 _h_task_os_agent)
+- `stable_agent/self_improvement/proof_loop.py` (Phase 2, 7 — 新增参数 + 拆分导出)
+- `stable_agent/memory_router.py` (Phase 6 — 新增 list_items())
+- `stable_agent/orchestrator.py` (Phase 6 — _items → list_items())
+- `tools/integration_test.py` (Phase 3, 4 — 完全重写)
+- `tools/check_closed_loop.py` (Phase 4, 6, 7 — 新增 4 项检查)
+- `web/static/run_observer.js` (Phase 8 — 同步异常 + 中文标签 + SI 增强)
+- `web/templates/run_observer.html` (Phase 8 — 同步异常 banner)
+- `tests/test_v9_final_hardening.py` (Phase 10 — 11 个新测试)
+- `FINAL_CLOSED_LOOP_HARDENING_AUDIT.md` (Phase 1)
+- `MANUAL_TEST_GUIDE.md` (Phase 9)
 
 ---
 

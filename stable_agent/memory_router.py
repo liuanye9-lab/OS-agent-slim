@@ -48,6 +48,16 @@ class MemoryBank:
     # 公共方法
     # ------------------------------------------------------------------
 
+    def list_items(self) -> list[MemoryItem]:
+        """返回所有记忆条目的列表副本。
+
+        替代直接访问 _items 私有字段。
+
+        Returns:
+            所有记忆条目的列表。
+        """
+        return list(self._items)
+
     def add_item(self, item: MemoryItem) -> None:
         """添加或覆盖记忆条目。
 

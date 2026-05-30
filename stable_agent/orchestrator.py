@@ -877,7 +877,7 @@ class StableAgentOrchestrator:
             logger.warning("存储操作失败，继续执行: %s", e)
 
         return {
-            "memory_count": len(self.memory_bank._items),
+            "memory_count": len(self.memory_bank.list_items()),
             "event_count": len(self.event_bus._events),
             "bad_case_count": len(
                 self.bad_case_manager.retrieve_recent_bad_cases(limit=1000)

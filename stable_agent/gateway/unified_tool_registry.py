@@ -915,24 +915,37 @@ class UnifiedToolRegistry:
     def _h_task_os_agent(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
         """处理 stableagent.task.os_agent — 完整闭环自优化工作流。
 
-        V8.1: 显式阶段流水线，每阶段发布事件到 EventStream + RunStore。
-        不再只发 acting/completed —— 完整展示:
-        received → intent_parsing → context_budgeting → temporal_memory →
-        context_compressing → acting → evaluating → self_improvement → completed
+        V9.0: 显式阶段流水线，每阶段发布事件到 EventStream + RunStore。
+        支持 force_eval_failed / force_failure_mode / force_regression_case /
+        force_skill_patch / dry_run_learning 测试模式参数。
+        事件同步健康检查: emitted_events / sync_errors / event_sync_ok。
         """
         tool_name = "stableagent.task.os_agent"
         task_input: str = args.get("task_input", "")
         mode: str = args.get("mode", "auto")
         open_dashboard: bool = args.get("open_dashboard", True)
 
+        # V9.0: 测试模式参数
+        force_eval_failed: bool = args.get("force_eval_failed", False)
+        force_failure_mode: str = args.get("force_failure_mode", "")
+        force_regression_case: bool = args.get("force_regression_case", False)
+        force_skill_patch: bool = args.get("force_skill_patch", False)
+        dry_run_learning: bool = args.get("dry_run_learning", False)
+
         from stable_agent.runtime.run_lifecycle import (
             RunStage, RunStageMeta, get_stage_meta, STAGE_PROGRESS,
             STAGE_LABEL_ZH, STAGE_AVATAR,
         )
 
-        # --- 事件发布辅助 ---
+        # --- 事件发布辅助 (V9.0: 同步健康检查) ---
+        emitted_events: list[dict] = []
+        sync_errors: list[str] = []
+
         def _emit(event_type: str, stage: str, payload: dict | None = None) -> dict:
-            """发布阶段事件到 EventStream + RunStore。返回事件字典。"""
+            """发布阶段事件到 EventStream + RunStore。返回事件字典。
+
+            V9.0: 记录每次 emit 成功/失败到 emitted_events / sync_errors。
+            """
             meta = get_stage_meta(stage)
             ctx.current_stage = stage
             ctx.progress_pct = meta.progress_pct
@@ -959,7 +972,8 @@ class UnifiedToolRegistry:
             if payload:
                 event.update(payload)
 
-            # 发布到 EventStream
+            # 发布到 EventStream + RunStore
+            emit_ok = False
             try:
                 tr = getattr(self, '_tool_router', None)
                 if tr is not None:
@@ -969,9 +983,15 @@ class UnifiedToolRegistry:
                     rs = getattr(tr, '_run_store', None)
                     if rs is not None:
                         rs.append_event(ctx.run_id, event)
-            except Exception:
+                emit_ok = True
+            except Exception as emit_exc:
                 import logging
-                logging.getLogger(__name__).debug("event emit skipped: %s", event_type)
+                logging.getLogger(__name__).warning(
+                    "event emit FAILED for %s: %s", event_type, emit_exc)
+                sync_errors.append(f"{event_type}: {emit_exc}")
+
+            event["_emit_ok"] = emit_ok
+            emitted_events.append(event)
             return event
 
         if self._orchestrator is None:
@@ -1001,10 +1021,10 @@ class UnifiedToolRegistry:
                 if hasattr(orch, 'temporal_memory_bridge'):
                     bridge = orch.temporal_memory_bridge
                     project_id = getattr(ctx, 'project_id', None)
-                    # 从 orchestrator 的 memory_bank 加载
+                    # V9.0: 使用 list_items() 替代 _items 私有字段访问
                     if hasattr(orch, 'memory_bank'):
                         mems = [{"id": m.id, "content": m.content[:100], "created_at": getattr(m, 'timestamp', time.time()), "source": "memory_bank"}
-                                for m in getattr(orch.memory_bank, '_items', {}).values()][:20]
+                                for m in orch.memory_bank.list_items()][:20]
                         bridge.load_for_project(project_id=project_id, existing_memories=mems)
                     temporal_hits = bridge.retrieve(task_input=task_input, project_id=project_id, top_k=8)
             except Exception:
@@ -1087,7 +1107,13 @@ class UnifiedToolRegistry:
             eval_reason = "无评估数据"
             failure_mode = ""
 
-            if "evaluation" in result and result["evaluation"] is not None:
+            # V9.0: force_eval_failed 测试模式
+            if force_eval_failed:
+                eval_passed = False
+                eval_score = 0.3
+                eval_reason = "force_eval_failed=true (测试模式)"
+                failure_mode = force_failure_mode or "intent_drift"
+            elif "evaluation" in result and result["evaluation"] is not None:
                 eval_obj = result["evaluation"]
                 if hasattr(eval_obj, 'overall_score'):
                     eval_score = float(eval_obj.overall_score)
@@ -1112,6 +1138,9 @@ class UnifiedToolRegistry:
             si_report = None
             try:
                 proof = self._orchestrator.proof_loop
+
+                # V9.0: force_regression_case / force_skill_patch 测试参数
+                # 传递给 evaluate_and_learn，由 proof_loop 内部处理
                 si_report = proof.evaluate_and_learn(
                     run_id=ctx.run_id,
                     eval_passed=eval_passed,
@@ -1119,6 +1148,9 @@ class UnifiedToolRegistry:
                     eval_reason=eval_reason,
                     failure_mode=failure_mode,
                     observations=[{"text": str(result.get("output", ""))[:200]}],
+                    # V9.0: 测试模式参数
+                    force_regression_case=force_regression_case,
+                    force_skill_patch=force_skill_patch,
                 )
 
                 si_payload = {
@@ -1161,6 +1193,16 @@ class UnifiedToolRegistry:
             # === Phase 9: 完成 ===
             _emit("task.completed", "completed")
 
+            # V9.0: 事件同步健康检查
+            event_sync_ok = len(sync_errors) == 0
+            # 如果核心事件（task.received, task.completed）全部失败，标记 false
+            core_events_ok = any(
+                e.get("event_type") in ("task.received", "task.completed") and e.get("_emit_ok")
+                for e in emitted_events
+            )
+            if not core_events_ok and emitted_events:
+                event_sync_ok = False
+
             return self._make_result(
                 ctx, tool_name,
                 ok=True,
@@ -1178,6 +1220,12 @@ class UnifiedToolRegistry:
                     "eval_passed": eval_passed,
                     "si_report": si_report.to_dict() if si_report else None,
                     "mode": mode,
+                    # V9.0: 事件同步健康
+                    "emitted_event_count": len(emitted_events),
+                    "event_sync_ok": event_sync_ok,
+                    "sync_errors": sync_errors,
+                    # V9.0: dry_run_learning 标记
+                    "dry_run_learning": dry_run_learning,
                 },
                 plain_text=f"任务完成: {task_input[:80]}",
                 plain_text_zh=f"任务完成: {task_input[:80]}",
@@ -1193,9 +1241,18 @@ class UnifiedToolRegistry:
                       {"reason_zh": str(exc), "error": str(exc)})
             except Exception as emit_err:
                 logger.warning("_emit task.failed 失败: %s", emit_err)
+
+            # V9.0: 失败时也返回同步健康信息
+            fail_sync_ok = len(sync_errors) == 0
+
             return self._make_result(
                 ctx, tool_name,
                 ok=False, is_error=True,
+                data={
+                    "emitted_event_count": len(emitted_events),
+                    "event_sync_ok": fail_sync_ok,
+                    "sync_errors": sync_errors,
+                },
                 plain_text=f"OS Agent 执行失败：{exc}",
                 plain_text_zh=f"OS Agent 任务失败：{exc}",
                 plain_text_en=f"OS Agent task failed: {exc}",
