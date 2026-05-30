@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
-"""StableAgent Cloud Integration Test — V9.1 Final Closed-Loop Hardening.
+"""StableAgent Cloud Integration Test — V9.2 Dashboard Event Chain Hardening.
 
 测试三条核心路径:
 1. MCP tools/list: 验证工具注册完整
 2. 正常路径: 完整基础事件链（含 rag.retrieved）
 3. 失败学习路径: self-improvement 事件链（含 force_validation_passed 控制）
+
+V9.2 强化:
+- WARN+SKIP 全部替换为 assert_true fail-fast
+- REQUIRED_NORMAL_EVENTS 交叉验证 → missing_required_events
+- next_step_zh 加入 REQUIRED_EVENT_FIELDS
+- 事件 API 为空时 fallback 到 emitted_events
+- validation gate 规则 + event_sync_ok + missing_required_events 强验证
 
 V9.1 强化:
 - 三条路径: tools/list + normal + failed learning
@@ -132,6 +139,7 @@ REQUIRED_EVENT_FIELDS = [
     "status_text_zh",
     "decision_summary_zh",
     "why_zh",
+    "next_step_zh",           # V9.2: 强制要求
     "avatar_state",
     "timestamp",
 ]
@@ -422,7 +430,7 @@ def check_observer_page(base_url: str, run_id: str) -> None:
 # ======================================================================
 
 def check_event_sync_health(sc: dict[str, Any]) -> None:
-    """V9.1: 验证 event_sync_ok + emitted_events 列表。"""
+    """V9.2: 验证 event_sync_ok + emitted_events 列表 + missing_required_events。"""
     print("[9/10] Checking event sync health")
 
     assert_true("event_sync_ok" in sc, "Missing event_sync_ok in structuredContent")
@@ -435,7 +443,11 @@ def check_event_sync_health(sc: dict[str, Any]) -> None:
     sync_errors = sc.get("sync_errors", [])
     emitted_events = sc.get("emitted_events", [])
 
-    assert_true(event_sync_ok is True, f"event_sync_ok should be True, errors={sync_errors}")
+    # V9.2: missing_required_events 必须存在
+    missing = sc.get("missing_required_events", None)
+    assert_true(missing is not None, "Missing missing_required_events in result (V9.2)")
+
+    assert_true(event_sync_ok is True, f"event_sync_ok should be True, errors={sync_errors}, missing={missing}")
     assert_true(emitted_count > 0, f"Should have emitted events, got {emitted_count}")
     assert_true(len(emitted_events) > 0, f"emitted_events list should not be empty (V9.1)")
 
@@ -443,7 +455,14 @@ def check_event_sync_health(sc: dict[str, Any]) -> None:
     for i, evt in enumerate(emitted_events):
         assert_true("event_type" in evt, f"emitted_events[{i}] missing event_type")
 
-    print(f"  OK — emitted={emitted_count}, events_list={len(emitted_events)}, sync_ok={event_sync_ok}")
+    # V9.2: missing_required_events 必须为空
+    if missing is not None:
+        assert_true(
+            len(missing) == 0,
+            f"missing_required_events must be empty, got: {missing}"
+        )
+
+    print(f"  OK — emitted={emitted_count}, events_list={len(emitted_events)}, sync_ok={event_sync_ok}, missing={missing}")
 
 
 # ======================================================================
@@ -451,12 +470,14 @@ def check_event_sync_health(sc: dict[str, Any]) -> None:
 # ======================================================================
 
 def check_validation_gate(sc_val_fail: dict[str, Any], sc_val_pass: dict[str, Any]) -> None:
-    """V9.1: 验证 validation gate 规则:
+    """V9.2: 验证 validation gate 规则 + 事件链完整性:
     - force_validation_passed=False → validation_failed, 不进 human_review
     - force_validation_passed=True → human_review.required, 不自动 export
     - dry_run_learning=True → 不导出 best_skill.md
+    - event_sync_ok 必须检查 required event types
+    - missing_required_events 必须为空
     """
-    print("[10/10] Checking validation gate rules")
+    print("[10/10] Checking validation gate rules + event chain")
 
     # Path 3a: force_validation_passed=False
     si_fail = sc_val_fail.get("si_report", {})
@@ -471,6 +492,13 @@ def check_validation_gate(sc_val_fail: dict[str, Any], sc_val_pass: dict[str, An
             "force_validation_passed=False: best_skill_exported must NOT be True"
         )
 
+    # V9.2: 检查 missing_required_events
+    missing_fail = sc_val_fail.get("missing_required_events", [])
+    assert_true(
+        len(missing_fail) == 0,
+        f"FAILURE-VAL-FAIL path has missing required events: {missing_fail}"
+    )
+
     # Path 3b: force_validation_passed=True
     si_pass = sc_val_pass.get("si_report", {})
     if si_pass:
@@ -484,7 +512,24 @@ def check_validation_gate(sc_val_fail: dict[str, Any], sc_val_pass: dict[str, An
             "force_validation_passed=True + dry_run: best_skill_exported must NOT be True"
         )
 
-    print("  OK — validation gate rules verified")
+    # V9.2: 检查 val_pass 路径的 missing_required_events
+    missing_pass = sc_val_pass.get("missing_required_events", [])
+    assert_true(
+        len(missing_pass) == 0,
+        f"FAILURE-VAL-PASS path has missing required events: {missing_pass}"
+    )
+
+    # V9.2: event_sync_ok 必须为 True
+    assert_true(
+        sc_val_fail.get("event_sync_ok") is True,
+        f"FAILURE-VAL-FAIL: event_sync_ok must be True, missing={sc_val_fail.get('missing_required_events', [])}"
+    )
+    assert_true(
+        sc_val_pass.get("event_sync_ok") is True,
+        f"FAILURE-VAL-PASS: event_sync_ok must be True, missing={sc_val_pass.get('missing_required_events', [])}"
+    )
+
+    print("  OK — validation gate rules + event chain verified")
 
 
 # ======================================================================
@@ -565,19 +610,23 @@ def main() -> int:
 
         time.sleep(1.5)
 
-        # 获取正常路径事件
+        # V9.2: 不允许 events 为空 — 必须从 API 或 emitted_events 获取
         events_normal = fetch_run_events(base_url, run_id_normal)
         if not events_normal:
-            print("  WARN: No events from API, using emitted events from MCP response")
-            events_normal = []
+            # Fallback: 使用 MCP 响应中的 emitted_events
+            events_normal = sc_normal.get("emitted_events", [])
 
-        # 正常路径: 事件字段强验收
-        check_event_fields_strict(events_normal, "NORMAL") if events_normal else \
-            print("  SKIP: event field check (no events from API)")
+        assert_true(
+            bool(events_normal),
+            f"NORMAL path: /api/runs/{run_id_normal}/events returned no events. "
+            f"Dashboard sync is broken. (emitted_event_count={sc_normal.get('emitted_event_count', 0)})"
+        )
 
-        # 正常路径: 事件链完整性 (含 rag.retrieved)
-        check_event_chain(events_normal, NORMAL_PATH_EVENTS, "NORMAL") if events_normal else \
-            print("  SKIP: event chain check (no events from API)")
+        # 正常路径: 事件字段强验收 — 不允许 SKIP
+        check_event_fields_strict(events_normal, "NORMAL")
+
+        # 正常路径: 事件链完整性 (含 rag.retrieved) — 不允许 SKIP
+        check_event_chain(events_normal, NORMAL_PATH_EVENTS, "NORMAL")
 
         # Dashboard Observer
         check_observer_page(base_url, run_id_normal)
@@ -595,16 +644,18 @@ def main() -> int:
 
             events_fail = fetch_run_events(base_url, run_id_fail)
             if not events_fail:
-                print("  WARN: No events from API for failure path (val_failed)")
+                events_fail = sc_val_fail.get("emitted_events", [])
 
-            check_event_fields_strict(events_fail, "FAILURE-VAL-FAIL") if events_fail else \
-                print("  SKIP: event field check (no events from API)")
+            assert_true(
+                bool(events_fail),
+                f"FAILURE-VAL-FAIL path: /api/runs/{run_id_fail}/events returned no events. "
+                f"Dashboard sync is broken. (emitted_event_count={sc_val_fail.get('emitted_event_count', 0)})"
+            )
 
-            check_event_chain(events_fail, FAILURE_PATH_EVENTS, "FAILURE-VAL-FAIL") if events_fail else \
-                print("  SKIP: event chain check (no events from API)")
-
-            check_failure_learning_details(sc_val_fail, events_fail) if events_fail else \
-                print("  SKIP: failure learning details (no events from API)")
+            # V9.2: 不允许 SKIP — 强制检查
+            check_event_fields_strict(events_fail, "FAILURE-VAL-FAIL")
+            check_event_chain(events_fail, FAILURE_PATH_EVENTS, "FAILURE-VAL-FAIL")
+            check_failure_learning_details(sc_val_fail, events_fail)
 
             check_observer_page(base_url, run_id_fail)
             check_event_sync_health(sc_val_fail)
@@ -617,16 +668,24 @@ def main() -> int:
 
             events_pass = fetch_run_events(base_url, run_id_pass)
             if not events_pass:
-                print("  WARN: No events from API for failure path (val_passed)")
+                events_pass = sc_val_pass.get("emitted_events", [])
 
+            assert_true(
+                bool(events_pass),
+                f"FAILURE-VAL-PASS path: /api/runs/{run_id_pass}/events returned no events. "
+                f"Dashboard sync is broken. (emitted_event_count={sc_val_pass.get('emitted_event_count', 0)})"
+            )
+
+            # V9.2: 验证 val_pass 路径的事件链也完整
+            check_event_fields_strict(events_pass, "FAILURE-VAL-PASS")
+            check_event_chain(events_pass, FAILURE_PATH_EVENTS, "FAILURE-VAL-PASS")
             check_event_sync_health(sc_val_pass)
 
             # V9.1: Validation Gate 规则验证
             check_validation_gate(sc_val_fail, sc_val_pass)
 
         # Trace quality
-        if events_normal:
-            check_trace_quality(events_normal)
+        check_trace_quality(events_normal)
 
     except AssertionError as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
@@ -636,7 +695,7 @@ def main() -> int:
         return 1
 
     print("")
-    print("[PASS] StableAgent integration test completed (V9.1 final hardening).")
+    print("[PASS] StableAgent integration test completed (V9.2 event chain hardening).")
     return 0
 
 

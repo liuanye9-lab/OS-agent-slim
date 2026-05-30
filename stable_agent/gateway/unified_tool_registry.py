@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 import time
 from enum import Enum
 from typing import Any, Callable, TYPE_CHECKING
@@ -1007,6 +1008,16 @@ class UnifiedToolRegistry:
             )
 
         try:
+            # V9.2: 显式在 RunStore 中注册 run（确保 API 可查）
+            try:
+                tr = getattr(self, '_tool_router', None)
+                if tr is not None:
+                    rs = getattr(tr, '_run_store', None)
+                    if rs is not None:
+                        rs.create_run(ctx.run_id)
+            except Exception:
+                logging.getLogger(__name__).warning("RunStore.create_run failed for %s", ctx.run_id, exc_info=True)
+
             # === Phase 1: 接收 → 意图解析 ===
             _emit("task.received", "received")
             _emit("intent.parsed", "intent_parsing",
@@ -1205,15 +1216,52 @@ class UnifiedToolRegistry:
             # === Phase 9: 完成 ===
             _emit("task.completed", "completed")
 
-            # V9.0: 事件同步健康检查
-            event_sync_ok = len(sync_errors) == 0
-            # 如果核心事件（task.received, task.completed）全部失败，标记 false
-            core_events_ok = any(
-                e.get("event_type") in ("task.received", "task.completed") and e.get("_emit_ok")
-                for e in emitted_events
-            )
-            if not core_events_ok and emitted_events:
-                event_sync_ok = False
+            # V9.2: 标记 RunStore 中 run 为 completed
+            try:
+                tr = getattr(self, '_tool_router', None)
+                if tr is not None:
+                    rs = getattr(tr, '_run_store', None)
+                    if rs is not None:
+                        rs.mark_completed(ctx.run_id)
+            except Exception:
+                logging.getLogger(__name__).warning("RunStore.mark_completed failed for %s", ctx.run_id, exc_info=True)
+
+            # V9.2: 事件同步健康检查 — 必需事件类型交叉检查
+            REQUIRED_NORMAL_EVENTS = [
+                "task.received",
+                "intent.parsed",
+                "context.budgeted",
+                "temporal_memory.retrieved",
+                "rag.retrieved",
+                "context.compression_guard.checked",
+                "context.built",
+                "workflow.plan.created",
+                "workflow.step.started",
+                "workflow.step.completed",
+                "eval.completed",
+                "self_improvement.checked",
+                "task.completed",
+            ]
+
+            # 对于失败学习路径，额外检查
+            REQUIRED_FAILURE_EVENTS = [
+                "regression.generated",
+                "memory.update.candidate",
+                "skill.patch.proposed",
+                "validation.checked",
+            ]
+
+            emitted_event_types = [e.get("event_type") for e in emitted_events if e.get("_emit_ok")]
+
+            missing_required_events = [e for e in REQUIRED_NORMAL_EVENTS if e not in emitted_event_types]
+
+            # 如果有 failure learning 事件，也检查额外必需事件
+            if force_eval_failed and any(e in emitted_event_types for e in ("regression.generated", "skill.patch.proposed")):
+                for fe in REQUIRED_FAILURE_EVENTS:
+                    if fe not in missing_required_events and fe not in emitted_event_types:
+                        missing_required_events.append(fe)
+
+            event_sync_ok = len(sync_errors) == 0 and not missing_required_events
 
             return self._make_result(
                 ctx, tool_name,
@@ -1241,6 +1289,9 @@ class UnifiedToolRegistry:
                     ],
                     "event_sync_ok": event_sync_ok,
                     "sync_errors": sync_errors,
+                    # V9.2: missing_required_events — 严格交叉检查
+                    "missing_required_events": missing_required_events,
+                    "required_events": REQUIRED_NORMAL_EVENTS,
                     # V9.0: dry_run_learning 标记
                     "dry_run_learning": dry_run_learning,
                     # V9.1: force_validation_passed 参数回显

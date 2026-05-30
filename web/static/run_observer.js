@@ -98,7 +98,74 @@ if (runId) {
   $runId.textContent = runId;
   const v3Link = document.getElementById("v3Link");
   if (v3Link) v3Link.href = `/runs/${runId}`;
+  // V9.2: 先 API 回放历史事件，再 WebSocket 实时订阅
+  loadHistoryAndConnect(runId);
+}
+
+// ========== API History Replay + WebSocket ==========
+async function loadHistoryAndConnect(runId) {
+  let historyEvents = [];
+
+  // Step 1: 请求 API 获取历史事件
+  try {
+    const resp = await fetch(`/api/runs/${runId}/events`);
+    if (resp.ok) {
+      const data = await resp.json();
+      if (Array.isArray(data) && data.length > 0) {
+        historyEvents = data;
+        // 回放历史事件到 UI
+        for (const evt of historyEvents) {
+          applyEvent(evt);
+        }
+        addLogLine("info", `API 回放 ${historyEvents.length} 个历史事件`);
+      }
+    } else if (resp.status === 404) {
+      addLogLine("warn", `Run ${runId} 不存在 (404)`);
+    }
+  } catch (err) {
+    addLogLine("warn", `API 回放失败: ${err.message}`);
+  }
+
+  // Step 2: 连接 WebSocket 获取实时事件
   connectWebSocket(runId);
+
+  // Step 3: 如果 API 和 WebSocket 都无事件，显示同步错误
+  setTimeout(() => {
+    const ws = activeConnections.get(runId);
+    const wsConnected = ws && ws.readyState === WebSocket.OPEN;
+    const timelineEmpty = $timelineCol && $timelineCol.children.length === 0;
+
+    if (historyEvents.length === 0 && !wsConnected) {
+      showSyncError("历史事件为空，WebSocket 未连接");
+    } else if (historyEvents.length === 0 && wsConnected) {
+      // API 空但 WebSocket 已连接 — 显示提示
+      addLogLine("warn", "历史事件为空，仅显示实时事件");
+      showHistoryEmptyNotice();
+    }
+    // 如果有历史事件或有实时事件，一切正常
+  }, 3000);
+}
+
+// V9.2: 显示同步错误
+function showSyncError(message) {
+  const banner = document.getElementById("syncWarning");
+  if (banner) {
+    banner.style.display = "flex";
+    const text = banner.querySelector(".sync-warning-text");
+    if (text) text.textContent = message || "事件同步异常";
+  }
+  $mcpStatus.textContent = "同步错误";
+  $mcpStatus.className = "mcp-status disconnected";
+}
+
+// V9.2: 历史事件为空但 WebSocket 有实时事件的提示
+function showHistoryEmptyNotice() {
+  const notice = document.createElement("div");
+  notice.className = "history-empty-notice";
+  notice.textContent = "⚠️ 历史事件为空，仅显示实时事件";
+  if ($timelineCol && $timelineCol.parentNode) {
+    $timelineCol.parentNode.insertBefore(notice, $timelineCol);
+  }
 }
 
 // ========== WebSocket ==========
@@ -112,6 +179,9 @@ function connectWebSocket(runId) {
     $mcpStatus.textContent = "已连接";
     $mcpStatus.className   = "mcp-status";
     addLogLine("info", `WebSocket 已连接: ${runId}`);
+    // V9.2: 记录到 activeConnections 供 loadHistoryAndConnect 检查
+    activeConnections.set(runId, ws);
+    if (!primaryRunId) primaryRunId = runId;
   };
 
   ws.onmessage = (e) => {
@@ -127,6 +197,7 @@ function connectWebSocket(runId) {
     $mcpStatus.textContent = "已断开";
     $mcpStatus.className   = "mcp-status disconnected";
     addLogLine("warn", "WebSocket 已断开");
+    activeConnections.delete(runId);
   };
 
   ws.onerror = () => {

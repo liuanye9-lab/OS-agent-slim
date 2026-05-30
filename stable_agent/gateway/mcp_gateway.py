@@ -78,6 +78,9 @@ class MCPGateway:
             event_bus=getattr(orchestrator, 'event_bus', None) if orchestrator else None,
         )
 
+        # V9.2: 反向注入 tool_router 到 registry，确保 _emit() 能写入 RunStore + EventStream
+        self.registry._tool_router = self.router
+
         # 创建适配器和 JSON-RPC 处理器
         self.adapter: ResponseAdapter = ResponseAdapter()
         self.jsonrpc: JSONRPCHandler = JSONRPCHandler(

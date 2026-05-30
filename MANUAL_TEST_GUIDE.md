@@ -1,4 +1,4 @@
-# StableAgent Cloud — 手动测试指南 (V9.0)
+# StableAgent Cloud — 手动测试指南 (V9.2)
 
 ## 1. 如何启动项目
 
@@ -95,8 +95,13 @@ curl http://localhost:8000/api/runs/{run_id}/events
 1. structuredContent 中 `eval_passed=true` (或评分合理通过)
 2. `event_sync_ok=true`
 3. `emitted_event_count >= 10`
-4. 事件包含: task.received → intent.parsed → eval.completed → task.completed
-5. Dashboard Observer 页面显示进度 100%
+4. `missing_required_events` 必须为空 `[]`
+5. 事件包含: task.received → intent.parsed → eval.completed → task.completed
+6. Dashboard Observer 页面显示进度 100%
+7. `/api/runs/{run_id}/events` 返回非空事件列表
+8. **每个关键事件必须包含 `next_step_zh` 字段**
+
+> ⚠️ **如果 `/api/runs/{run_id}/events` 返回空，则 Dashboard 同步未打通，不能算通过。**
 
 ## 8. 如何判断失败学习路径是否打通
 
@@ -108,6 +113,9 @@ curl http://localhost:8000/api/runs/{run_id}/events
 4. 如果 validation_passed=true: 事件包含 human_review.required
 5. 如果 validation_passed=false: human_review_status = "validation_failed"
 6. `dry_run_learning=true` 标记存在
+7. `missing_required_events` 必须为空 `[]`
+
+> ⚠️ **如果 `integration_test` 出现 SKIP event chain，则不能算通过。**
 
 ## 9. 如何确认 best_skill.md 没有被自动覆盖
 
@@ -128,6 +136,17 @@ ls -la skills/best_skill.md
 3. 观察 Dashboard 实时更新:
    - 进度条从 0% → 100% (不是前端猜测)
    - 时间线逐条添加事件
+
+## 11. V9.2 事件链硬性判定标准
+
+以下任一条件不满足，则闭环未打通：
+
+1. **如果 `/api/runs/{run_id}/events` 返回空** → Dashboard 同步未打通
+2. **如果 `integration_test` 出现 SKIP event chain** → 不能算通过
+3. **如果 `event_sync_ok=false`** → 不能算通过
+4. **如果 `best_skill_exported=true` 但没有 human review** → 不能算通过
+5. **如果 `missing_required_events` 非空** → 事件链不完整
+6. **如果关键事件缺少 `next_step_zh` 字段** → 解释性不足
    - 头像状态随阶段变化
    - 如果 event_sync_ok=false，顶部显示同步异常 banner
 4. 事件字段包含后端生成的 why_zh / decision_summary_zh / avatar_state

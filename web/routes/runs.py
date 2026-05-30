@@ -58,9 +58,19 @@ def register_run_routes(app: FastAPI, gateway_run_store=None, dash_sync=None) ->
         try:
             store = gateway_run_store
             if store is None:
-                return []
+                return JSONResponse(
+                    {"error": "gateway_run_store unavailable", "run_id": run_id},
+                    status_code=503,
+                )
             import dataclasses
             events = store.get_events(run_id)
+            # V9.2: run_id 不存在于 RunStore → 返回 404
+            run_status = store.get_run_status(run_id)
+            if run_status is None:
+                return JSONResponse(
+                    {"error": "run not found", "run_id": run_id},
+                    status_code=404,
+                )
             result = []
             for e in events:
                 if dataclasses.is_dataclass(e):
@@ -72,8 +82,11 @@ def register_run_routes(app: FastAPI, gateway_run_store=None, dash_sync=None) ->
             return result
         except Exception as e:
             import logging
-            logging.getLogger("uvicorn").warning(f"get_run_events failed: {e}")
-            return []
+            logging.getLogger("uvicorn").exception("get_run_events failed: %s", e)
+            return JSONResponse(
+                {"error": str(e), "run_id": run_id},
+                status_code=500,
+            )
 
     @app.get("/api/runs/{run_id}/summary")
     async def get_run_summary(run_id: str):
