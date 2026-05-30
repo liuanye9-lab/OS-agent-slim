@@ -66,14 +66,14 @@ class RegressionValidationRunner:
             ValidationReport，passed 表示验证通过。
         """
         if not regression_cases:
-            logger.warning("无回归用例，跳过验证")
+            logger.warning("无回归用例，验证失败")
             return ValidationReport.from_results(
                 run_id=patch.source_run_id or "unknown",
                 patch_id=patch.patch_id,
                 old_score=0.0,
-                new_score=1.0,
+                new_score=0.0,
                 case_results=[],
-                reason_zh="无回归用例可用，默认通过（低置信度）",
+                reason_zh="没有回归用例，无法证明新 skill 更好，因此验证失败。",
             )
 
         use_llm = llm_client is not None

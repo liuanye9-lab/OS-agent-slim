@@ -190,8 +190,9 @@ class SelfImprovementProofLoop:
             skill_patches=patch_entries,
         )
 
-        # V6.1: 真实 Regression Validation（替换硬置 validation_passed=True）
-        validation_passed = True
+        # V8.1: validation_passed 默认 False，只有真实验证通过才为 True
+        # 旧行为: validation_passed = True（默认通过，不安全）
+        validation_passed = False
         validation_reports: list[ValidationReport] = []
 
         if patch_entries:
@@ -218,6 +219,7 @@ class SelfImprovementProofLoop:
 
                 if vr.passed:
                     # 验证通过 → 可以进入审核
+                    validation_passed = True
                     self.patch_store.submit_for_review(entry.patch_id)
                     # V6.3: 提交到真实 Review Queue
                     patch = self.patch_store.get(entry.patch_id)

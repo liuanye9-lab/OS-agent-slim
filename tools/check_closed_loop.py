@@ -142,12 +142,11 @@ def check_self_improvement_not_stubbed() -> None:
 
     found = [pattern for pattern in forbidden_patterns if pattern in text]
 
-    # validation_passed = True 初始化是正常的，关键是后续能否被改为 False
-    # 检查: 如果文件中只有 validation_passed = True 赋值而没有任何 False 赋值 → 真正的硬编码
+    # validation_passed 初始化必须为 False (V8.1)
     has_true_init = "validation_passed = True" in text
-    has_false_set = "validation_passed = False" in text
+    has_false_init = "validation_passed = False" in text
 
-    if has_true_init and not has_false_set:
+    if has_true_init and not has_false_init:
         found.append("validation_passed = True (no False assignment found → hardcoded!)")
 
     assert_true(
@@ -211,6 +210,20 @@ def check_scripts_exist() -> None:
     print("  OK")
 
 
+def check_regression_runner_no_cases_fails() -> None:
+    print("[CHECK] RegressionValidationRunner no-cases fails")
+
+    file_path = ROOT / "stable_agent/self_improvement/regression_validation_runner.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert_true("new_score=0.0" in text, "RegressionValidationRunner should return new_score=0.0 when no cases")
+    assert_true("old_score=0.0" not in text or "无法证明" in text,
+               "RegressionValidationRunner should fail when no regression cases")
+    assert_true("默认通过" not in text, "RegressionValidationRunner should NOT default-pass when no cases")
+
+    print("  OK")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
@@ -221,6 +234,7 @@ def main() -> int:
         check_run_lifecycle()
         check_self_improvement_not_stubbed()
         check_best_skill_guard()
+        check_regression_runner_no_cases_fails()
         check_dashboard_observer_files()
         check_scripts_exist()
         check_no_forbidden_fields()

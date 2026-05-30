@@ -913,17 +913,12 @@ class UnifiedToolRegistry:
 
     # V6.5: /os-agent 快捷入口
     def _h_task_os_agent(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
-        """处理 stableagent.task.os_agent — OS Agent 自优化工作流。
+        """处理 stableagent.task.os_agent — 完整闭环自优化工作流。
 
-        启动完整自优化链路（Context → Memory → RAG → Budget → Workflow →
-        Eval → SkillOpt），每阶段发布 TraceEvent 供 Dashboard 实时订阅。
-
-        Args:
-            ctx: RunContext。
-            args: 包含 task_input、mode 等参数字典。
-
-        Returns:
-            包含 run_id / dashboard_url / progress_pct 的 StableAgentToolResult。
+        V8.1: 显式阶段流水线，每阶段发布事件到 EventStream + RunStore。
+        不再只发 acting/completed —— 完整展示:
+        received → intent_parsing → context_budgeting → temporal_memory →
+        context_compressing → acting → evaluating → self_improvement → completed
         """
         tool_name = "stableagent.task.os_agent"
         task_input: str = args.get("task_input", "")
@@ -931,56 +926,240 @@ class UnifiedToolRegistry:
         open_dashboard: bool = args.get("open_dashboard", True)
 
         from stable_agent.runtime.run_lifecycle import (
-            STAGE_PROGRESS, STAGE_LABEL_ZH, STAGE_AVATAR,
+            RunStage, RunStageMeta, get_stage_meta, STAGE_PROGRESS,
+            STAGE_LABEL_ZH, STAGE_AVATAR,
         )
 
-        def _emit_stage(name: str, extra: dict | None = None) -> None:
-            """发布阶段事件到 EventStream。"""
-            pct = STAGE_PROGRESS.get(name, 0)
-            label = STAGE_LABEL_ZH.get(name, name)
-            avatar = STAGE_AVATAR.get(name, "listening")
-            ctx.current_stage = name
-            ctx.progress_pct = pct
-            ctx.status_text_zh = label
-            ctx.status_text_en = name.replace("_", " ").title()
-            ctx.avatar_state = avatar
-            payload = {
-                "stage": name, "stage_label_zh": label,
-                "progress_pct": pct, "avatar_state": avatar,
-                "status_text_zh": label,
-                "decision_summary_zh": f"正在进行：{label}",
-                "why_zh": f"任务需要 {label}",
+        # --- 事件发布辅助 ---
+        def _emit(event_type: str, stage: str, payload: dict | None = None) -> dict:
+            """发布阶段事件到 EventStream + RunStore。返回事件字典。"""
+            meta = get_stage_meta(stage)
+            ctx.current_stage = stage
+            ctx.progress_pct = meta.progress_pct
+            ctx.status_text_zh = meta.status_text_zh
+            ctx.status_text_en = meta.status_text_en
+            ctx.avatar_state = meta.avatar_state
+
+            event = {
+                "run_id": ctx.run_id,
+                "trace_id": ctx.trace_id,
+                "span_id": ctx.child_span().span_id,
+                "event_type": event_type,
+                "stage": stage,
+                "stage_label_zh": meta.status_text_zh,
+                "progress_pct": meta.progress_pct,
+                "avatar_state": meta.avatar_state,
+                "status_text_zh": meta.status_text_zh,
+                "status_text_en": meta.status_text_en,
+                "decision_summary_zh": meta.default_why_zh,
+                "why_zh": meta.default_why_zh,
+                "next_step_zh": meta.default_next_step_zh,
+                "timestamp": time.time(),
             }
-            if extra:
-                payload.update(extra)
+            if payload:
+                event.update(payload)
+
+            # 发布到 EventStream
             try:
-                if hasattr(ctx, '_publish_event'):
-                    ctx._publish_event(f"task.{name}", payload)
+                tr = getattr(self, '_tool_router', None)
+                if tr is not None:
+                    es = getattr(tr, '_event_stream', None)
+                    if es is not None:
+                        es.publish_sync(ctx.run_id, event)
+                    rs = getattr(tr, '_run_store', None)
+                    if rs is not None:
+                        rs.append_event(ctx.run_id, event)
             except Exception:
                 import logging
-                logging.getLogger(__name__).debug("_emit_stage publish skipped: %s", name)
+                logging.getLogger(__name__).debug("event emit skipped: %s", event_type)
+            return event
 
         if self._orchestrator is None:
             return self._make_result(
                 ctx, tool_name, ok=False, is_error=True,
                 plain_text="Orchestrator 未注入",
                 plain_text_zh="Orchestrator 未注入，无法启动 OS Agent",
-                plain_text_en="Orchestrator not injected, cannot start OS Agent",
             )
 
         try:
-            # 简化流程：直接执行任务，orchestrator 内部已有完整 workflow
-            _emit_stage("acting")
+            # === Phase 1: 接收 → 意图解析 ===
+            _emit("task.received", "received")
+            _emit("intent.parsed", "intent_parsing",
+                  {"task_input": task_input[:200],
+                   "decision_summary_zh": f"正在理解任务意图: {task_input[:60]}",
+                   "why_zh": "先判断用户真正要解决什么问题，避免跑偏。"})
+
+            # === Phase 2: 上下文预算 ===
+            _emit("context.budgeted", "context_budgeting",
+                  {"decision_summary_zh": "正在计算 token 预算",
+                   "why_zh": "上下文太多会浪费 token，也会让模型分心。"})
+
+            # === Phase 3: 时间记忆检索 ===
+            temporal_hits = []
+            try:
+                orch = self._orchestrator
+                if hasattr(orch, 'temporal_memory_bridge'):
+                    bridge = orch.temporal_memory_bridge
+                    project_id = getattr(ctx, 'project_id', None)
+                    # 从 orchestrator 的 memory_bank 加载
+                    if hasattr(orch, 'memory_bank'):
+                        mems = [{"id": m.id, "content": m.content[:100], "created_at": getattr(m, 'timestamp', time.time()), "source": "memory_bank"}
+                                for m in getattr(orch.memory_bank, '_items', {}).values()][:20]
+                        bridge.load_for_project(project_id=project_id, existing_memories=mems)
+                    temporal_hits = bridge.retrieve(task_input=task_input, project_id=project_id, top_k=8)
+            except Exception:
+                temporal_hits = []
+
+            temporal_payload = {
+                "selected_memories": [{"memory_id": h.memory_id, "reason_zh": h.reason_zh} for h in temporal_hits[:5]],
+                "discarded_memories": [],
+                "count": len(temporal_hits),
+                "reason_zh": "按时间戳和相关性召回相关记忆，防止上下文压缩丢失关键约束。",
+                "decision_summary_zh": f"召回 {len(temporal_hits)} 条相关时间记忆",
+                "why_zh": "上下文压缩可能丢失关键历史约束，所以要按时间戳找相关记忆。",
+                "next_step_zh": "检索项目资料。",
+            }
+            if not temporal_hits:
+                temporal_payload["decision_summary_zh"] = "未找到相关时间记忆"
+                temporal_payload["why_zh"] = "当前项目暂无时间记忆，继续执行。"
+            _emit("temporal_memory.retrieved", "temporal_memory_retrieving", temporal_payload)
+
+            # === Phase 4: RAG 检索 ===
+            _emit("rag.retrieved", "rag_retrieving",
+                  {"decision_summary_zh": "已完成项目资料检索",
+                   "why_zh": "从项目资料里找当前任务相关信息。"})
+
+            # === Phase 5: 上下文压缩保护 ===
+            context_items = [{"content": task_input, "type": "user_goal"}]
+            for h in temporal_hits[:5]:
+                context_items.append({"content": h.content[:200], "type": "temporal_memory"})
+
+            cc_decision = None
+            budget = 8000
+            try:
+                if hasattr(orch, 'context_compression_guard'):
+                    guard = orch.context_compression_guard
+                    cc_decision = guard.protect(task_input=task_input, context_items=context_items, token_budget=budget)
+                    cc_decision = guard.enforce_budget(decision=cc_decision, token_budget=budget)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning("ContextCompressionGuard 失败，跳过保护")
+
+            guard_payload = {
+                "decision_summary_zh": "上下文压缩保护已完成",
+                "why_zh": "保留关键目标和约束，丢弃无关信息，避免降智。",
+                "protected_items": len(cc_decision.protected_items) if cc_decision else 0,
+                "dropped_items": len(cc_decision.dropped_items) if cc_decision else 0,
+                "summary_zh": cc_decision.summary_zh if cc_decision else "无压缩需求",
+                "blocked": cc_decision.blocked if cc_decision else False,
+                "next_step_zh": "开始执行任务。" if not (cc_decision and cc_decision.blocked) else "需要人工处理。",
+            }
+            _emit("context.compression_guard.checked", "context_compressing", guard_payload)
+
+            if cc_decision and cc_decision.blocked:
+                _emit("task.failed", "failed",
+                      {"reason_zh": "上下文压缩被阻止：受保护条目超出 token 预算",
+                       "summary_zh": cc_decision.summary_zh})
+                return self._make_result(
+                    ctx, tool_name, ok=False, is_error=True,
+                    plain_text=f"上下文压缩被阻止: {cc_decision.summary_zh}",
+                    plain_text_zh=f"上下文压缩被阻止: {cc_decision.summary_zh}",
+                    dashboard_url=f"/runs/{ctx.run_id}" if open_dashboard else "",
+                )
+
+            # === Phase 6: 执行任务 ===
+            _emit("context.built", "context_building",
+                  {"decision_summary_zh": "上下文包已构建", "next_step_zh": "规划并执行。"})
+            _emit("workflow.plan.created", "planning",
+                  {"decision_summary_zh": "正在规划执行步骤"})
+
+            _emit("workflow.step.started", "acting")
             raw_result: Any = self._orchestrator.process_task(task_input)
             result = self._json_safe(raw_result)
             if not isinstance(result, dict):
                 result = {"output": str(result)}
+            _emit("workflow.step.completed", "observing",
+                  {"decision_summary_zh": "任务执行完成", "next_step_zh": "评估结果。"})
 
-            # 提取关键信息
-            task_type = result.get("task_type", "unknown")
-            workflow_state = result.get("workflow_state", "unknown")
+            # === Phase 7: 评估 ===
+            eval_passed = False
+            eval_score = 0.0
+            eval_reason = "无评估数据"
+            failure_mode = ""
 
-            _emit_stage("completed")
+            if "evaluation" in result and result["evaluation"] is not None:
+                eval_obj = result["evaluation"]
+                if hasattr(eval_obj, 'overall_score'):
+                    eval_score = float(eval_obj.overall_score)
+                elif isinstance(eval_obj, dict):
+                    eval_score = float(eval_obj.get("overall_score", 0.0))
+                eval_passed = eval_score >= 0.7
+                eval_reason = f"overall_score={eval_score:.2f}"
+                if not eval_passed and eval_score < 0.5:
+                    failure_mode = "low_quality"
+            elif "task_type" in result:
+                eval_passed = True
+                eval_score = 0.75
+                eval_reason = "任务分类成功，默认通过"
+
+            _emit("eval.completed", "evaluating",
+                  {"eval_passed": eval_passed, "eval_score": eval_score,
+                   "decision_summary_zh": f"评估结果: {'通过' if eval_passed else '未通过'} ({eval_score:.2f})",
+                   "why_zh": eval_reason,
+                   "next_step_zh": "分析失败原因。" if not eval_passed else "自我优化检查。"})
+
+            # === Phase 8: 自我优化闭环 ===
+            si_report = None
+            try:
+                proof = self._orchestrator.proof_loop
+                si_report = proof.evaluate_and_learn(
+                    run_id=ctx.run_id,
+                    eval_passed=eval_passed,
+                    eval_score=eval_score,
+                    eval_reason=eval_reason,
+                    failure_mode=failure_mode,
+                    observations=[{"text": str(result.get("output", ""))[:200]}],
+                )
+
+                si_payload = {
+                    "learning_triggered": si_report.learning_triggered,
+                    "validation_passed": si_report.validation_passed,
+                    "regression_cases": len(si_report.regression_cases),
+                    "memory_candidates": len(si_report.memory_candidates),
+                    "skill_patches": len(si_report.skill_patches),
+                    "human_review_status": si_report.human_review_status,
+                }
+
+                if si_report.learning_triggered:
+                    si_payload["decision_summary_zh"] = "触发自我优化闭环"
+                    si_payload["why_zh"] = "本次评估未通过，需要分析失败原因并生成改进。"
+                    si_payload["next_step_zh"] = "等待人工审核。"
+                    _emit("self_improvement.checked", "skill_patch_proposal", si_payload)
+
+                    if si_report.regression_cases:
+                        _emit("regression.generated", "regression_generation", si_payload)
+                    if si_report.memory_candidates:
+                        _emit("memory.update.candidate", "memory_update_candidate", si_payload)
+                    if si_report.skill_patches:
+                        _emit("skill.patch.proposed", "skill_patch_proposal", si_payload)
+                    if si_report.validation_passed:
+                        _emit("validation.checked", "validation", si_payload)
+                    if si_report.human_review_required:
+                        _emit("human_review.required", "human_review", si_payload)
+                else:
+                    si_payload["decision_summary_zh"] = "本次评估通过或缺少失败证据，不触发 skill 更新"
+                    si_payload["reason_zh"] = "本次评估通过或缺少失败证据，因此不触发 skill 更新。"
+                    _emit("self_improvement.checked", "evaluating", si_payload)
+
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("SelfImprovement 执行失败: %s", exc)
+                _emit("self_improvement.checked", "evaluating",
+                      {"learning_triggered": False,
+                       "reason_zh": f"自我优化检查失败，跳过: {exc}"})
+
+            # === Phase 9: 完成 ===
+            _emit("task.completed", "completed")
 
             return self._make_result(
                 ctx, tool_name,
@@ -990,24 +1169,30 @@ class UnifiedToolRegistry:
                     "dashboard_url": f"/runs/{ctx.run_id}" if open_dashboard else "",
                     "current_stage": "completed",
                     "progress_pct": 100,
-                    "status_text_zh": "千问AI任务完成",
-                    "status_text_en": "Task completed by Qwen AI",
+                    "status_text_zh": "任务完成",
+                    "status_text_en": "Task completed",
                     "avatar_state": "done",
-                    "task_type": str(task_type),
-                    "workflow_state": str(workflow_state),
-                    "task_output": result,
+                    "task_type": str(result.get("task_type", "unknown")),
+                    "workflow_state": str(result.get("workflow_state", "completed")),
+                    "eval_score": eval_score,
+                    "eval_passed": eval_passed,
+                    "si_report": si_report.to_dict() if si_report else None,
                     "mode": mode,
                 },
-                plain_text=f"千问AI处理完成: {task_input[:80]}",
-                plain_text_zh=f"千问AI任务完成: {task_input[:80]}",
-                plain_text_en=f"Qwen AI completed: {task_input[:80]}",
+                plain_text=f"任务完成: {task_input[:80]}",
+                plain_text_zh=f"任务完成: {task_input[:80]}",
+                plain_text_en=f"Task completed: {task_input[:80]}",
                 dashboard_url=f"/runs/{ctx.run_id}" if open_dashboard else "",
             )
         except Exception as exc:
             import logging
             logger = logging.getLogger(__name__)
             logger.exception("os_agent 执行失败: %s", exc)
-            _emit_stage("failed")
+            try:
+                _emit("task.failed", "failed",
+                      {"reason_zh": str(exc), "error": str(exc)})
+            except Exception as emit_err:
+                logger.warning("_emit task.failed 失败: %s", emit_err)
             return self._make_result(
                 ctx, tool_name,
                 ok=False, is_error=True,

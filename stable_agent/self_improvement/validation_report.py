@@ -70,7 +70,8 @@ class ValidationReport:
         failed_cases = [c for c in case_results if not c.passed]
         passed = len(failed_cases) == 0 and delta > 0
 
-        if not passed:
+        if not passed and not reason_zh:
+            # 只有没有显式提供 reason_zh 时才自动生成
             if failed_cases:
                 reason_zh = (
                     f"有 {len(failed_cases)} 个回归用例失败"

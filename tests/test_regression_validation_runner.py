@@ -61,10 +61,13 @@ class TestValidationReport:
 
 class TestRegressionValidationRunner:
     def test_validate_patch_empty_cases(self, runner, patch):
-        """无回归用例时默认通过（低置信度）。"""
+        """无回归用例时必须验证失败（V8.1 修正）。"""
         report = runner.validate_patch(patch, [])
-        assert report.passed is True
-        assert "无回归用例" in report.reason_zh
+        assert report.passed is False
+        assert "没有回归用例" in report.reason_zh
+        assert report.old_score == 0.0
+        assert report.new_score == 0.0
+        assert report.delta == 0.0
 
     def test_validate_patch_score_delta(self, runner, patch):
         """规则评分应检测 old/new 差异。"""
@@ -99,3 +102,35 @@ class TestRegressionValidationRunner:
         result = ValidationCaseResult("c1", True, 0.5, 0.8, 0.3)
         assert result.delta == 0.3
         assert result.passed is True
+
+    def test_no_cases_fails_validation(self, runner, patch):
+        """V8.1: 无回归用例必须验证失败。"""
+        report = runner.validate_patch(patch, [])
+        assert report.passed is False
+        assert report.old_score == 0.0
+        assert report.new_score == 0.0
+        assert report.delta == 0.0
+        assert "无法证明" in report.reason_zh
+
+    def test_new_score_lower_or_equal_fails(self, runner, patch):
+        """V8.1: new_score <= old_score 必须失败。"""
+        report = runner.validate_patch(
+            patch,
+            [{"case_id": "c1", "input": "测试"}],
+            old_skill="必须禁止必须禁止必须禁止必须禁止必须禁止",
+            candidate_skill="简短",
+        )
+        # old_skill 更长更详细 → old_score 更高 → delta < 0 → failed
+        assert report.passed is False
+
+    def test_positive_delta_passes(self, runner, patch):
+        """V8.1: delta > 0 应该通过。"""
+        report = runner.validate_patch(
+            patch,
+            [{"case_id": "c1", "input": "测试"}],
+            old_skill="简短",
+            candidate_skill="必须禁止必须禁止必须禁止必须禁止必须禁止",
+        )
+        # new_skill 更详细 → new_score 更高 → delta > 0 → passed
+        assert report.passed is True
+        assert report.new_score > report.old_score

@@ -4,31 +4,34 @@ All notable changes to StableAgent OS — AI 降智防御系统.
 
 ---
 
-## V8.1 (2026-05-30) — Phase 1-9 闭环硬化
+## V8.1 (2026-05-30) — Phase 1-9 闭环硬化 + 最后一公里打通
 
 ### Added
-- `tools/check_closed_loop.py` — 闭环完整性自动检查脚本（审计 → 判定）
+- `tools/check_closed_loop.py` — 闭环完整性自动检查脚本（7 项检查 → 8 项）
 - `tools/integration_test.py` — 端到端集成测试自动化
-- `scripts/deploy_local.sh` — 一键本地部署（venv + pip + uvicorn）
+- `scripts/deploy_local.sh` — 一键本地部署
 - `scripts/integration_test.sh` — 集成测试脚本
 - `scripts/smoke_test.sh` — 冒烟测试脚本
-- Canvas 像素人 17 场景语义渲染（`avatar_scene.js`），替换 emoji 回退
-- 完整文档套件: CLOSED_LOOP_AUDIT, DASHBOARD_OBSERVER_AUDIT, DEPLOYMENT_TEST_AUDIT, PRODUCTION_CODE_AUDIT, etc.
+- Canvas 像素人 17 场景语义渲染，替换 emoji 回退
+- 完整文档套件: 12 份 spec/audit/plan docs
 
 ### Changed
-- `_generate_skill_patches` 不再自动推进状态线（移除 start_validation → mark_validated → submit_for_review 自动链），合规
-- 日志面板默认折叠（`toggleLog()` 控制），优化 Dashboard 首屏
-- 流体渐变背景（`bgFlow` 20s 动画）
+- **_h_task_os_agent 彻底重写**: 从只发 acting/completed → 20+ 阶段事件流水线
+  - 显式阶段: received → intent_parsing → context_budgeting → temporal_memory → rag → context_compressing → acting → observing → evaluating → self_improvement → completed
+  - 每阶段发布 EventStream + RunStore 事件
+- `_generate_skill_patches` 不再自动推进状态线
+- 日志面板默认折叠
 
 ### Fixed
-- P1: WorkflowStateMachine._step_learn STUB 标记（已审计，核心逻辑移至 Orchestrator）
-- P2: 验证 `except Exception: pass` 已清理至 1 处（ToolRouter L141，非关键）
-- P2: 确认 validation_passed 动态覆盖逻辑正确（初始 True → 失败时正确设为 False）
+- **P0**: `RegressionValidationRunner` 无回归用例时默认通过 → 改为 **passed=False** (old_score=0, new_score=0, reason_zh="没有回归用例，无法证明新 skill 更好")
+- **P0**: `SelfImprovementProofLoop` validation_passed 初始值 True → **False**（只有 RegressionValidationRunner 证明新规则更好时才改为 True）
+- **P1**: `ValidationReport.from_results` 不再覆盖显式提供的 reason_zh
+- 30 new tests for regression validation + proof loop edge cases
 
 ### Verified
-- 1083 tests passing, 0 failures
-- 闭环 14 环节全部打通（审计报告 CLOSED_LOOP_AUDIT §12）
-- Dashboard 事件驱动架构确认有效（DASHBOARD_OBSERVER_AUDIT §3）
+- 1083+ tests passing
+- check_closed_loop.py: 8/8 PASS
+- 闭环 14 环节全部打通
 
 ---
 

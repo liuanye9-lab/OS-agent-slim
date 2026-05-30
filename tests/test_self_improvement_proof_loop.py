@@ -152,3 +152,42 @@ class TestSelfImprovementProofLoop:
             eval_reason="一般",
         )
         assert not report.learning_triggered
+
+    def test_eval_passed_does_not_learn(self):
+        """V8.1: 评估通过时不触发学习。"""
+        report = self.loop.evaluate_and_learn(
+            run_id="run-001",
+            eval_passed=True,
+            eval_score=0.9,
+            eval_reason="任务完成",
+        )
+        assert not report.learning_triggered
+
+    def test_no_regression_cases_blocks_validation(self):
+        """V8.1: 无回归用例时验证失败，不进 Human Review。"""
+        loop = SelfImprovementProofLoop(min_confidence=0.1)
+        report = loop.evaluate_and_learn(
+            run_id="run-no-cases",
+            eval_passed=False,
+            eval_score=0.2,
+            eval_reason="失败但无法生成用例",
+            failure_mode="",
+        )
+        assert not report.validation_passed
+        assert not report.human_review_required
+
+    def test_memory_candidate_not_promoted_without_review(self):
+        """V8.1: Memory candidate 不会自动 promote。"""
+        report = self.loop.evaluate_and_learn(
+            run_id="run-mem",
+            eval_passed=False,
+            eval_score=0.3,
+            eval_reason="失败",
+            failure_mode="error",
+        )
+        if report.memory_candidates:
+            for mc in report.memory_candidates:
+                upd = self.loop.memory_store.get(mc.update_id)
+                if upd:
+                    from stable_agent.self_improvement.memory_update_candidate import MemoryUpdateStatus
+                    assert upd.status != MemoryUpdateStatus.PROMOTED
