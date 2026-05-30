@@ -1,26 +1,18 @@
 #!/usr/bin/env python3
-"""StableAgent Cloud Integration Test — V9.2 Dashboard Event Chain Hardening.
+"""StableAgent Cloud Integration Test — V10 100% Closed-Loop Verification.
 
 测试三条核心路径:
 1. MCP tools/list: 验证工具注册完整
-2. 正常路径: 完整基础事件链（含 rag.retrieved）
-3. 失败学习路径: self-improvement 事件链（含 force_validation_passed 控制）
+2. 正常路径: 完整基础事件链（从 /api/runs/{run_id}/events 读取）
+3. 失败学习路径: self-improvement 事件链（从 /api/runs/{run_id}/events 读取）
 
-V9.2 强化:
-- WARN+SKIP 全部替换为 assert_true fail-fast
-- REQUIRED_NORMAL_EVENTS 交叉验证 → missing_required_events
-- next_step_zh 加入 REQUIRED_EVENT_FIELDS
-- 事件 API 为空时 fallback 到 emitted_events
-- validation gate 规则 + event_sync_ok + missing_required_events 强验证
-
-V9.1 强化:
-- 三条路径: tools/list + normal + failed learning
-- 正常路径: rag.retrieved 为必须事件
-- 失败学习路径: force_validation_passed=False → validation_failed, 不进 human_review
-- 失败学习路径: force_validation_passed=True → human_review.required, 不自动 export
-- dry_run_learning=true → 拒绝 export
-- emitted_events 列表（非仅计数）在 result
-- best_skill_exported 在 si_report 中
+V10 强化:
+- 禁止 fallback 到 emitted_events — 必须从 API events 验证
+- event_api_ok / dashboard_replay_ok 强验证
+- check_dashboard_replay_api — 事件 API 非空 + event_count > 0
+- event_sync_ok 依赖 event_api_ok
+- api_missing_required_events 必须为空
+- emitted_events 仅用于 debug 打印
 """
 
 from __future__ import annotations
@@ -58,18 +50,34 @@ def assert_true(condition: bool, message: str) -> None:
 
 
 def extract_structured_content(data: dict[str, Any]) -> dict[str, Any]:
+    """从 MCP 响应中提取 os_agent 的 data 字段。
+
+    MCP 响应结构: result.structuredContent.data → 包含 run_id, event_api_ok 等
+    """
     if "result" in data and isinstance(data["result"], dict):
         result = data["result"]
+        sc = None
         if isinstance(result.get("structuredContent"), dict):
-            return result["structuredContent"]
-        if isinstance(result.get("structured_content"), dict):
-            return result["structured_content"]
+            sc = result["structuredContent"]
+        elif isinstance(result.get("structured_content"), dict):
+            sc = result["structured_content"]
+        if sc is not None:
+            # os_agent 的核心数据在 sc.data 里
+            if isinstance(sc.get("data"), dict):
+                return sc["data"]
+            return sc
 
     if isinstance(data.get("structuredContent"), dict):
-        return data["structuredContent"]
+        sc = data["structuredContent"]
+        if isinstance(sc.get("data"), dict):
+            return sc["data"]
+        return sc
 
     if isinstance(data.get("structured_content"), dict):
-        return data["structured_content"]
+        sc = data["structured_content"]
+        if isinstance(sc.get("data"), dict):
+            return sc["data"]
+        return sc
 
     if isinstance(data.get("data"), dict):
         return data["data"]
@@ -82,8 +90,8 @@ def extract_structured_content(data: dict[str, Any]) -> dict[str, Any]:
 # ======================================================================
 
 def call_tools_list(base_url: str) -> list[str]:
-    """V9.1: MCP tools/list — 验证工具注册完整。"""
-    print("[1/10] MCP tools/list")
+    """MCP tools/list — 验证工具注册完整。"""
+    print("[1/12] MCP tools/list")
     status, data = post_json(
         f"{base_url}/mcp",
         {
@@ -95,13 +103,11 @@ def call_tools_list(base_url: str) -> list[str]:
     )
     assert_true(200 <= status < 500, f"tools/list returned HTTP {status}: {data}")
 
-    # 提取工具名列表
     tool_names: list[str] = []
     if "result" in data and isinstance(data["result"], dict):
         tools = data["result"].get("tools", [])
         tool_names = [t.get("name", "") for t in tools if isinstance(t, dict)]
 
-    # 必须包含 os_agent
     assert_true(
         any("os_agent" in name for name in tool_names),
         f"tools/list must include stableagent.task.os_agent, got: {tool_names[:10]}"
@@ -120,7 +126,7 @@ NORMAL_PATH_EVENTS = [
     "intent.parsed",
     "context.budgeted",
     "temporal_memory.retrieved",
-    "rag.retrieved",          # V9.1: 强制要求
+    "rag.retrieved",
     "context.compression_guard.checked",
     "context.built",
     "workflow.plan.created",
@@ -139,15 +145,15 @@ REQUIRED_EVENT_FIELDS = [
     "status_text_zh",
     "decision_summary_zh",
     "why_zh",
-    "next_step_zh",           # V9.2: 强制要求
+    "next_step_zh",
     "avatar_state",
     "timestamp",
 ]
 
 
 def call_os_agent_normal(base_url: str) -> dict[str, Any]:
-    """正常路径: 测试完整基础事件链（含 rag.retrieved）。"""
-    print("[2/10] Calling os_agent (NORMAL path)")
+    """正常路径: 测试完整基础事件链。"""
+    print("[2/12] Calling os_agent (NORMAL path)")
     payload = {
         "jsonrpc": "2.0",
         "id": "os-agent-normal",
@@ -194,7 +200,7 @@ FAILURE_PATH_EVENTS = [
 
 def call_os_agent_failure_val_failed(base_url: str) -> dict[str, Any]:
     """失败学习路径 (validation_failed): force_validation_passed=False → 不进 human_review。"""
-    print("[3/10] Calling os_agent (FAILURE → validation_failed path)")
+    print("[3/12] Calling os_agent (FAILURE → validation_failed path)")
     payload = {
         "jsonrpc": "2.0",
         "id": "os-agent-failure-val-fail",
@@ -209,7 +215,7 @@ def call_os_agent_failure_val_failed(base_url: str) -> dict[str, Any]:
                 "force_failure_mode": "intent_drift",
                 "force_regression_case": True,
                 "force_skill_patch": True,
-                "force_validation_passed": False,   # V9.1: 强制验证失败
+                "force_validation_passed": False,
                 "dry_run_learning": True,
             },
         },
@@ -223,40 +229,24 @@ def call_os_agent_failure_val_failed(base_url: str) -> dict[str, Any]:
     run_id = sc.get("run_id")
     assert_true(bool(run_id), f"Missing run_id: {json.dumps(sc, ensure_ascii=False)[:300]}")
 
-    # 验证 eval 一定是失败的
     eval_passed = sc.get("eval_passed", True)
     eval_score = sc.get("eval_score", 1.0)
     assert_true(not eval_passed, f"force_eval_failed should make eval_passed=False, got {eval_passed}")
     assert_true(eval_score <= 0.4, f"force_eval_failed should make score <= 0.4, got {eval_score}")
-
-    # 验证 dry_run_learning 标记
     assert_true(sc.get("dry_run_learning") is True, "dry_run_learning should be True")
-
-    # V9.1: 验证 force_validation_passed 参数回显
     assert_true(sc.get("force_validation_passed") is False, "force_validation_passed should be False")
 
-    # V9.1: 验证 si_report 中 validation_failed 不进 human_review
     si_report = sc.get("si_report")
     if si_report:
         hr_status = si_report.get("human_review_status", "")
-        hr_required = si_report.get("human_review_required", False)
-        # force_validation_passed=False + dry_run_learning=True → dry_run 状态
         assert_true(
             hr_status in ("validation_failed", "dry_run", "none"),
             f"force_validation_passed=False: human_review_status should be validation_failed/dry_run/none, got {hr_status}"
         )
-        # best_skill_exported 必须为 False
         assert_true(
             si_report.get("best_skill_exported") is not True,
             "best_skill_exported should NOT be True when validation_failed"
         )
-
-    # 验证事件同步健康
-    event_sync_ok = sc.get("event_sync_ok", False)
-    assert_true(event_sync_ok is True, f"event_sync_ok should be True, sync_errors={sc.get('sync_errors', [])}")
-
-    # 验证 emitted_events 列表存在（V9.1）
-    assert_true("emitted_events" in sc, "emitted_events list must be in result (V9.1)")
 
     print(f"  OK run_id={run_id}, val_failed={si_report.get('validation_passed') if si_report else 'N/A'}")
     return sc
@@ -267,8 +257,8 @@ def call_os_agent_failure_val_failed(base_url: str) -> dict[str, Any]:
 # ======================================================================
 
 def call_os_agent_failure_val_pass(base_url: str) -> dict[str, Any]:
-    """失败学习路径 (validation_passed + human_review): force_validation_passed=True → 进 human_review。"""
-    print("[4/10] Calling os_agent (FAILURE → validation_passed + human_review path)")
+    """失败学习路径 (validation_passed + human_review)。"""
+    print("[4/12] Calling os_agent (FAILURE → validation_passed + human_review path)")
     payload = {
         "jsonrpc": "2.0",
         "id": "os-agent-failure-val-pass",
@@ -283,8 +273,8 @@ def call_os_agent_failure_val_pass(base_url: str) -> dict[str, Any]:
                 "force_failure_mode": "intent_drift",
                 "force_regression_case": True,
                 "force_skill_patch": True,
-                "force_validation_passed": True,    # V9.1: 强制验证通过
-                "dry_run_learning": True,           # 阻止实际导出
+                "force_validation_passed": True,
+                "dry_run_learning": True,
             },
         },
     }
@@ -296,20 +286,15 @@ def call_os_agent_failure_val_pass(base_url: str) -> dict[str, Any]:
 
     run_id = sc.get("run_id")
     assert_true(bool(run_id), f"Missing run_id: {json.dumps(sc, ensure_ascii=False)[:300]}")
-
-    # V9.1: force_validation_passed=True 回显
     assert_true(sc.get("force_validation_passed") is True, "force_validation_passed should be True")
 
     si_report = sc.get("si_report")
     if si_report:
-        # V9.1: validation_passed=True 但不自动 export
-        # dry_run_learning=True → human_review_status=dry_run
         hr_status = si_report.get("human_review_status", "")
         assert_true(
             hr_status in ("pending", "dry_run"),
             f"force_validation_passed=True: human_review_status should be pending/dry_run, got {hr_status}"
         )
-        # best_skill_exported 必须为 False（dry_run_learning=True 阻止导出）
         assert_true(
             si_report.get("best_skill_exported") is not True,
             "best_skill_exported must be False (dry_run_learning=True)"
@@ -320,12 +305,37 @@ def call_os_agent_failure_val_pass(base_url: str) -> dict[str, Any]:
 
 
 # ======================================================================
+# Run Events API (V10: 结构化返回)
+# ======================================================================
+
+def fetch_run_events(base_url: str, run_id: str) -> list[dict[str, Any]]:
+    """从 /api/runs/{run_id}/events 获取事件列表。
+
+    V10: 不再 fallback 到 emitted_events。
+    如果 API 返回空，调用方必须 fail。
+    """
+    url = f"{base_url}/api/runs/{run_id}/events"
+    status, data = get_json(url)
+
+    if 200 <= status < 300:
+        if isinstance(data, dict) and isinstance(data.get("events"), list):
+            return data["events"]
+        elif isinstance(data, list):
+            # 兼容旧版直接返回列表
+            return data
+        else:
+            return []
+
+    return []
+
+
+# ======================================================================
 # Phase 5: 事件字段强验收
 # ======================================================================
 
 def check_event_fields_strict(events: list[dict[str, Any]], path_name: str) -> None:
-    """V9.0: 严格事件字段验收 — 缺字段即 FAIL。"""
-    print(f"[5/10] Checking event fields ({path_name})")
+    """严格事件字段验收 — 缺字段即 FAIL。"""
+    print(f"[5/12] Checking event fields ({path_name})")
 
     if not events:
         raise AssertionError(f"No events returned for {path_name}")
@@ -347,7 +357,7 @@ def check_event_fields_strict(events: list[dict[str, Any]], path_name: str) -> N
 
 def check_event_chain(events: list[dict[str, Any]], required_events: list[str], path_name: str) -> None:
     """验证事件链包含所有必要事件类型。"""
-    print(f"[6/10] Checking event chain ({path_name})")
+    print(f"[6/12] Checking event chain ({path_name})")
 
     event_types = [evt.get("event_type", "") for evt in events]
     missing = [e for e in required_events if e not in event_types]
@@ -365,28 +375,21 @@ def check_event_chain(events: list[dict[str, Any]], required_events: list[str], 
 
 def check_failure_learning_details(sc: dict[str, Any], events: list[dict[str, Any]]) -> None:
     """验证失败学习路径的特殊事件和 si_report。"""
-    print("[7/10] Checking failure learning details")
+    print("[7/12] Checking failure learning details")
 
     event_types = [evt.get("event_type", "") for evt in events]
 
-    # 必须包含 regression.generated
     assert_true("regression.generated" in event_types, "Must have regression.generated event")
-
-    # 必须包含 skill.patch.proposed
     assert_true("skill.patch.proposed" in event_types, "Must have skill.patch.proposed event")
-
-    # 必须包含 validation.checked (force_skill_patch 确保有 patch, validation 会运行)
     assert_true("validation.checked" in event_types, "Must have validation.checked event")
 
-    # 检查 si_report 字段
     si_report = sc.get("si_report")
     if si_report:
         assert_true(si_report.get("learning_triggered") is True, "si_report.learning_triggered must be True")
         assert_true(si_report.get("validation_passed") is not None, "si_report.validation_passed must not be None")
-        assert_true("best_skill_exported" in si_report, "si_report must have best_skill_exported field (V9.1)")
-        assert_true("human_review_required" in si_report, "si_report must have human_review_required field (V9.1)")
+        assert_true("best_skill_exported" in si_report, "si_report must have best_skill_exported field")
+        assert_true("human_review_required" in si_report, "si_report must have human_review_required field")
 
-        # human_review_status 检查
         hr_status = si_report.get("human_review_status", "")
         if si_report.get("validation_passed"):
             assert_true(hr_status in ("pending", "approved", "dry_run"),
@@ -403,7 +406,7 @@ def check_failure_learning_details(sc: dict[str, Any], events: list[dict[str, An
 # ======================================================================
 
 def check_observer_page(base_url: str, run_id: str) -> None:
-    print("[8/10] Checking Dashboard Observer page")
+    print("[8/12] Checking Dashboard Observer page")
 
     candidates = [
         f"{base_url}/runs/{run_id}",
@@ -426,58 +429,89 @@ def check_observer_page(base_url: str, run_id: str) -> None:
 
 
 # ======================================================================
-# Phase 9: 事件同步健康检查
+# Phase 9: Dashboard Replay API (V10 新增)
+# ======================================================================
+
+def check_dashboard_replay_api(base_url: str, run_id: str, path_name: str) -> None:
+    """V10: 验证 /api/runs/{run_id}/events 返回非空事件。"""
+    print(f"[9/12] Checking Dashboard Replay API ({path_name})")
+
+    url = f"{base_url}/api/runs/{run_id}/events"
+    status, data = get_json(url)
+    assert_true(status == 200, f"{path_name}: events API HTTP {status}: {data}")
+
+    if isinstance(data, dict):
+        events = data.get("events", [])
+        event_count = data.get("event_count", len(events))
+    elif isinstance(data, list):
+        events = data
+        event_count = len(events)
+    else:
+        events = []
+        event_count = 0
+
+    assert_true(event_count > 0, f"{path_name}: Dashboard replay API returned no events (event_count={event_count})")
+    assert_true(len(events) > 0, f"{path_name}: Dashboard replay API events list empty")
+
+    print(f"  OK — event_count={event_count}, events_len={len(events)}")
+
+
+# ======================================================================
+# Phase 10: 事件同步健康检查
 # ======================================================================
 
 def check_event_sync_health(sc: dict[str, Any]) -> None:
-    """V9.2: 验证 event_sync_ok + emitted_events 列表 + missing_required_events。"""
-    print("[9/10] Checking event sync health")
+    """V10: 验证 event_sync_ok + event_api_ok + dashboard_replay_ok + missing_required_events。"""
+    print("[10/12] Checking event sync health")
 
     assert_true("event_sync_ok" in sc, "Missing event_sync_ok in structuredContent")
     assert_true("emitted_event_count" in sc, "Missing emitted_event_count in structuredContent")
     assert_true("sync_errors" in sc, "Missing sync_errors in structuredContent")
-    assert_true("emitted_events" in sc, "Missing emitted_events list in structuredContent (V9.1)")
 
     event_sync_ok = sc.get("event_sync_ok")
     emitted_count = sc.get("emitted_event_count", 0)
     sync_errors = sc.get("sync_errors", [])
-    emitted_events = sc.get("emitted_events", [])
 
-    # V9.2: missing_required_events 必须存在
+    # V10: event_api_ok 必须存在
+    assert_true("event_api_ok" in sc, "Missing event_api_ok in structuredContent (V10)")
+    assert_true("api_event_count" in sc, "Missing api_event_count in structuredContent (V10)")
+    assert_true("dashboard_replay_ok" in sc, "Missing dashboard_replay_ok in structuredContent (V10)")
+
+    event_api_ok = sc.get("event_api_ok")
+    api_event_count = sc.get("api_event_count", 0)
+    dashboard_replay_ok = sc.get("dashboard_replay_ok")
+
+    # missing_required_events 必须存在且为空
     missing = sc.get("missing_required_events", None)
-    assert_true(missing is not None, "Missing missing_required_events in result (V9.2)")
+    assert_true(missing is not None, "Missing missing_required_events in result")
 
+    # api_missing_required_events 必须存在且为空
+    api_missing = sc.get("api_missing_required_events", None)
+    assert_true(api_missing is not None, "Missing api_missing_required_events in result (V10)")
+
+    # 强验证
     assert_true(event_sync_ok is True, f"event_sync_ok should be True, errors={sync_errors}, missing={missing}")
     assert_true(emitted_count > 0, f"Should have emitted events, got {emitted_count}")
-    assert_true(len(emitted_events) > 0, f"emitted_events list should not be empty (V9.1)")
+    assert_true(len(missing) == 0, f"missing_required_events must be empty, got: {missing}")
 
-    # 每个事件必须有 event_type
-    for i, evt in enumerate(emitted_events):
-        assert_true("event_type" in evt, f"emitted_events[{i}] missing event_type")
+    # V10: event_api_ok 强验证
+    assert_true(event_api_ok is True, f"event_api_ok must be True, api_event_count={api_event_count}, api_missing={api_missing}")
+    assert_true(api_event_count > 0, f"api_event_count must be > 0, got {api_event_count}")
+    assert_true(len(api_missing) == 0, f"api_missing_required_events must be empty, got: {api_missing}")
 
-    # V9.2: missing_required_events 必须为空
-    if missing is not None:
-        assert_true(
-            len(missing) == 0,
-            f"missing_required_events must be empty, got: {missing}"
-        )
+    # V10: dashboard_replay_ok 强验证
+    assert_true(dashboard_replay_ok is True, f"dashboard_replay_ok must be True")
 
-    print(f"  OK — emitted={emitted_count}, events_list={len(emitted_events)}, sync_ok={event_sync_ok}, missing={missing}")
+    print(f"  OK — emitted={emitted_count}, api={api_event_count}, sync_ok={event_sync_ok}, api_ok={event_api_ok}, replay_ok={dashboard_replay_ok}")
 
 
 # ======================================================================
-# Phase 10: Validation Gate 验证
+# Phase 11: Validation Gate 验证
 # ======================================================================
 
 def check_validation_gate(sc_val_fail: dict[str, Any], sc_val_pass: dict[str, Any]) -> None:
-    """V9.2: 验证 validation gate 规则 + 事件链完整性:
-    - force_validation_passed=False → validation_failed, 不进 human_review
-    - force_validation_passed=True → human_review.required, 不自动 export
-    - dry_run_learning=True → 不导出 best_skill.md
-    - event_sync_ok 必须检查 required event types
-    - missing_required_events 必须为空
-    """
-    print("[10/10] Checking validation gate rules + event chain")
+    """V10: 验证 validation gate 规则 + event_api_ok。"""
+    print("[11/12] Checking validation gate rules + event chain")
 
     # Path 3a: force_validation_passed=False
     si_fail = sc_val_fail.get("si_report", {})
@@ -492,7 +526,6 @@ def check_validation_gate(sc_val_fail: dict[str, Any], sc_val_pass: dict[str, An
             "force_validation_passed=False: best_skill_exported must NOT be True"
         )
 
-    # V9.2: 检查 missing_required_events
     missing_fail = sc_val_fail.get("missing_required_events", [])
     assert_true(
         len(missing_fail) == 0,
@@ -512,14 +545,13 @@ def check_validation_gate(sc_val_fail: dict[str, Any], sc_val_pass: dict[str, An
             "force_validation_passed=True + dry_run: best_skill_exported must NOT be True"
         )
 
-    # V9.2: 检查 val_pass 路径的 missing_required_events
     missing_pass = sc_val_pass.get("missing_required_events", [])
     assert_true(
         len(missing_pass) == 0,
         f"FAILURE-VAL-PASS path has missing required events: {missing_pass}"
     )
 
-    # V9.2: event_sync_ok 必须为 True
+    # event_sync_ok / event_api_ok 强验证
     assert_true(
         sc_val_fail.get("event_sync_ok") is True,
         f"FAILURE-VAL-FAIL: event_sync_ok must be True, missing={sc_val_fail.get('missing_required_events', [])}"
@@ -528,37 +560,16 @@ def check_validation_gate(sc_val_fail: dict[str, Any], sc_val_pass: dict[str, An
         sc_val_pass.get("event_sync_ok") is True,
         f"FAILURE-VAL-PASS: event_sync_ok must be True, missing={sc_val_pass.get('missing_required_events', [])}"
     )
+    assert_true(
+        sc_val_fail.get("event_api_ok") is True,
+        f"FAILURE-VAL-FAIL: event_api_ok must be True (V10)"
+    )
+    assert_true(
+        sc_val_pass.get("event_api_ok") is True,
+        f"FAILURE-VAL-PASS: event_api_ok must be True (V10)"
+    )
 
     print("  OK — validation gate rules + event chain verified")
-
-
-# ======================================================================
-# Run Events API
-# ======================================================================
-
-def fetch_run_events(base_url: str, run_id: str) -> list[dict[str, Any]]:
-    """获取 run 的事件列表。"""
-    candidates = [
-        f"{base_url}/api/runs/{run_id}/events",
-        f"{base_url}/runs/{run_id}/events",
-    ]
-
-    last_error = None
-    events: list[dict[str, Any]] = []
-
-    for url in candidates:
-        status, data = get_json(url)
-        if 200 <= status < 300:
-            if isinstance(data, list):
-                events = data
-            elif isinstance(data, dict) and isinstance(data.get("events"), list):
-                events = data["events"]
-            else:
-                events = []
-            break
-        last_error = f"{url} HTTP {status}: {data}"
-
-    return events
 
 
 # ======================================================================
@@ -567,6 +578,8 @@ def fetch_run_events(base_url: str, run_id: str) -> list[dict[str, Any]]:
 
 def check_trace_quality(events: list[dict[str, Any]]) -> None:
     """检查无隐藏推理字段，有可读解释。"""
+    print("[12/12] Checking trace quality")
+
     if not events:
         return
 
@@ -582,6 +595,7 @@ def check_trace_quality(events: list[dict[str, Any]]) -> None:
         if isinstance(event, dict)
     )
     assert_true(has_explanation, "No human-readable explanation fields found in events")
+    print("  OK — no hidden reasoning, has readable explanations")
 
 
 # ======================================================================
@@ -597,9 +611,6 @@ def main() -> int:
 
     base_url = args.base_url.rstrip("/")
 
-    sc_val_fail = None
-    sc_val_pass = None
-
     try:
         # Path 1: tools/list
         call_tools_list(base_url)
@@ -610,28 +621,21 @@ def main() -> int:
 
         time.sleep(1.5)
 
-        # V9.2: 不允许 events 为空 — 必须从 API 或 emitted_events 获取
+        # V10: 必须从 API events 获取 — 不允许 fallback 到 emitted_events
         events_normal = fetch_run_events(base_url, run_id_normal)
-        if not events_normal:
-            # Fallback: 使用 MCP 响应中的 emitted_events
-            events_normal = sc_normal.get("emitted_events", [])
-
         assert_true(
             bool(events_normal),
             f"NORMAL path: /api/runs/{run_id_normal}/events returned no events. "
-            f"Dashboard sync is broken. (emitted_event_count={sc_normal.get('emitted_event_count', 0)})"
+            f"RunStore/API/Dashboard event chain is broken. "
+            f"Debug: emitted_event_count={sc_normal.get('emitted_event_count', 0)}, "
+            f"event_api_ok={sc_normal.get('event_api_ok')}, "
+            f"api_event_count={sc_normal.get('api_event_count', 0)}"
         )
 
-        # 正常路径: 事件字段强验收 — 不允许 SKIP
         check_event_fields_strict(events_normal, "NORMAL")
-
-        # 正常路径: 事件链完整性 (含 rag.retrieved) — 不允许 SKIP
         check_event_chain(events_normal, NORMAL_PATH_EVENTS, "NORMAL")
-
-        # Dashboard Observer
+        check_dashboard_replay_api(base_url, run_id_normal, "NORMAL")
         check_observer_page(base_url, run_id_normal)
-
-        # 事件同步健康
         check_event_sync_health(sc_normal)
 
         # Path 3: 失败学习路径
@@ -643,20 +647,18 @@ def main() -> int:
             time.sleep(1.5)
 
             events_fail = fetch_run_events(base_url, run_id_fail)
-            if not events_fail:
-                events_fail = sc_val_fail.get("emitted_events", [])
-
             assert_true(
                 bool(events_fail),
                 f"FAILURE-VAL-FAIL path: /api/runs/{run_id_fail}/events returned no events. "
-                f"Dashboard sync is broken. (emitted_event_count={sc_val_fail.get('emitted_event_count', 0)})"
+                f"RunStore/API/Dashboard event chain is broken. "
+                f"Debug: emitted_event_count={sc_val_fail.get('emitted_event_count', 0)}, "
+                f"event_api_ok={sc_val_fail.get('event_api_ok')}"
             )
 
-            # V9.2: 不允许 SKIP — 强制检查
             check_event_fields_strict(events_fail, "FAILURE-VAL-FAIL")
             check_event_chain(events_fail, FAILURE_PATH_EVENTS, "FAILURE-VAL-FAIL")
             check_failure_learning_details(sc_val_fail, events_fail)
-
+            check_dashboard_replay_api(base_url, run_id_fail, "FAILURE-VAL-FAIL")
             check_observer_page(base_url, run_id_fail)
             check_event_sync_health(sc_val_fail)
 
@@ -667,21 +669,19 @@ def main() -> int:
             time.sleep(1.5)
 
             events_pass = fetch_run_events(base_url, run_id_pass)
-            if not events_pass:
-                events_pass = sc_val_pass.get("emitted_events", [])
-
             assert_true(
                 bool(events_pass),
                 f"FAILURE-VAL-PASS path: /api/runs/{run_id_pass}/events returned no events. "
-                f"Dashboard sync is broken. (emitted_event_count={sc_val_pass.get('emitted_event_count', 0)})"
+                f"RunStore/API/Dashboard event chain is broken. "
+                f"Debug: emitted_event_count={sc_val_pass.get('emitted_event_count', 0)}, "
+                f"event_api_ok={sc_val_pass.get('event_api_ok')}"
             )
 
-            # V9.2: 验证 val_pass 路径的事件链也完整
             check_event_fields_strict(events_pass, "FAILURE-VAL-PASS")
             check_event_chain(events_pass, FAILURE_PATH_EVENTS, "FAILURE-VAL-PASS")
+            check_dashboard_replay_api(base_url, run_id_pass, "FAILURE-VAL-PASS")
             check_event_sync_health(sc_val_pass)
 
-            # V9.1: Validation Gate 规则验证
             check_validation_gate(sc_val_fail, sc_val_pass)
 
         # Trace quality
@@ -695,7 +695,7 @@ def main() -> int:
         return 1
 
     print("")
-    print("[PASS] StableAgent integration test completed (V9.2 event chain hardening).")
+    print("[PASS] StableAgent integration test completed (V10 100% closed-loop).")
     return 0
 
 

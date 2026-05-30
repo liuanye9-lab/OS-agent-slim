@@ -105,25 +105,44 @@ if (runId) {
 // ========== API History Replay + WebSocket ==========
 async function loadHistoryAndConnect(runId) {
   let historyEvents = [];
+  let apiEventCount = 0;
+  let dashboardReplayOk = false;
 
   // Step 1: 请求 API 获取历史事件
   try {
     const resp = await fetch(`/api/runs/${runId}/events`);
     if (resp.ok) {
       const data = await resp.json();
-      if (Array.isArray(data) && data.length > 0) {
+      // V10: 结构化返回 { run_id, event_count, events: [...] }
+      if (data && typeof data === "object" && Array.isArray(data.events)) {
+        historyEvents = data.events;
+        apiEventCount = data.event_count || historyEvents.length;
+      } else if (Array.isArray(data) && data.length > 0) {
+        // 兼容旧版直接返回列表
         historyEvents = data;
+        apiEventCount = data.length;
+      }
+
+      if (historyEvents.length > 0) {
         // 回放历史事件到 UI
         for (const evt of historyEvents) {
           applyEvent(evt);
         }
-        addLogLine("info", `API 回放 ${historyEvents.length} 个历史事件`);
+        addLogLine("info", `API 回放 ${historyEvents.length} 个历史事件 (event_count=${apiEventCount})`);
+        dashboardReplayOk = true;
       }
+      // 更新 API 状态显示
+      updateEventApiStatus(true, apiEventCount, dashboardReplayOk);
     } else if (resp.status === 404) {
       addLogLine("warn", `Run ${runId} 不存在 (404)`);
+      updateEventApiStatus(false, 0, false);
+    } else {
+      addLogLine("warn", `API 返回 HTTP ${resp.status}`);
+      updateEventApiStatus(false, 0, false);
     }
   } catch (err) {
     addLogLine("warn", `API 回放失败: ${err.message}`);
+    updateEventApiStatus(false, 0, false);
   }
 
   // Step 2: 连接 WebSocket 获取实时事件
@@ -136,14 +155,31 @@ async function loadHistoryAndConnect(runId) {
     const timelineEmpty = $timelineCol && $timelineCol.children.length === 0;
 
     if (historyEvents.length === 0 && !wsConnected) {
-      showSyncError("历史事件为空，WebSocket 未连接");
+      showSyncError("同步异常：未收到任何事件（API 和 WebSocket 均无数据）");
     } else if (historyEvents.length === 0 && wsConnected) {
-      // API 空但 WebSocket 已连接 — 显示提示
       addLogLine("warn", "历史事件为空，仅显示实时事件");
       showHistoryEmptyNotice();
     }
-    // 如果有历史事件或有实时事件，一切正常
   }, 3000);
+}
+
+// V10: 更新 API 状态显示
+function updateEventApiStatus(apiOk, eventCount, replayOk) {
+  const statusEl = document.getElementById("eventApiStatus");
+  if (statusEl) {
+    statusEl.textContent = apiOk ? `${eventCount} events` : "无事件";
+    statusEl.className = apiOk ? "api-status ok" : "api-status error";
+  }
+  const replayEl = document.getElementById("dashboardReplayOk");
+  if (replayEl) {
+    replayEl.textContent = replayOk ? "✅ 已回放" : "❌ 未回放";
+    replayEl.className = replayOk ? "api-status ok" : "api-status error";
+  }
+  const wsEl = document.getElementById("websocketStatus");
+  if (wsEl) {
+    wsEl.textContent = "等待连接";
+    wsEl.className = "api-status";
+  }
 }
 
 // V9.2: 显示同步错误
@@ -182,6 +218,12 @@ function connectWebSocket(runId) {
     // V9.2: 记录到 activeConnections 供 loadHistoryAndConnect 检查
     activeConnections.set(runId, ws);
     if (!primaryRunId) primaryRunId = runId;
+    // V10: 更新 WebSocket 状态显示
+    const wsEl = document.getElementById("websocketStatus");
+    if (wsEl) {
+      wsEl.textContent = "✅ 已连接";
+      wsEl.className = "api-status ok";
+    }
   };
 
   ws.onmessage = (e) => {

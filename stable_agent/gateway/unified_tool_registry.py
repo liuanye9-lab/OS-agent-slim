@@ -1263,6 +1263,45 @@ class UnifiedToolRegistry:
 
             event_sync_ok = len(sync_errors) == 0 and not missing_required_events
 
+            # V10: 从 RunStore 回读验证 — event_api_ok / dashboard_replay_ok
+            api_event_count = 0
+            api_missing_required_events: list[str] = []
+            event_api_ok = False
+            dashboard_replay_ok = False
+            try:
+                tr2 = getattr(self, '_tool_router', None)
+                if tr2 is not None:
+                    rs2 = getattr(tr2, '_run_store', None)
+                    if rs2 is not None:
+                        stored_events = rs2.get_events(ctx.run_id)
+                        api_event_count = len(stored_events)
+                        stored_event_types = [
+                            e.get("event_type") for e in stored_events
+                            if isinstance(e, dict)
+                        ]
+                        api_missing_required_events = [
+                            e for e in REQUIRED_NORMAL_EVENTS
+                            if e not in stored_event_types
+                        ]
+                        # 如果有 failure learning，也检查额外必需事件
+                        if force_eval_failed and any(e in stored_event_types for e in ("regression.generated", "skill.patch.proposed")):
+                            for fe in REQUIRED_FAILURE_EVENTS:
+                                if fe not in api_missing_required_events and fe not in stored_event_types:
+                                    api_missing_required_events.append(fe)
+
+                        event_api_ok = (
+                            api_event_count > 0
+                            and len(api_missing_required_events) == 0
+                        )
+                        dashboard_replay_ok = event_api_ok
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "RunStore API readback failed for %s", ctx.run_id, exc_info=True)
+
+            # V10: event_sync_ok 必须依赖 event_api_ok
+            if not event_api_ok:
+                event_sync_ok = False
+
             return self._make_result(
                 ctx, tool_name,
                 ok=True,
@@ -1292,6 +1331,11 @@ class UnifiedToolRegistry:
                     # V9.2: missing_required_events — 严格交叉检查
                     "missing_required_events": missing_required_events,
                     "required_events": REQUIRED_NORMAL_EVENTS,
+                    # V10: event_api_ok / dashboard_replay_ok
+                    "event_api_ok": event_api_ok,
+                    "api_event_count": api_event_count,
+                    "api_missing_required_events": api_missing_required_events,
+                    "dashboard_replay_ok": dashboard_replay_ok,
                     # V9.0: dry_run_learning 标记
                     "dry_run_learning": dry_run_learning,
                     # V9.1: force_validation_passed 参数回显

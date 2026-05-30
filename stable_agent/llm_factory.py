@@ -59,6 +59,8 @@ def get_llm_client(
 
     if key:
         logger.info("使用 OpenAI 兼容 API: model=%s, base_url=%s", model_name, url)
+        from stable_agent.security.secret_masker import mask_secret
+        logger.debug("API key (masked): %s", mask_secret(key))
         _global_client = OpenAICompatibleClient(
             api_key=key,
             base_url=url,

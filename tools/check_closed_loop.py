@@ -498,6 +498,163 @@ def check_best_skill_exported_in_si_report() -> None:
     print("  OK")
 
 
+# ======================================================================
+# V10: 9 new checks — 100% Closed-Loop + Real Key E2E
+# ======================================================================
+
+def check_no_emitted_events_fallback() -> None:
+    """V10: integration_test.py 不允许 fallback 到 sc.get("emitted_events") 作为通过条件。"""
+    print("[CHECK] No emitted_events fallback in integration_test.py")
+
+    file_path = ROOT / "tools/integration_test.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    # 不允许出现 "emitted_events" 作为 fallback 赋值
+    forbidden_patterns = [
+        '= sc_normal.get("emitted_events"',
+        '= sc_val_fail.get("emitted_events"',
+        '= sc_val_pass.get("emitted_events"',
+        '= sc.get("emitted_events"',
+        "= sc_normal.get('emitted_events'",
+        "= sc_val_fail.get('emitted_events'",
+        "= sc_val_pass.get('emitted_events'",
+    ]
+    found = [p for p in forbidden_patterns if p in text]
+    assert_true(not found,
+                f"integration_test.py must NOT fallback to emitted_events as pass condition, found: {found}")
+
+    print("  OK")
+
+
+def check_integration_test_checks_events_api() -> None:
+    """V10: integration_test.py 必须检查 /api/runs/{run_id}/events 非空。"""
+    print("[CHECK] integration_test checks /api/runs events non-empty")
+
+    file_path = ROOT / "tools/integration_test.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert_true("fetch_run_events" in text,
+                "integration_test.py must have fetch_run_events function")
+    assert_true("/api/runs/" in text,
+                "integration_test.py must call /api/runs/{run_id}/events")
+
+    print("  OK")
+
+
+def check_dashboard_replay_api_in_test() -> None:
+    """V10: integration_test.py 必须有 check_dashboard_replay_api。"""
+    print("[CHECK] check_dashboard_replay_api in integration_test.py")
+
+    file_path = ROOT / "tools/integration_test.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert_true("check_dashboard_replay_api" in text,
+                "integration_test.py must have check_dashboard_replay_api function")
+
+    print("  OK")
+
+
+def check_run_observer_fetches_api_events() -> None:
+    """V10: run_observer.js 必须 fetch /api/runs/${runId}/events。"""
+    print("[CHECK] run_observer.js fetches API events")
+
+    file_path = ROOT / "web/static/run_observer.js"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert_true("/api/runs/" in text and "events" in text,
+                "run_observer.js must fetch /api/runs/${runId}/events")
+    assert_true("loadHistoryAndConnect" in text,
+                "run_observer.js must have loadHistoryAndConnect function")
+
+    print("  OK")
+
+
+def check_event_api_ok_in_result() -> None:
+    """V10: os_agent 返回中必须有 event_api_ok / api_event_count / dashboard_replay_ok。"""
+    print("[CHECK] event_api_ok / dashboard_replay_ok in os_agent result")
+
+    file_path = ROOT / "stable_agent/gateway/unified_tool_registry.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert_true('"event_api_ok"' in text,
+                "os_agent result must include event_api_ok")
+    assert_true('"api_event_count"' in text,
+                "os_agent result must include api_event_count")
+    assert_true('"dashboard_replay_ok"' in text,
+                "os_agent result must include dashboard_replay_ok")
+    assert_true('"api_missing_required_events"' in text,
+                "os_agent result must include api_missing_required_events")
+
+    print("  OK")
+
+
+def check_event_sync_ok_depends_on_event_api_ok() -> None:
+    """V10: event_sync_ok 必须依赖 event_api_ok。"""
+    print("[CHECK] event_sync_ok depends on event_api_ok")
+
+    file_path = ROOT / "stable_agent/gateway/unified_tool_registry.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    # 必须有 "if not event_api_ok: event_sync_ok = False" 类似逻辑
+    assert_true("event_api_ok" in text and "event_sync_ok" in text,
+                "Both event_api_ok and event_sync_ok must exist")
+    # 必须有 event_api_ok 影响 event_sync_ok 的逻辑
+    assert_true(
+        "not event_api_ok" in text or "event_api_ok is True" in text or "event_api_ok ==" in text,
+        "event_sync_ok must be set to False when event_api_ok is False"
+    )
+
+    print("  OK")
+
+
+def check_env_in_gitignore() -> None:
+    """V10: .env 必须在 .gitignore 中。"""
+    print("[CHECK] .env in .gitignore")
+
+    gitignore_path = ROOT / ".gitignore"
+    assert_true(gitignore_path.exists(), ".gitignore must exist")
+
+    text = gitignore_path.read_text(encoding="utf-8", errors="ignore")
+    assert_true(".env" in text, ".gitignore must contain .env")
+
+    print("  OK")
+
+
+def check_secret_masker_exists() -> None:
+    """V10: secret_masker.py 必须存在。"""
+    print("[CHECK] secret_masker.py exists")
+
+    check_file_exists("stable_agent/security/secret_masker.py")
+
+    # 验证核心函数
+    file_path = ROOT / "stable_agent/security/secret_masker.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    assert_true("def mask_secret" in text, "secret_masker.py must have mask_secret function")
+    assert_true("def mask_text" in text, "secret_masker.py must have mask_text function")
+
+    print("  OK")
+
+
+def check_real_llm_e2e_test_no_key_print() -> None:
+    """V10: real_llm_e2e_test.py 必须不打印 key。"""
+    print("[CHECK] real_llm_e2e_test.py does not print key")
+
+    file_path = ROOT / "tools/real_llm_e2e_test.py"
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+
+    # 必须导入 mask_secret
+    assert_true("mask_secret" in text, "real_llm_e2e_test.py must import mask_secret")
+    # 必须有 key 泄露检查
+    assert_true("is_secret_leaked" in text or "check_no_key_leak" in text,
+                "real_llm_e2e_test.py must check for key leaks")
+    # 不允许直接 print key
+    assert_true("print(api_key)" not in text and "print(key)" not in text,
+                "real_llm_e2e_test.py must NOT print raw API key")
+
+    print("  OK")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
@@ -527,6 +684,16 @@ def main() -> int:
         check_export_approved_patch_explicit()
         check_can_export_three_conditions()
         check_best_skill_exported_in_si_report()
+        # V10: 9 new checks — 100% Closed-Loop + Real Key E2E
+        check_no_emitted_events_fallback()
+        check_integration_test_checks_events_api()
+        check_dashboard_replay_api_in_test()
+        check_run_observer_fetches_api_events()
+        check_event_api_ok_in_result()
+        check_event_sync_ok_depends_on_event_api_ok()
+        check_env_in_gitignore()
+        check_secret_masker_exists()
+        check_real_llm_e2e_test_no_key_print()
 
     except AssertionError as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)

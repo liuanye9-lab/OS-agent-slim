@@ -79,7 +79,12 @@ def register_run_routes(app: FastAPI, gateway_run_store=None, dash_sync=None) ->
                     result.append(e)
                 else:
                     result.append({"raw": str(e)})
-            return result
+            # V10: 结构化返回，含 event_count
+            return {
+                "run_id": run_id,
+                "event_count": len(result),
+                "events": result,
+            }
         except Exception as e:
             import logging
             logging.getLogger("uvicorn").exception("get_run_events failed: %s", e)
