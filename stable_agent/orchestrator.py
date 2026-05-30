@@ -175,6 +175,7 @@ class StableAgentOrchestrator:
             memory_store=MemoryUpdateStore(),
             patch_store=SkillPatchStore(),
             min_confidence=0.6,
+            storage=self.storage,  # V6.2: 回归用例持久化
         )
         # V6.2: 验证时优先使用 LLM eval（如果 llm_client 可用）
         try:

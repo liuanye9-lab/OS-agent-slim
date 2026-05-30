@@ -72,6 +72,7 @@ class SelfImprovementProofLoop:
         memory_store: MemoryUpdateStore | None = None,
         patch_store: SkillPatchStore | None = None,
         min_confidence: float = 0.6,
+        storage: Any = None,
     ) -> None:
         """初始化自我优化引擎。
 
@@ -79,11 +80,13 @@ class SelfImprovementProofLoop:
             memory_store: 记忆更新存储（可选，默认创建新实例）。
             patch_store: Skill Patch 存储（可选，默认创建新实例）。
             min_confidence: 触发学习的最低 eval 置信度阈值。
+            storage: V6.2 持久化存储（用于保存回归用例）。
         """
         self.memory_store = memory_store or MemoryUpdateStore()
         self.patch_store = patch_store or SkillPatchStore()
         self.min_confidence = min_confidence
         self.last_report: SelfImprovementReport | None = None
+        self._storage = storage  # V6.2: 回归用例持久化
 
         # V6.1: 真实 Regression Validation Runner
         self._validator: RegressionValidationRunner = RegressionValidationRunner()
@@ -141,6 +144,27 @@ class SelfImprovementProofLoop:
 
         # 2. 生成回归用例
         regression_cases = self._generate_regression_cases(run_id, attribution)
+
+        # V6.2: 回归用例持久化
+        if self._storage is not None and regression_cases:
+            for rc in regression_cases:
+                try:
+                    # 动态导入避免硬依赖
+                    from stable_agent.saas.repository import RegressionCaseRecord
+                    record = RegressionCaseRecord(
+                        id=f"reg_{rc.case_id}",
+                        task_input=attribution[:200],
+                        expected_behavior="",
+                        failure_mode=failure_mode,
+                        source_run_id=run_id,
+                        source_bad_case_id="",
+                        tags=["auto_generated", failure_mode],
+                        overall_score=eval_score,
+                    )
+                    self._storage.save_regression_case(record)
+                    logger.info("回归用例已持久化: %s", rc.case_id)
+                except Exception as e:
+                    logger.warning("回归用例持久化失败: %s", e)
 
         # 3. 生成记忆候选
         memory_entries = self._generate_memory_candidates(run_id, attribution, observations)
