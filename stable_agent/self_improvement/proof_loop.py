@@ -46,6 +46,10 @@ from stable_agent.self_improvement.self_improvement_report import (
     SelfImprovementReport,
     SkillPatchEntry,
 )
+from stable_agent.self_improvement.regression_validation_runner import (
+    RegressionValidationRunner,
+)
+from stable_agent.self_improvement.validation_report import ValidationReport
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +84,9 @@ class SelfImprovementProofLoop:
         self.patch_store = patch_store or SkillPatchStore()
         self.min_confidence = min_confidence
         self.last_report: SelfImprovementReport | None = None
+
+        # V6.1: 真实 Regression Validation Runner
+        self._validator: RegressionValidationRunner = RegressionValidationRunner()
 
     # ------------------------------------------------------------------
     # 公共方法
@@ -151,19 +158,59 @@ class SelfImprovementProofLoop:
             skill_patches=patch_entries,
         )
 
+        # V6.1: 真实 Regression Validation（替换硬置 validation_passed=True）
+        validation_passed = True
+        validation_reports: list[ValidationReport] = []
+
+        if patch_entries:
+            # 对每个 patch 执行真实验证
+            for entry in patch_entries:
+                patch = self.patch_store.get(entry.patch_id)
+                if patch is None:
+                    logger.warning("patch %s 不在 store 中，跳过验证", entry.patch_id)
+                    continue
+
+                # 获取原始回归用例数据
+                case_data = [
+                    {"case_id": rc.case_id, "input": rc.description}
+                    for rc in regression_cases
+                ]
+
+                vr = self._validator.validate_patch(
+                    patch=patch,
+                    regression_cases=case_data,
+                    old_skill=patch.old_rule,
+                    candidate_skill=patch.new_rule,
+                )
+                validation_reports.append(vr)
+
+                if vr.passed:
+                    # 验证通过 → 可以进入审核
+                    self.patch_store.submit_for_review(entry.patch_id)
+                    logger.info("patch %s validation passed, → waiting_review", entry.patch_id)
+                else:
+                    # 验证失败 → 标记但状态不同
+                    validation_passed = False
+                    logger.warning(
+                        "patch %s validation FAILED: %s (delta=%.2f)",
+                        entry.patch_id, vr.reason_zh, vr.delta,
+                    )
+
         # 设置验证和审核状态
-        if need_review:
+        if validation_passed and need_review:
             report.human_review_required = True
             report.human_review_status = "pending"
         else:
             report.human_review_required = False
+            report.human_review_status = "none" if not need_review else "validation_failed"
 
-        # 标记验证通过（当前实现为规则驱动，非 LLM 模拟）
-        report.validation_passed = True
+        report.validation_passed = validation_passed
+        report.validation_reports = validation_reports
 
         self.last_report = report
-        logger.info("Self-improvement: 学习完成 — 回归=%d, 记忆=%d, patches=%d",
-                    len(regression_cases), len(memory_entries), len(patch_entries))
+        logger.info("Self-improvement: 学习完成 — 回归=%d, 记忆=%d, patches=%d, validation=%s",
+                    len(regression_cases), len(memory_entries), len(patch_entries),
+                    "PASSED" if validation_passed else "FAILED")
         return report
 
     def approve_patch(self, patch_id: str, review_id: str) -> SkillPatchCandidate | None:

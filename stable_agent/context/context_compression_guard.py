@@ -40,6 +40,12 @@ class CompressionDecision:
     protected_items: list[dict] = field(default_factory=list)
     risk_flags: list[str] = field(default_factory=list)
     summary_zh: str = ""
+    # V6.1: token 预算相关字段
+    token_budget: int = 0
+    estimated_tokens_before: int = 0
+    estimated_tokens_after: int = 0
+    compression_ratio: float = 0.0
+    blocked: bool = False
 
 
 class ContextCompressionGuard:
@@ -187,6 +193,116 @@ class ContextCompressionGuard:
             risk_flags=risk_flags,
             summary_zh=summary_zh,
         )
+
+        self._last_decision = decision
+        return decision
+
+    # ------------------------------------------------------------------
+    # V6.1: Token Budget Enforcement
+    # ------------------------------------------------------------------
+
+    def enforce_budget(
+        self,
+        decision: CompressionDecision,
+        token_budget: int,
+    ) -> CompressionDecision:
+        """在不丢 protected_items 的前提下压缩普通 items。
+
+        算法：
+        1. protected_items 全部保留，不允许被丢弃
+        2. 如果 protected_items 本身已经超过预算 → blocked=True，返回风险说明
+        3. 否则按"非保护 items 的优先级"从低到高丢弃，直到预算内
+        4. 生成 summary_zh 和压缩统计数据
+
+        Args:
+            decision: protect() 方法生成的原始决策。
+            token_budget: token 预算上限。
+
+        Returns:
+            更新后的 CompressionDecision（包含 kept/dropped 最终分配）。
+        """
+        # Token 估算（简单：content 长度 / 2 近似 token 数）
+        def _estimate(content: str) -> int:
+            return max(1, len(content) // 2)
+
+        protected = list(decision.protected_items)
+        non_protected = list(decision.kept_items)  # 非保护但候选保留的 items
+
+        # 计算 protected 的 token 总量
+        protected_tokens = sum(_estimate(str(i.get("content", ""))) for i in protected)
+        total_before_tokens = protected_tokens + sum(
+            _estimate(str(i.get("content", ""))) for i in non_protected
+        )
+
+        decision.estimated_tokens_before = total_before_tokens
+        decision.token_budget = token_budget
+
+        # 情况 1: protected_items 本身就超预算
+        if protected_tokens > token_budget:
+            decision.blocked = True
+            decision.risk_flags.append(
+                f"保护条目总 token({protected_tokens}) 超过预算({token_budget})，"
+                f"不能丢弃受保护条目。建议增大 token_budget 到至少 {protected_tokens * 2}。"
+            )
+            decision.estimated_tokens_after = protected_tokens
+            decision.compression_ratio = 0.0
+            decision.summary_zh = (
+                f"压缩被阻止: protected_items 已有 {protected_tokens} tokens，"
+                f"超过了 {token_budget} 预算上限。"
+            )
+            self._last_decision = decision
+            return decision
+
+        # 情况 2: 正常压缩 — 从非保护 items 中按优先级丢弃
+        # 优先级排序（低优先级的先丢弃）：
+        #   - type="secondary" 最先丢
+        #   - 短内容（len < 20）优先丢
+        #   - 无 confidence 的先丢
+        def _priority(item: dict) -> int:
+            """返回优先级得分，越低越先被丢弃。"""
+            score = 0
+            if item.get("type") == "secondary":
+                score -= 20
+            content_len = len(str(item.get("content", "")))
+            if content_len < 20:
+                score -= 10
+            if not item.get("confidence"):
+                score -= 5
+            return score
+
+        sorted_items = sorted(non_protected, key=_priority)
+        kept: list[dict] = []
+        dropped: list[dict] = []
+        current_tokens = protected_tokens
+
+        for item in sorted_items:
+            item_tokens = _estimate(str(item.get("content", "")))
+            if current_tokens + item_tokens <= token_budget:
+                kept.append(item)
+                current_tokens += item_tokens
+            else:
+                dropped.append(item)
+
+        decision.estimated_tokens_after = current_tokens
+        decision.compression_ratio = (
+            (total_before_tokens - current_tokens) / total_before_tokens
+            if total_before_tokens > 0
+            else 0.0
+        )
+        decision.blocked = False
+
+        # 更新 kept/dropped 列表
+        decision.kept_items = kept
+        decision.dropped_items = dropped
+        # protected_items 保持不变（必然保留）
+
+        decision.summary_zh = (
+            f"压缩完成: {protected_tokens} tokens (受保护) + {current_tokens - protected_tokens} tokens (普通保留) "
+            f"= {current_tokens} / {token_budget} tokens | "
+            f"丢弃 {len(dropped)} 条, 保留 {len(protected) + len(kept)} 条"
+        )
+        if decision.risk_flags:
+            decision.summary_zh += f" | 风险: {'; '.join(decision.risk_flags)}"
 
         self._last_decision = decision
         return decision

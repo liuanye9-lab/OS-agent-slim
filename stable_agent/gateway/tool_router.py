@@ -380,14 +380,50 @@ class ToolRouter:
     }
 
     # V5.5: 事件 → 阶段映射
+    # V6.1: 事件类型 → RunStage 精确映射（替换旧 _EVENT_TO_STAGE 和 _STAGE_MAP）
     _STAGE_MAP: dict[str, str] = {
-        "mcp.call.received": "execution",
-        "tool.risk_checked": "execution",
-        "tool.started": "execution",
-        "tool.completed": "execution",
-        "tool.failed": "execution",
-        "task.completed": "execution",
-        "approval.required": "approval",
+        # 接收阶段
+        "mcp.call.received": "received",
+        "tool.risk_checked": "intent_parsing",
+        "budget.allocated": "context_budgeting",
+        # 记忆与知识检索
+        "temporal_memory.retrieving": "temporal_memory_retrieving",
+        "temporal_memory.retrieved": "temporal_memory_retrieving",
+        "rag.retrieved": "rag_retrieving",
+        "memory.retrieved": "rag_retrieving",
+        # 上下文
+        "context.compression_guard.checked": "context_compressing",
+        "context.compressing": "context_compressing",
+        "context.built": "context_building",
+        # 规划
+        "workflow.plan.created": "planning",
+        # 执行
+        "tool.started": "acting",
+        "tool.executing": "acting",
+        "workflow.step.started": "acting",
+        # 观察
+        "tool.completed": "observing",
+        "workflow.step.completed": "observing",
+        "observe.completed": "observing",
+        # 评估
+        "eval.completed": "evaluating",
+        # 失败分析
+        "tool.failed": "failure_attribution",
+        "failure.attributed": "failure_attribution",
+        # 闭环
+        "regression.generated": "regression_generation",
+        "memory.update.candidate": "memory_update_candidate",
+        "self_improvement.checked": "skill_patch_proposal",
+        "skill.patch.proposed": "skill_patch_proposal",
+        # 验证与审核
+        "validation.checked": "validation",
+        "human_review.required": "human_review",
+        "approval.required": "human_review",
+        "approval.approved": "acting",
+        "approval.rejected": "cancelled",
+        # 完成
+        "task.completed": "completed",
+        "mcp.response.ready": "completed",
     }
 
     @staticmethod
@@ -473,8 +509,9 @@ class ToolRouter:
             event["next_step_en"] = trace_dict.get("next_step_en", "")
             event["stage_label_zh"] = trace_dict.get("stage_label_zh", "")
             event["stage_label_en"] = trace_dict.get("stage_label_en", "")
-        except Exception:
-            pass  # 决策字段非关键，静默降级
+        except Exception as trace_err:
+            logger.exception("DecisionTrace build_for_dashboard 失败: %s", trace_err)
+            # 决策字段非关键，但必须记录异常以便排查
 
         return event
 

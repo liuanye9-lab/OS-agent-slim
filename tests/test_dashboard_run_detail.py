@@ -21,7 +21,7 @@ class TestDashboardRunDetail:
             RunStage.RECEIVED,
             RunStage.INTENT_PARSING,
             RunStage.CONTEXT_BUDGETING,
-            RunStage.MEMORY_RETRIEVING,
+            RunStage.TEMPORAL_MEMORY_RETRIEVING,
             RunStage.CONTEXT_BUILDING,
             RunStage.PLANNING,
             RunStage.ACTING,
@@ -58,7 +58,7 @@ class TestDashboardRunDetail:
         # Dashboard 展示需要的字段
         assert result["run_id"] == "run-dash-001"
         assert result["stage"] == "evaluating"
-        assert result["progress_pct"] == 85
+        assert result["progress_pct"] == 86  # V6.1: evaluating=86%
 
     def test_all_stage_labels_zh(self):
         """所有阶段都有中文字段。"""

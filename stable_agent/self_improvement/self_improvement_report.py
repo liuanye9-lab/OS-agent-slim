@@ -10,7 +10,10 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from stable_agent.self_improvement.validation_report import ValidationReport
 
 
 @dataclass
@@ -89,9 +92,10 @@ class SelfImprovementReport:
     # 验证与审核
     validation_passed: bool = False
     validation_report_id: str = ""
+    validation_reports: list = field(default_factory=list)  # V6.1: list[ValidationReport]
     human_review_required: bool = False
     human_review_id: str = ""
-    human_review_status: str = "pending"  # pending / approved / rejected
+    human_review_status: str = "pending"  # pending / approved / rejected / validation_failed / none
     best_skill_exported: bool = False
 
     # 摘要
@@ -125,6 +129,17 @@ class SelfImprovementReport:
             ],
             "validation_passed": self.validation_passed,
             "validation_report_id": self.validation_report_id,
+            "validation_reports": [
+                {
+                    "report_id": vr.report_id,
+                    "passed": vr.passed,
+                    "old_score": vr.old_score,
+                    "new_score": vr.new_score,
+                    "delta": vr.delta,
+                    "reason_zh": vr.reason_zh,
+                }
+                for vr in self.validation_reports
+            ],
             "human_review_required": self.human_review_required,
             "human_review_id": self.human_review_id,
             "human_review_status": self.human_review_status,

@@ -4,6 +4,35 @@ All notable changes to StableAgent Cloud.
 
 ---
 
+## v6.1 (2026-05-30) — Core Loop Hardening
+
+### Added
+- `stable_agent/memory/temporal_memory_bridge.py` — 连接旧 MemoryRouter 到新 TemporalMemoryRouter
+- `stable_agent/self_improvement/validation_report.py` — ValidationReport + ValidationCaseResult (真实验证报告)
+- `stable_agent/self_improvement/regression_validation_runner.py` — 规则驱动的回归验证执行器
+- 28 个新测试 (test_regression_validation_runner, test_context_compression_budget_enforcement, test_temporal_memory_bridge)
+- 3 个审计文档 (CORE_LOOP_STATUS_AUDIT, DASHBOARD_SYNC_STATUS_AUDIT, REDUNDANCY_AND_DEPRECATION_AUDIT)
+
+### Changed
+- RunLifecycle: 20→22 阶段 (新增 TEMPORAL_MEMORY_RETRIEVING, CONTEXT_COMPRESSING, MEMORY_UPDATE_CANDIDATE)
+- RunStageMeta: 新增 scene 字段 (像素人语义场景渲染)
+- self_improvement/proof_loop.py: 替换硬置 validation_passed=True → RegressionValidationRunner 真实验证
+- tool_router.py: _STAGE_MAP 从 7 项扩展到 40+ 项精确映射
+- TemporalMemoryHit: 新增 project_id 正式字段
+- ContextCompressionGuard: 新增 enforce_budget() 方法 + token 统计字段
+- orchestrator.py: +step 6.5 TemporalMemory + CompressionGuard 注入, 修复 run_id 未定义 bug
+
+### Fixed
+- P0: 修复 3 处 `except Exception: pass` (tool_router, decision_trace_builder, eval_and_bad_case)
+- P0: 修复 validation_passed 无条件硬置 True
+- P1: TemporalMemoryRouter + ContextCompressionGuard 接入主流程
+- P2: orchestrator run_id 未定义 bug
+
+### Tests
+- 1120 passed, 6 skipped, 0 failures
+
+---
+
 ## v2.2 (2026-05-29) — Production Hardening Complete ✅
 
 ### Added

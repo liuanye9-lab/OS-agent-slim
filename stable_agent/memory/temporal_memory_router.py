@@ -38,6 +38,7 @@ class TemporalMemoryHit:
     content: str
     created_at: float
     updated_at: float
+    project_id: str | None = None
     valid_from: float | None = None
     valid_until: float | None = None
     confidence: float = 0.5
@@ -132,10 +133,16 @@ class TemporalMemoryRouter:
                 if now - hit.created_at > window_seconds:
                     continue
 
-            # 可选：项目过滤
+            # 可选：项目过滤（V6.1: 优先用正式 project_id 字段）
             if query.project_id is not None:
-                if query.project_id not in hit.tags:
-                    continue
+                if hit.project_id is not None:
+                    # 正式 project_id 字段匹配（精确）
+                    if hit.project_id != query.project_id:
+                        continue
+                else:
+                    # fallback: 旧 tags 兼容
+                    if query.project_id not in hit.tags:
+                        continue
 
             # 计算 relevance（关键词匹配）
             relevance = self._compute_relevance(hit, query)

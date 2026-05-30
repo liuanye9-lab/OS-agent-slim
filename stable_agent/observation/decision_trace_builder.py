@@ -10,9 +10,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from stable_agent.observation.decision_trace import DecisionTrace
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from stable_agent.explanation.decision_narrator import DecisionNarrator
@@ -85,8 +88,7 @@ class DecisionTraceBuilder:
                 trace.avatar_state = meta.avatar_state
                 trace.progress_pct = meta.progress_pct
             except Exception:
-                import logging
-                logging.getLogger(__name__).debug("RunLifecycle meta injection skipped")
+                logger.exception("RunLifecycle meta injection failed for stage=%s", stage)
 
         # Payload 中的显式字段优先
         if payload.get("decision_summary_zh"):

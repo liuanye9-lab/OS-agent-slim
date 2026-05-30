@@ -27,6 +27,13 @@ from stable_agent.self_improvement.self_improvement_report import (
     SelfImprovementReport,
     SkillPatchEntry,
 )
+from stable_agent.self_improvement.regression_validation_runner import (
+    RegressionValidationRunner,
+)
+from stable_agent.self_improvement.validation_report import (
+    ValidationReport,
+    ValidationCaseResult,
+)
 
 __all__ = [
     "SelfImprovementProofLoop",
@@ -40,4 +47,7 @@ __all__ = [
     "RegressionCaseEntry",
     "SelfImprovementReport",
     "SkillPatchEntry",
+    "RegressionValidationRunner",
+    "ValidationReport",
+    "ValidationCaseResult",
 ]

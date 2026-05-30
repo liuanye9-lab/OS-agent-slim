@@ -620,8 +620,8 @@ class Evaluator:
             match = re.search(r'(0?\.?\d+)', score_text)
             if match:
                 return min(1.0, max(0.0, float(match.group(1))))
-        except Exception:
-            pass
+        except Exception as parse_err:
+            logger.warning("分数解析失败，回退默认值: %s", parse_err)
         return 0.75  # LLM 失败时回退
 
 

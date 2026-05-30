@@ -57,7 +57,7 @@ class TestDecisionTraceBuilder:
         )
         # RunLifecycle 元信息应该被注入
         assert result["stage_label_zh"] == "评估结果"
-        assert result["progress_pct"] == 85
+        assert result["progress_pct"] == 86  # V6.1: evaluating=86%
 
     def test_payload_overrides_runlifecycle(self, builder):
         """Payload 中的显式字段覆盖 RunLifecycle 默认值。"""

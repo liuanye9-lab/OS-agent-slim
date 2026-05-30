@@ -70,6 +70,10 @@ from stable_agent.self_improvement.proof_loop import SelfImprovementProofLoop
 from stable_agent.self_improvement.memory_update_candidate import MemoryUpdateStore
 from stable_agent.self_improvement.skill_patch_candidate import SkillPatchStore
 
+# V6.1: Temporal Memory + Context Compression
+from stable_agent.memory.temporal_memory_bridge import TemporalMemoryBridge
+from stable_agent.context.context_compression_guard import ContextCompressionGuard
+
 
 # ============================================================================
 # StableAgentOrchestrator — 系统编排器
@@ -174,6 +178,10 @@ class StableAgentOrchestrator:
             patch_store=SkillPatchStore(),
             min_confidence=0.6,
         )
+
+        # V6.1: Temporal Memory Bridge + Context Compression Guard
+        self.temporal_memory_bridge: TemporalMemoryBridge = TemporalMemoryBridge()
+        self.context_compression_guard: ContextCompressionGuard = ContextCompressionGuard()
 
         # 初始化持久化数据库
         self.storage.init_db()
@@ -397,6 +405,82 @@ class StableAgentOrchestrator:
                     logger.warning("RAG build_context_pack 回退也失败: %s", e2)
                     rag_chunks = []
 
+        # 6.5 (V6.1) Temporal Memory Retrieval + Context Compression Guard
+        _run_id = self._current_run_id or str(uuid.uuid4())
+        try:
+            # 加载项目记忆到 TemporalMemoryRouter
+            project_id = getattr(self, "_project_id", None)
+            temporal_hits = self.temporal_memory_bridge.load_for_project(
+                project_id=project_id,
+                existing_memories=[{
+                    "id": m.memory_id,
+                    "content": m.content,
+                    "created_at": m.created_at,
+                    "source": "memory_bank",
+                } for m in pruned_memories if hasattr(m, 'content')],
+            )
+
+            # 检索相关时间记忆
+            temporal_results = self.temporal_memory_bridge.retrieve(
+                task_input=task_input,
+                project_id=project_id,
+                top_k=8,
+            )
+
+            # 发布 temporal_memory.retrieved 事件
+            self.event_bus.publish(Event(
+                timestamp=time.time(),
+                type="temporal_memory.retrieved",
+                payload={
+                    "run_id": _run_id,
+                    "hit_count": len(temporal_results),
+                    "hits": [{"memory_id": h.memory_id, "reason_zh": h.reason_zh}
+                             for h in temporal_results[:5]],
+                },
+            ))
+            logger.info("TemporalMemory: 检索到 %d 条时间记忆", len(temporal_results))
+
+            # Context Compression Guard
+            context_items_for_guard = [
+                {"content": m.content, "type": "memory", "confidence": getattr(m, 'confidence', 0.5)}
+                for m in pruned_memories if hasattr(m, 'content')
+            ]
+            # 添加 RAG chunks
+            for rc in rag_chunks:
+                if isinstance(rc, dict) and rc.get("content"):
+                    context_items_for_guard.append({**rc, "type": "rag"})
+
+            compression_decision = self.context_compression_guard.protect(
+                task_input=task_input,
+                context_items=context_items_for_guard,
+                temporal_memories=temporal_results,
+                token_budget=budget.get("context", 8000),
+            )
+
+            # apply enforce_budget
+            compression_decision = self.context_compression_guard.enforce_budget(
+                decision=compression_decision,
+                token_budget=budget.get("context", 8000),
+            )
+
+            # 发布 context.compression_guard.checked 事件
+            self.event_bus.publish(Event(
+                timestamp=time.time(),
+                type="context.compression_guard.checked",
+                payload={
+                    "run_id": _run_id,
+                    "protected_count": len(compression_decision.protected_items),
+                    "dropped_count": len(compression_decision.dropped_items),
+                    "kept_count": len(compression_decision.kept_items),
+                    "risk_flags": compression_decision.risk_flags,
+                    "blocked": compression_decision.blocked,
+                    "summary_zh": compression_decision.summary_zh,
+                },
+            ))
+            logger.info("ContextCompressionGuard: %s", compression_decision.summary_zh)
+        except Exception as e:
+            logger.warning("TemporalMemory/CompressionGuard 执行失败，跳过: %s", e)
+
         # 7. 上下文包构建
         context_pack: ContextPack = self.context_triage.build_context_pack(
             task_input=task_input,
@@ -418,6 +502,9 @@ class StableAgentOrchestrator:
                 risk=risk,
                 reason=f"任务类型 {task_type.value} 需要审批",
             )
+        else:
+            # V6.1 fix: 确保 run_id 在所有分支都被定义
+            run_id = self._current_run_id or str(uuid.uuid4())
 
         # 发布 budget:allocated 事件
         self.event_bus.publish(
