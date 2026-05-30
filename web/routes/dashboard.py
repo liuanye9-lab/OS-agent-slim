@@ -40,7 +40,14 @@ def register_pages(app, templates_dir: str) -> None:
     async def dashboard_legacy(): return _serve_html(_dash)
 
     @app.get("/dashboard/v2")
-    async def dashboard_v2(): return _serve_html(_dash_v2)
+    async def dashboard_v2():
+        # V6.2: 已收敛到 observer，302 重定向
+        return HTMLResponse(
+            content='<html><head><meta http-equiv="refresh" content="0;url=/observer"></head>'
+            '<body><p>重定向到 <a href="/observer">实时观察器</a>...</p></body></html>',
+            status_code=302,
+            headers={"Location": "/observer"},
+        )
 
     @app.get("/runs/{run_id}")
     async def run_page(run_id: str):

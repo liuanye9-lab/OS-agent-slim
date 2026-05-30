@@ -207,6 +207,17 @@ class SelfImprovementProofLoop:
         report.validation_passed = validation_passed
         report.validation_reports = validation_reports
 
+        # V6.2: MemoryCandidate 推进 — 验证通过后自动 validate
+        # （promote 仍需 human_review，在外部分支 approve 中触发）
+        if validation_passed and memory_entries:
+            vr_id = validation_reports[0].report_id if validation_reports else ""
+            for mentry in memory_entries:
+                try:
+                    self.memory_store.validate(mentry.update_id, vr_id)
+                    logger.info("MemoryCandidate %s validated (report=%s)", mentry.update_id, vr_id[:12])
+                except Exception as e:
+                    logger.warning("MemoryCandidate validate 失败: %s", e)
+
         self.last_report = report
         logger.info("Self-improvement: 学习完成 — 回归=%d, 记忆=%d, patches=%d, validation=%s",
                     len(regression_cases), len(memory_entries), len(patch_entries),

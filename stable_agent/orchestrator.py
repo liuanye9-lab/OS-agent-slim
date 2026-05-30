@@ -176,6 +176,11 @@ class StableAgentOrchestrator:
             patch_store=SkillPatchStore(),
             min_confidence=0.6,
         )
+        # V6.2: 验证时优先使用 LLM eval（如果 llm_client 可用）
+        try:
+            self.proof_loop._validator.llm_client = self.llm_client if hasattr(self.llm_client, 'generate') else None
+        except Exception:
+            pass  # llm_client 不可用时 fallback 规则评分
 
         # V6.1: Temporal Memory Bridge + Context Compression Guard
         self.temporal_memory_bridge: TemporalMemoryBridge = TemporalMemoryBridge()

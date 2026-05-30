@@ -125,6 +125,21 @@ class ToolRouter:
             mode=saas_mode,
         )
 
+        # V6.2: auto-fill progress_pct/status_text_zh from RunLifecycle
+        # 覆盖 RunContext 默认值 (0/"") → 实际阶段值
+        try:
+            from stable_agent.runtime.run_lifecycle import get_stage_meta
+            initial_stage = ctx.current_stage or "received"
+            meta = get_stage_meta(initial_stage)
+            if ctx.progress_pct == 0:
+                ctx.progress_pct = meta.progress_pct
+            if not ctx.status_text_zh:
+                ctx.status_text_zh = meta.status_text_zh
+            if not ctx.status_text_en:
+                ctx.status_text_en = meta.status_text_en
+        except Exception:
+            pass  # 注入失败不影响主流程
+
         # 2. 查找工具定义
         tool_def: dict[str, Any] | None = get_tool_by_name(tool_name)
         if tool_def is None:
