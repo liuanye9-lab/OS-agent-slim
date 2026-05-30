@@ -26,6 +26,7 @@ def register_pages(app, templates_dir: str) -> None:
     _review = os.path.join(templates_dir, "review.html")
     _login = os.path.join(templates_dir, "login.html")
     _connect = os.path.join(templates_dir, "connect.html")
+    _observer = os.path.join(templates_dir, "run_observer.html")
 
     @app.get("/")
     async def root():
@@ -66,3 +67,15 @@ def register_pages(app, templates_dir: str) -> None:
     async def login_page(): return _serve_html(_login)
     @app.get("/connect")
     async def connect_page(): return _serve_html(_connect)
+
+    @app.get("/observe/{run_id}")
+    async def observe_run(run_id: str):
+        if os.path.exists(_observer):
+            with open(_observer, "r", encoding="utf-8") as f:
+                html = f.read()
+            html = html.replace("<head>", f'<head>\n    <meta name="run-id" content="{run_id}">')
+            return HTMLResponse(content=html)
+        return HTMLResponse(content="<h1>Observer page not found</h1>", status_code=404)
+
+    @app.get("/observer")
+    async def observer_page(): return _serve_html(_observer)

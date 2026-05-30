@@ -1,4 +1,6 @@
 """progress_model — 后端统一进度模型。
+# @deprecated V6.0: 已被 runtime/run_lifecycle.py 的 RunStage (20阶段) 替代。
+#   本模块保留为兼容层，内部应转用 RunLifecycle。计划在 V7.0 移除。
 
 V6.5: 每个 OS Agent 任务有 11 个标准化阶段，每个阶段有固定百分比、
 语义场景、中英文状态文本。进度只能由后端生成，前端不可猜测。

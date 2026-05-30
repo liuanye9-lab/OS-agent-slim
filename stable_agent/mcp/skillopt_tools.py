@@ -1,5 +1,7 @@
 """V4 SkillOpt MCP 工具层。
 # frozen: V5.6 — 仅兼容保留，严禁新增能力
+# @deprecated V6.0: 所有 SkillOpt 工具已迁移到 gateway/unified_tool_registry.py
+#   的 _h_skillopt_* handler。本模块计划在 V7.0 移除。
 
 提供 10 个与 Skill 优化相关的 MCP 工具，供 MCP 客户端通过
 /mcp/tools/skillopt/ 端点调用。

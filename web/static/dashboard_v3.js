@@ -28,6 +28,8 @@
     if (runId) {
       currentRunId = runId;
       document.getElementById('run-id-display').textContent = 'run_id: ' + runId;
+      const obsLink = document.getElementById('observerLink');
+      if (obsLink) obsLink.href = '/observe/' + runId;
       loadHistory(runId).then(() => connectWs(runId));
     } else {
       document.getElementById('run-id-display').textContent = '等待 MCP 调用...';

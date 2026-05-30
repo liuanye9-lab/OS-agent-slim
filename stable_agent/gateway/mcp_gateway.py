@@ -106,6 +106,7 @@ class MCPGateway:
                     stage_name: str = sc.get("current_stage", "execution")
                     sc["trace_url"] = trace_url
                     sc["dashboard_url"] = trace_url
+                    sc["observer_url"] = f"/observe/{run_id}" if run_id else ""  # V6.0: 推荐入口
                     sc["current_stage"] = stage_name
 
                     # SaaS v1.3: 记录用量 & 审计

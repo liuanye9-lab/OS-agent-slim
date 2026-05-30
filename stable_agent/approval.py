@@ -1,4 +1,6 @@
 """StableAgent OS 审批管理器模块。
+# @deprecated V6.0: 审批逻辑已迁移到 stable_agent/approval/ 包。
+#   本文件保留向后兼容（approval/__init__.py 动态导入），计划在 V7.0 移除。
 
 管理审批请求的完整生命周期：创建、批准、拒绝和查询。
 支持两种运行模式：

@@ -1,4 +1,5 @@
 // progress_bar.js — 后端驱动的进度条组件
+// @deprecated V6.0: unused — 无任何 HTML 模板引用。计划在 V7.0 移除。
 window.ProgressBar = {
   _currentPct: 0,
   _currentLabel: '',

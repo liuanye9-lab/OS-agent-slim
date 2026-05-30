@@ -1,4 +1,5 @@
 """StableAgent OS Run 回放器模块。
+# @deprecated V6.0: unused — 全代码库无导入此模块。计划在 V7.0 移除。
 
 本模块提供 RunReplay 类，从 storage 加载历史 run 的 trace
 并按时间顺序回放，用于调试、审计和行为分析。

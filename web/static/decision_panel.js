@@ -1,4 +1,5 @@
 // decision_panel.js — 决策卡片实时更新
+// @deprecated V6.0: unused — 无任何 HTML 模板引用。计划在 V7.0 移除。
 window.DecisionPanel = {
   init() {
     const panel = document.getElementById('decision-panel');

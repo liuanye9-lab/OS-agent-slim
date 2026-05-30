@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Run Observer — StableAgent OS</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --glass-bg: rgba(255,255,255,0.72);
+    --glass-border: rgba(0,0,0,0.06);
+    --text: #1d1d1f;
+    --text-secondary: #86868b;
+    --accent: #0071e3;
+    --accent-light: #e8f0fe;
+    --card-radius: 16px;
+    --shadow: 0 4px 24px rgba(0,0,0,0.06);
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", "Helvetica Neue", sans-serif;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box }
+
+  body {
+    font-family: var(--font);
+    background: linear-gradient(135deg, #f5f5f7 0%, #e8e8ed 30%, #f0f0f5 60%, #f5f5f7 100%);
+    background-size: 400% 400%;
+    animation: bgFlow 20s ease infinite;
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  @keyframes bgFlow {
+    0%, 100% { background-position: 0% 50% }
+    50% { background-position: 100% 50% }
+  }
+
+  /* Top Bar */
+  .top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border-bottom: 1px solid var(--glass-border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .top-bar .task-name {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .top-bar .run-id {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-family: "SF Mono", "Fira Code", monospace;
+  }
+
+  .top-bar .progress-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .progress-pct {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    transition: color 0.3s;
+  }
+
+  .progress-bar-bg {
+    width: 160px;
+    height: 6px;
+    background: rgba(0,0,0,0.08);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .mcp-status {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: #e8f5e9;
+    color: #2e7d32;
+    font-weight: 500;
+  }
+
+  .mcp-status.disconnected {
+    background: #fbe9e7;
+    color: #bf360c;
+  }
+
+  /* Main Layout */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 280px 1fr 340px;
+    gap: 20px;
+    padding: 24px;
+    max-width: 1440px;
+    margin: 0 auto;
+  }
+
+  @media (max-width: 1100px) {
+    .main-grid {
+      grid-template-columns: 1fr;
+    }
+    .right-col { display: none }
+  }
+
+  /* Left: Avatar Scene */
+  .left-col {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .avatar-card {
+    background: var(--glass-bg);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--card-radius);
+    padding: 20px;
+    text-align: center;
+    box-shadow: var(--shadow);
+  }
+
+  .avatar-scene {
+    width: 200px;
+    height: 200px;
+    margin: 0 auto 12px;
+    border-radius: 50%;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 80px;
+    transition: transform 0.3s ease;
+  }
+
+  .avatar-scene.bounce { animation: avatarBounce 0.5s ease }
+
+  @keyframes avatarBounce {
+    0%, 100% { transform: scale(1) }
+    50% { transform: scale(1.05) }
+  }
+
+  .avatar-scene-scene { font-size: 64px; opacity: 0.6 }
+
+  .scene-label {
+    font-size: 14px;
+    font-weight: 600;
+    margin-top: 4px;
+  }
+
+  .scene-prop {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  /* Center: Status Card */
+  .center-col {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .status-card {
+    background: var(--glass-bg);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--card-radius);
+    padding: 28px;
+    box-shadow: var(--shadow);
+  }
+
+  .status-card .now-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  .status-card .now-status {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin-bottom: 12px;
+  }
+
+  .status-card .why-section,
+  .status-card .evidence-section,
+  .status-card .next-section {
+    margin-bottom: 14px;
+  }
+
+  .status-card .section-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 4px;
+  }
+
+  .status-card .section-text {
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text);
+  }
+
+  /* Right: Decision Timeline */
+  .right-col {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .timeline-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 4px;
+  }
+
+  .timeline-item {
+    background: var(--glass-bg);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-size: 13px;
+    position: relative;
+    opacity: 0;
+    transform: translateY(8px);
+    animation: slideIn 0.3s ease forwards;
+    margin-bottom: 1px;
+  }
+
+  @keyframes slideIn {
+    to { opacity: 1; transform: translateY(0) }
+  }
+
+  .timeline-item .tl-stage {
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+
+  .timeline-item .tl-what {
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 2px;
+  }
+
+  .timeline-item .tl-progress {
+    font-size: 10px;
+    color: var(--text-secondary);
+  }
+
+  /* Bottom: SelfImprovement Report */
+  .bottom-bar {
+    padding: 0 24px 24px;
+    max-width: 1440px;
+    margin: 0 auto;
+  }
+
+  .si-report {
+    background: var(--glass-bg);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--card-radius);
+    padding: 20px 24px;
+    box-shadow: var(--shadow);
+    display: none;
+  }
+
+  .si-report.visible { display: block }
+
+  .si-report h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+
+  .si-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    font-size: 13px;
+  }
+
+  @media (max-width: 700px) {
+    .si-grid { grid-template-columns: repeat(2, 1fr) }
+  }
+
+  .si-item {
+    background: var(--accent-light);
+    border-radius: 10px;
+    padding: 12px;
+    text-align: center;
+  }
+
+  .si-item .si-value {
+    font-size: 22px;
+    font-weight: 700;
+  }
+
+  .si-item .si-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+
+  .si-item.warn {
+    background: #fff3e0;
+  }
+  .si-item.ok {
+    background: #e8f5e9;
+  }
+
+  /* Log toggle */
+  .log-section {
+    margin-top: 16px;
+  }
+
+  .log-toggle {
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border: none;
+    background: none;
+    padding: 4px 0;
+  }
+
+  .log-panel {
+    display: none;
+    background: #fafafa;
+    border-radius: 10px;
+    padding: 12px;
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 11px;
+    white-space: pre-wrap;
+    margin-top: 8px;
+  }
+
+  .log-panel.open { display: block }
+
+  /* Empty state */
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-secondary);
+    font-size: 14px;
+  }
+
+  .empty-state .empty-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+    opacity: 0.5;
+  }
+</style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<header class="top-bar">
+  <div>
+    <div class="task-name" id="taskName">等待任务...</div>
+    <div class="run-id" id="runId">--</div>
+  </div>
+  <div class="progress-wrap">
+    <div class="progress-pct" id="progressPct">0%</div>
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill" id="progressBar" style="width:0%"></div>
+    </div>
+  </div>
+  <div class="mcp-status" id="mcpStatus">已连接</div>
+  <a href="#" id="v3Link" style="font-size:12px;color:var(--accent);text-decoration:none;margin-left:12px">详细视图 →</a>
+</header>
+
+<!-- Main Grid -->
+<div class="main-grid">
+
+  <!-- Left: Avatar Scene -->
+  <aside class="left-col">
+    <div class="avatar-card" id="avatarCard">
+      <div class="avatar-scene" id="avatarScene">👤</div>
+      <div class="scene-label" id="sceneLabel">等待任务</div>
+      <div class="scene-prop" id="sceneProp">--</div>
+    </div>
+  </aside>
+
+  <!-- Center: Status Card -->
+  <main class="center-col">
+    <div class="status-card" id="statusCard">
+      <div class="now-label">现在</div>
+      <div class="now-status" id="nowStatus">等待任务</div>
+
+      <div class="why-section">
+        <div class="section-label">为什么</div>
+        <div class="section-text" id="whyText">等待 Agent 任务触发。</div>
+      </div>
+
+      <div class="evidence-section">
+        <div class="section-label">依据</div>
+        <div class="section-text" id="evidenceText">--</div>
+      </div>
+
+      <div class="next-section">
+        <div class="section-label">下一步</div>
+        <div class="section-text" id="nextStepText">等待接收任务。</div>
+      </div>
+
+      <div class="next-section">
+        <div class="section-label">进度</div>
+        <div class="section-text" id="progressText">0%</div>
+      </div>
+    </div>
+
+    <!-- Log Section -->
+    <div class="log-section">
+      <button class="log-toggle" onclick="toggleLog()">📋 事件日志</button>
+      <div class="log-panel" id="logPanel"></div>
+    </div>
+  </main>
+
+  <!-- Right: Decision Timeline -->
+  <aside class="right-col" id="timelineCol">
+    <div class="timeline-title">决策时间线</div>
+    <div class="empty-state" id="timelineEmpty">
+      <div class="empty-icon">📡</div>
+      等待事件...
+    </div>
+  </aside>
+
+</div>
+
+<!-- Bottom: SelfImprovement Report -->
+<div class="bottom-bar">
+  <div class="si-report" id="siReport">
+    <h3>📊 Self-Improvement Report</h3>
+    <div class="si-grid">
+      <div class="si-item" id="siTriggered">
+        <div class="si-value">否</div>
+        <div class="si-label">触发学习</div>
+      </div>
+      <div class="si-item" id="siRegressions">
+        <div class="si-value">0</div>
+        <div class="si-label">回归用例</div>
+      </div>
+      <div class="si-item" id="siMemories">
+        <div class="si-value">0</div>
+        <div class="si-label">记忆候选</div>
+      </div>
+      <div class="si-item" id="siPatches">
+        <div class="si-value">0</div>
+        <div class="si-label">Skill Patches</div>
+      </div>
+      <div class="si-item" id="siValidation">
+        <div class="si-value">--</div>
+        <div class="si-label">验证状态</div>
+      </div>
+      <div class="si-item" id="siReview">
+        <div class="si-value">--</div>
+        <div class="si-label">审核状态</div>
+      </div>
+      <div class="si-item" id="siExport">
+        <div class="si-value">否</div>
+        <div class="si-label">导出 best_skill</div>
+      </div>
+      <div class="si-item" id="siSummary">
+        <div class="si-value" style="font-size:13px;font-weight:400">--</div>
+        <div class="si-label">摘要</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/run_observer.js"></script>
+</body>
+</html>

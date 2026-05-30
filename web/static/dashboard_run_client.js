@@ -1,5 +1,6 @@
 /**
  * Dashboard Run 客户端 — V5 per-run WebSocket 订阅
+ * @deprecated V6.0: unused — 无任何 HTML 模板引用。计划在 V7.0 移除。
  *
  * 从 URL 中提取 run_id（/runs/{run_id}），连接 /dashboard/ws/runs/{run_id}，
  * 实时更新 Timeline / 像素机器人 / 大白话 / token / eval / skill 面板。

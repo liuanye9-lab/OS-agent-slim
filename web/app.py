@@ -46,7 +46,7 @@ def create_app() -> FastAPI:
     from stable_agent.eval_and_bad_case import BadCaseManager, Evaluator
     from stable_agent.workflow_state_machine import WorkflowEngine
     from stable_agent.trace_event_bus import EventBus
-    from stable_agent.mcp_server import MCPServer
+    # V6.0: MCPServer import removed — /mcp/legacy deprecated
 
     event_bus = EventBus()
     decision_engine = ContextDecisionEngine()
@@ -72,14 +72,7 @@ def create_app() -> FastAPI:
     except Exception as e:
         logger.warning("Orchestrator 创建失败 (网关模式): %s", e)
 
-    mcp_tools = None
-    try:
-        from stable_agent.mcp_tools import MCPToolRegistry
-        mcp_tools = MCPToolRegistry(orchestrator)
-    except Exception:
-        pass
-
-    # ------------------------------------------------------------------
+    # V6.0: MCPToolRegistry (V3) 不再需要，V5 UnifiedToolRegistry 在 gateway 中使用    # ------------------------------------------------------------------
     # 2. FastAPI app
     # ------------------------------------------------------------------
     app = FastAPI(title="StableAgent Cloud", version="2.2.0",
@@ -106,13 +99,10 @@ def create_app() -> FastAPI:
     except Exception as e:
         logger.warning(f"V5 MCP Gateway mount skipped: {e}")
 
-    mcp_server = MCPServer(
-        decision_engine=decision_engine, budget_manager=budget_manager,
-        memory_router=memory_router, evaluator=evaluator,
-        bad_case_manager=bad_case_manager, workflow_engine=workflow_engine,
-        event_bus=event_bus, mcp_tools=mcp_tools,
-    )
-    app.mount("/mcp/legacy", mcp_server.app)
+    # V6.0: V3/V4 MCP Legacy 已断连
+    # mcp_server.py 和 mcp_tools.py 文件保留（mark deprecated），
+    # 但 /mcp/legacy 路由不再挂载。计划 V7.0 物理删除。
+    logger.info("V6.0: /mcp/legacy 路由已断连，V3/V4 MCP deprecated")
 
     # ------------------------------------------------------------------
     # 4. Static files + templates

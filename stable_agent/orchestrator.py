@@ -65,6 +65,11 @@ from stable_agent.approval import ApprovalManager
 from stable_agent.llm_client import MockLLMClient
 from stable_agent.eval_dataset import EvalDatasetManager
 
+# V6.0 Self-Improvement Proof Loop
+from stable_agent.self_improvement.proof_loop import SelfImprovementProofLoop
+from stable_agent.self_improvement.memory_update_candidate import MemoryUpdateStore
+from stable_agent.self_improvement.skill_patch_candidate import SkillPatchStore
+
 
 # ============================================================================
 # StableAgentOrchestrator — 系统编排器
@@ -162,6 +167,13 @@ class StableAgentOrchestrator:
         # MCP 工具注册中心（延迟绑定 orchestrator 自身）
         from stable_agent.mcp_tools import MCPToolRegistry
         self.mcp_tools: MCPToolRegistry = MCPToolRegistry(self)
+
+        # V6.0: Self-Improvement Proof Loop
+        self.proof_loop: SelfImprovementProofLoop = SelfImprovementProofLoop(
+            memory_store=MemoryUpdateStore(),
+            patch_store=SkillPatchStore(),
+            min_confidence=0.6,
+        )
 
         # 初始化持久化数据库
         self.storage.init_db()
@@ -302,20 +314,21 @@ class StableAgentOrchestrator:
     def process_task(self, task_input: str) -> dict:
         """处理用户任务，完成端到端的 V3 执行流程。
 
-        V3 升级为 17 步流程：
+        V6.0 升级：新增第 14.5 步 Self-Improvement Proof Loop。
+        V3 升级为 17+ 步流程：
         1. 多标签分类 → 2. 风险检测 → 3. 动态预算分配
         → 4. 检索策略判断 → 5. 分层记忆检索 → 6. RAG 检索 + 批判
         → 7. 上下文包构建 → 8. 审批判断 → 9. 发布构建事件
         → 10. 启动工作流 → 11. 合并上下文 → 12. 循环推进
-        → 13. 提取评估 → 14. bad case 记录 → 15. 持久化 run
-        → 16. 存储 context_pack → 17. 返回结构化结果
+        → 13. 提取评估 → 14. bad case 记录 → 14.5 Self-Improvement
+        → 15. 持久化 run → 16. 存储 context_pack → 17. 返回结果
 
         Args:
             task_input: 用户的自然语言任务描述。
 
         Returns:
             包含 task_type, workflow_state, evaluation, events_count,
-            context_pack, risk, run_id 的字典。
+            context_pack, risk, run_id, si_report 的字典。
 
         Examples:
             >>> orchestrator = StableAgentOrchestrator()
@@ -492,6 +505,42 @@ class StableAgentOrchestrator:
                 except Exception as e:
                     logger.warning("存储操作失败，继续执行: %s", e)
 
+        # 14.5 (V6.0) Self-Improvement Proof Loop
+        si_report = None
+        try:
+            eval_passed = evaluation is not None and evaluation.overall_score >= 0.6
+            failure_mode = ""
+            if evaluation is not None and evaluation.overall_score < 0.6:
+                # 推断失败模式
+                if evaluation.hallucination_score < 0.5:
+                    failure_mode = "hallucination"
+                elif evaluation.completion_rate < 0.5:
+                    failure_mode = "incomplete_output"
+                elif evaluation.token_efficiency < 0.3:
+                    failure_mode = "token_waste"
+                else:
+                    failure_mode = "low_quality"
+
+            si_report = self.proof_loop.evaluate_and_learn(
+                run_id=run_id if run_id else str(uuid.uuid4()),
+                eval_passed=eval_passed,
+                eval_score=evaluation.overall_score if evaluation else 0.0,
+                eval_reason=(
+                    f"overall_score={evaluation.overall_score:.2f}" if evaluation else "无评估"
+                ),
+                failure_mode=failure_mode,
+                observations=[{"text": workflow.context_pack.get("output", "")}],
+            )
+            logger.info(
+                "Self-improv: learning_triggered=%s, regressions=%d, memories=%d, patches=%d",
+                si_report.learning_triggered,
+                len(si_report.regression_cases),
+                len(si_report.memory_candidates),
+                len(si_report.skill_patches),
+            )
+        except Exception as e:
+            logger.warning("Self-Improvement ProofLoop 执行失败，继续: %s", e)
+
         # 15. 持久化 run 记录
         run_id = self._current_run_id or str(uuid.uuid4())
         run_record = RunRecord(
@@ -526,6 +575,7 @@ class StableAgentOrchestrator:
             "context_pack": context_pack,
             "risk": risk,
             "run_id": run_id,
+            "si_report": si_report.to_dict() if si_report else None,
         }
 
     # ------------------------------------------------------------------
