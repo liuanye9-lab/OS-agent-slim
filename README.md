@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/tests-1274_passed-brightgreen?style=for-the-badge" alt="1274 Tests">
+  <img src="https://img.shields.io/badge/tests-1289_passed-brightgreen?style=for-the-badge" alt="1289 Tests">
   <img src="https://img.shields.io/badge/closed_loop-30%2F30-22c55e?style=for-the-badge" alt="30/30 Closed Loop">
   <img src="https://img.shields.io/badge/E2E-6%2F6_REAL_LLM-ff6b35?style=for-the-badge" alt="Real LLM E2E">
   <img src="https://img.shields.io/badge/python-3.13-blue?style=for-the-badge" alt="Python 3.13">
@@ -323,7 +323,7 @@ uvicorn web.server:app --host 0.0.0.0 --port 8000
 
 | 测试 | 命令 | 结果 |
 |------|------|------|
-| **单元测试** | `pytest tests/ -q --ignore=tests/test_mcp_gateway.py` | **1274 passed**, 0 failures |
+| **单元测试** | `pytest tests/ -q --ignore=tests/test_mcp_gateway.py` | **1289 passed**, 0 failures |
 | **闭环结构检查** | `python tools/check_closed_loop.py` | **30/30 PASS** |
 | **集成测试** | `bash scripts/integration_test.sh` | 三条路径 fail-fast |
 | **真实 LLM E2E** | `bash scripts/real_llm_e2e_test.sh` | **6/6 PASS** (阿里云 qwen-plus) |
@@ -343,7 +343,7 @@ uvicorn web.server:app --host 0.0.0.0 --port 8000
 | JavaScript 代码 | ~271K 行 |
 | HTML 模板 | ~2.5K 行 |
 | Python 模块 | 245 文件 |
-| 测试用例 | 1274 个 |
+| 测试用例 | 1289 个 |
 | MCP 工具 | 55 个 |
 | 必需事件类型 | 13 (正常) + 4 (失败) |
 | V11 可选事件 | 6 (understanding + token + feedback) |
@@ -460,7 +460,7 @@ stable_agent/
 
 | 版本 | 日期 | 核心变更 |
 |------|------|---------|
-| **V11.1** | 2026-05-31 | Production Wiring: os_agent 接入 Understanding Trace + Token Budget, V11 API 路由 (10个), Dashboard 六大面板 + 反馈三按钮 |
+| **V11.1** | 2026-05-31 | Production Wiring: os_agent 接入 Understanding Trace + Token Budget, V11 API 路由 (10个), Dashboard 六大面板 + 反馈三按钮, 反馈持久化, 1289 tests |
 | **V11** | 2026-05-31 | Agent Capsule: 胶囊管理 + 记忆生命周期 + 语义理解 + Token 预算 + 模型画像 + 个人评测 + 反馈闭环 + CLI, 1274 tests, 55 MCP tools |
 | **V10** | 2026-05-31 | 100% 闭环: 禁止 emitted_events fallback, event_api_ok, dashboard_replay_ok, 真实 LLM E2E (阿里云), key 安全脱敏, 30/30 checks |
 | V9.2 | 2026-05-31 | 事件链硬化: _tool_router 注入, REQUIRED_NORMAL_EVENTS 13项, fail-fast, 404 未知 run |
