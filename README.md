@@ -372,7 +372,11 @@ python -m pip install -r requirements.txt
 ### 3. 启动服务
 
 ```bash
-PYTHONPATH=. uvicorn web.server:app --host 127.0.0.1 --port 8000
+# 推荐使用 CLI 启动
+PYTHONPATH=. python -m stable_agent.cli serve
+
+# 或直接使用 uvicorn
+# PYTHONPATH=. uvicorn web.server:app --host 127.0.0.1 --port 8000
 ```
 
 启动成功后访问：
@@ -388,6 +392,21 @@ http://127.0.0.1:8000/api/health
   "ok": true,
   "service": "StableAgent OS"
 }
+```
+
+### 4. 健康检查（V11.4）
+
+```bash
+PYTHONPATH=. python -m stable_agent.cli health --json
+```
+
+### 5. 执行任务（V11.4 CLI Mode）
+
+```bash
+PYTHONPATH=. python -m stable_agent.cli task run \
+  --task-input "你的任务描述" \
+  --open-dashboard \
+  --json
 ```
 
 ---
@@ -448,11 +467,76 @@ curl -s -X POST http://127.0.0.1:8000/mcp/ \
 
 ---
 
+## CLI Mode：稳定保底入口（V11.4）
+
+MCP 是推荐集成方式，但不同 Coding 软件对 MCP 的支持不稳定（Trae / Codex / Claude Code 可能因配置路径、streamableHttp、SSE、JSON-RPC 兼容问题导致工具列表无法加载）。
+
+**CLI Mode 是稳定保底入口**，所有 Coding 软件都可以通过 shell 命令调用 StableAgent。
+
+### 启动服务（推荐用 CLI）
+
+```bash
+PYTHONPATH=. python -m stable_agent.cli serve
+```
+
+### 健康检查
+
+```bash
+PYTHONPATH=. python -m stable_agent.cli health --json
+```
+
+### 执行任务
+
+```bash
+PYTHONPATH=. python -m stable_agent.cli task run \
+  --task-input "继续优化这个项目，不要AI味，不要大范围重构无关文件" \
+  --open-dashboard \
+  --json
+```
+
+### 反馈命令
+
+```bash
+# 记住这个
+PYTHONPATH=. python -m stable_agent.cli feedback remember \
+  --run-id run_xxx --note "以后记住这个约束" --json
+
+# 下次别这样
+PYTHONPATH=. python -m stable_agent.cli feedback dont \
+  --run-id run_xxx --note "下次不要大范围重构无关文件" --json
+
+# 纠正表达习惯
+PYTHONPATH=. python -m stable_agent.cli feedback correct \
+  --run-id run_xxx \
+  --phrase "不要AI味" \
+  --meaning "避免模板化表达，保持克制，减少空泛营销腔" \
+  --json
+```
+
+### 效果评估
+
+```bash
+PYTHONPATH=. python -m stable_agent.cli effectiveness summary --json
+```
+
+### MCP Mode vs CLI Mode
+
+| 特性 | MCP Mode | CLI Mode |
+|------|----------|----------|
+| 集成方式 | Claude Code / Codex / Trae 直接识别为工具 | 所有 Coding 软件通过 shell 命令调用 |
+| 稳定性 | 依赖 MCP 配置兼容性 | 稳定保底入口 |
+| 输出格式 | JSON-RPC 2.0 | `--json` 模式输出 JSON |
+| 推荐场景 | MCP 正常工作时 | MCP 识别失败时作为 fallback |
+| Dashboard | 自动展示 | 通过 Web 服务展示 |
+
+---
+
 ## 当前能力状态
 
 | 能力 | 状态 |
 |---|---|
 | MCP Gateway | 已支持 JSON-RPC / tools / health / SSE |
+| CLI Mode (V11.4) | 已支持 task run / serve / health / feedback / effectiveness / dashboard |
 | stableagent.task.os_agent | 已接入主流程 |
 | Understanding Trace | 已支持 |
 | Expression Profile | 已支持 |
@@ -461,7 +545,7 @@ curl -s -X POST http://127.0.0.1:8000/mcp/ \
 | Bad Case → Eval Case → Skill Patch | 已支持 |
 | Validation → Human Review | 已支持 |
 | Dashboard 六大面板 | 已支持 |
-| AGENTS.md / CLAUDE.md | 已支持 |
+| AGENTS.md / CLAUDE.md | 已支持（含 CLI fallback 规则） |
 | Effectiveness Dashboard | MVP 已支持，仍需真实 A/B 数据积累 |
 
 ---
@@ -508,7 +592,8 @@ flowchart TB
     V11 --> V112[V11.2<br/>Trustworthy Feedback Loop]
     V112 --> V113[V11.3<br/>Default Agent Rules + Effectiveness MVP]
     V113 --> V1131[V11.3.1<br/>Effectiveness Hardening]
-    V1131 --> V12[V12<br/>多工具稳定接入与真实数据评测]
+    V1131 --> V114[V11.4<br/>CLI Mode + MCP Fallback]
+    V114 --> V12[V12<br/>多工具稳定接入与真实数据评测]
 ```
 
 ### 下一步重点

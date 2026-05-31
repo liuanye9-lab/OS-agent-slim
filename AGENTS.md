@@ -24,6 +24,31 @@
 
 ## 调用方式
 
+## StableAgent Calling Priority
+
+1. **Prefer MCP**: call `stableagent.task.os_agent`
+
+2. **If MCP tool is not visible or unavailable**, use CLI fallback:
+
+```bash
+PYTHONPATH=. python -m stable_agent.cli task run \
+  --task-input "<user task>" \
+  --open-dashboard \
+  --json
+```
+
+After the CLI call, parse JSON and return:
+- `run_id`
+- `dashboard_url`
+- `observer_url`
+- `missing_required_events`
+- `understanding_trace`
+- `token_report`
+
+Do not start editing files before either MCP or CLI creates a StableAgent run.
+
+## 调用方式
+
 标准调用格式（必须包含 `task_input` 和 `open_dashboard`）：
 
 ```json

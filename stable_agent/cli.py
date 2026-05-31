@@ -1,23 +1,93 @@
 #!/usr/bin/env python3
-"""StableAgent V11 CLI — 胶囊管理命令行工具。
+"""StableAgent V11.4 CLI — 胶囊管理 + CLI Mode 命令行工具。
 
 Usage:
+    # Capsule 管理
     python -m stable_agent.cli capsule init
     python -m stable_agent.cli capsule status
     python -m stable_agent.cli capsule doctor
     python -m stable_agent.cli capsule export [output.zip]
     python -m stable_agent.cli capsule import <zip_path> [--target PATH]
+
+    # 记忆 & Token
     python -m stable_agent.cli memory health
     python -m stable_agent.cli token summary [--days 7]
+
+    # MCP 配置
     python -m stable_agent.cli mcp config
+
+    # V11.4: CLI Mode
+    python -m stable_agent.cli serve [--host 127.0.0.1] [--port 8000]
+    python -m stable_agent.cli health [--json]
+    python -m stable_agent.cli task run -t "任务内容" [--open-dashboard] [--json]
+    python -m stable_agent.cli feedback remember --run-id ID --note "..." [--json]
+    python -m stable_agent.cli feedback dont --run-id ID --note "..." [--json]
+    python -m stable_agent.cli feedback correct --run-id ID --phrase "..." --meaning "..." [--json]
+    python -m stable_agent.cli effectiveness summary [--json]
+    python -m stable_agent.cli effectiveness task create --task-id T01 --description "..." [--json]
+    python -m stable_agent.cli effectiveness run record --task-id T01 --mode stableagent [--json]
+    python -m stable_agent.cli dashboard open [--run-id ID] [--print-only]
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import socket
 import sys
+import webbrowser
 from pathlib import Path
+
+# Default server config
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8000
+
+
+def _base_url(args: argparse.Namespace) -> str:
+    host = getattr(args, "host", DEFAULT_HOST)
+    port = getattr(args, "port", DEFAULT_PORT)
+    return f"http://{host}:{port}"
+
+
+def _http_get(url: str, timeout: float = 5.0) -> dict:
+    """GET request returning JSON dict. Raises on failure."""
+    import urllib.request
+    req = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _http_post(url: str, body: dict, timeout: float = 30.0) -> dict:
+    """POST JSON request returning JSON dict. Raises on failure."""
+    import urllib.request
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _output(data: dict, args: argparse.Namespace) -> None:
+    """Output JSON or human-readable summary."""
+    if getattr(args, "json", False):
+        print(json.dumps(data, ensure_ascii=False))
+    else:
+        _print_summary(data)
+
+
+def _print_summary(data: dict) -> None:
+    ok = data.get("ok", False)
+    status = "OK" if ok else "FAIL"
+    print(f"[{status}]")
+    for key, value in data.items():
+        if key == "ok":
+            continue
+        if isinstance(value, (dict, list)):
+            print(f"  {key}: {json.dumps(value, ensure_ascii=False)}")
+        else:
+            print(f"  {key}: {value}")
 
 
 def cmd_capsule_init(args: argparse.Namespace) -> None:
@@ -103,10 +173,243 @@ def cmd_mcp_config(args: argparse.Namespace) -> None:
     print(json.dumps(config, indent=2))
 
 
+# ===================================================================
+# V11.4: CLI Mode Commands
+# ===================================================================
+
+
+def cmd_task_run(args: argparse.Namespace) -> None:
+    """执行 StableAgent 任务 (CLI Mode)。"""
+    task_input: str = args.task_input
+    open_dashboard: bool = args.open_dashboard
+    use_json: bool = args.json
+    base = _base_url(args)
+    mcp_url = f"{base}/mcp/"
+
+    rpc_body = {
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": {
+            "name": "stableagent.task.os_agent",
+            "arguments": {"task_input": task_input, "open_dashboard": open_dashboard},
+        },
+        "id": "cli-task-run",
+    }
+
+    try:
+        result = _http_post(mcp_url, rpc_body, timeout=60.0)
+    except Exception as exc:
+        error_data = {"ok": False, "error": f"StableAgent server 未启动或请求失败: {exc}",
+                       "hint": "请先运行: python -m stable_agent.cli serve"}
+        _output(error_data, args)
+        sys.exit(1)
+
+    rpc_result = result.get("result", {})
+    sc = rpc_result.get("structuredContent", {})
+    output = {
+        "ok": rpc_result.get("ok", not rpc_result.get("isError", False)),
+        "run_id": sc.get("run_id", ""),
+        "dashboard_url": f"{base}{sc.get('dashboard_url', '')}" if sc.get("dashboard_url") else "",
+        "observer_url": f"{base}{sc.get('observer_url', '')}" if sc.get("observer_url") else "",
+        "missing_required_events": sc.get("missing_required_events", []),
+        "understanding_trace": sc.get("understanding_trace"),
+        "token_report": sc.get("token_report"),
+        "expression_matches": sc.get("expression_matches"),
+    }
+    _output(output, args)
+
+    if open_dashboard and output.get("observer_url"):
+        try:
+            webbrowser.open(output["observer_url"])
+            if not use_json:
+                print(f"\n已在浏览器中打开: {output['observer_url']}")
+        except Exception:
+            if not use_json:
+                print(f"\n无法打开浏览器，请手动访问: {output['observer_url']}")
+    if not output["ok"]:
+        sys.exit(1)
+
+
+def cmd_serve(args: argparse.Namespace) -> None:
+    """启动 StableAgent Web 服务。"""
+    host: str = args.host
+    port: int = args.port
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind((host, port))
+        sock.close()
+    except OSError:
+        print(f"错误: 端口 {port} 已被占用。")
+        print(f"请先停止占用端口 {port} 的进程，或使用 --port 指定其他端口。")
+        sys.exit(1)
+
+    base = f"http://{host}:{port}"
+    print(f"启动 StableAgent 服务...")
+    print(f"  Health URL:        {base}/api/health")
+    print(f"  MCP URL:           {base}/mcp/")
+    print(f"  Dashboard URL:     {base}/")
+    print(f"  Effectiveness URL: {base}/effectiveness")
+    print()
+    try:
+        import uvicorn
+        uvicorn.run("web.server:app", host=host, port=port, log_level="info")
+    except ImportError:
+        print("错误: uvicorn 未安装。请运行: pip install uvicorn")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\n服务已停止。")
+    except Exception as exc:
+        print(f"服务启动失败: {exc}")
+        sys.exit(1)
+
+
+def cmd_health(args: argparse.Namespace) -> None:
+    """健康检查。"""
+    base = _base_url(args)
+    result: dict = {
+        "ok": True, "server": False, "mcp": False,
+        "tool_count": 0, "has_os_agent": False,
+        "health_url": f"{base}/api/health",
+        "mcp_url": f"{base}/mcp/health",
+        "tools_url": f"{base}/mcp/tools",
+    }
+    try:
+        health = _http_get(f"{base}/api/health", timeout=3.0)
+        result["server"] = health.get("ok", False)
+    except Exception:
+        result["ok"] = False
+        result["error"] = "StableAgent server not reachable"
+        _output(result, args)
+        sys.exit(1)
+    try:
+        mcp_health = _http_get(f"{base}/mcp/health", timeout=3.0)
+        result["mcp"] = mcp_health.get("ok", False)
+    except Exception:
+        result["mcp"] = False
+    try:
+        tools = _http_get(f"{base}/mcp/tools", timeout=3.0)
+        tool_list = tools.get("result", {}).get("tools", [])
+        result["tool_count"] = len(tool_list)
+        result["has_os_agent"] = any(t.get("name") == "stableagent.task.os_agent" for t in tool_list)
+    except Exception:
+        pass
+    result["ok"] = result["server"] and result["mcp"]
+    _output(result, args)
+    if not result["ok"]:
+        sys.exit(1)
+
+
+def cmd_feedback_remember(args: argparse.Namespace) -> None:
+    """记住这个。"""
+    base = _base_url(args)
+    try:
+        result = _http_post(f"{base}/api/feedback/remember",
+                            {"run_id": args.run_id, "note": args.note}, timeout=10.0)
+    except Exception as exc:
+        _output({"ok": False, "error": f"请求失败: {exc}", "hint": "请先运行: python -m stable_agent.cli serve"}, args)
+        sys.exit(1)
+    _output(result, args)
+
+
+def cmd_feedback_dont(args: argparse.Namespace) -> None:
+    """下次别这样。"""
+    base = _base_url(args)
+    try:
+        result = _http_post(f"{base}/api/feedback/dont-do-this-again",
+                            {"run_id": args.run_id, "note": args.note}, timeout=10.0)
+    except Exception as exc:
+        _output({"ok": False, "error": f"请求失败: {exc}", "hint": "请先运行: python -m stable_agent.cli serve"}, args)
+        sys.exit(1)
+    _output(result, args)
+
+
+def cmd_feedback_correct(args: argparse.Namespace) -> None:
+    """纠正并记住。"""
+    base = _base_url(args)
+    try:
+        result = _http_post(f"{base}/api/feedback/correct-and-remember", {
+            "run_id": args.run_id, "note": args.meaning,
+            "context": {"phrase": args.phrase, "corrected_meaning": args.meaning},
+        }, timeout=10.0)
+    except Exception as exc:
+        _output({"ok": False, "error": f"请求失败: {exc}", "hint": "请先运行: python -m stable_agent.cli serve"}, args)
+        sys.exit(1)
+    _output(result, args)
+
+
+def cmd_effectiveness_summary(args: argparse.Namespace) -> None:
+    base = _base_url(args)
+    try:
+        result = _http_get(f"{base}/api/effectiveness/summary", timeout=5.0)
+    except Exception as exc:
+        _output({"ok": False, "error": f"请求失败: {exc}"}, args)
+        sys.exit(1)
+    _output(result, args)
+
+
+def cmd_effectiveness_task_create(args: argparse.Namespace) -> None:
+    base = _base_url(args)
+    try:
+        result = _http_post(f"{base}/api/effectiveness/task", {
+            "title": args.task_id, "description": args.description,
+            "task_type": getattr(args, "category", "coding"),
+        }, timeout=10.0)
+    except Exception as exc:
+        _output({"ok": False, "error": f"请求失败: {exc}"}, args)
+        sys.exit(1)
+    _output(result, args)
+
+
+def cmd_effectiveness_run_record(args: argparse.Namespace) -> None:
+    base = _base_url(args)
+    body = {
+        "task_id": args.task_id, "mode": args.mode,
+        "model": getattr(args, "model", "other"),
+        "stableagent_run_id": getattr(args, "stableagent_run_id", ""),
+        "success": args.success,
+        "test_passed": getattr(args, "test_passed", True),
+        "intent_drift": getattr(args, "intent_drift", False),
+        "over_editing": getattr(args, "over_editing", False),
+        "constraint_preserved": getattr(args, "constraint_preserved", True),
+        "rework_count": getattr(args, "rework_count", 0),
+        "estimated_tokens": getattr(args, "estimated_tokens", 0),
+        "user_satisfaction": getattr(args, "user_satisfaction", 3),
+    }
+    try:
+        result = _http_post(f"{base}/api/effectiveness/run", body, timeout=10.0)
+    except Exception as exc:
+        _output({"ok": False, "error": f"请求失败: {exc}"}, args)
+        sys.exit(1)
+    _output(result, args)
+
+
+def cmd_dashboard_open(args: argparse.Namespace) -> None:
+    base = _base_url(args)
+    run_id: str = args.run_id or ""
+    url = f"{base}/observe/{run_id}?check=1" if run_id else f"{base}/"
+    if getattr(args, "print_only", False):
+        print(url)
+    else:
+        print(f"Dashboard URL: {url}")
+        try:
+            webbrowser.open(url)
+        except Exception:
+            print("无法打开浏览器，请手动访问上述 URL。")
+
+
+def _add_json_flag(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--json", action="store_true", default=False, help="JSON 输出模式")
+
+
+def _add_server_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--host", default=DEFAULT_HOST, help=f"服务器地址 (默认: {DEFAULT_HOST})")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"服务器端口 (默认: {DEFAULT_PORT})")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="stableagent",
-        description="StableAgent V11 — Agent Capsule 管理工具",
+        description="StableAgent V11.4 — Agent Capsule 管理 + CLI Mode 工具",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -158,6 +461,104 @@ def main() -> None:
 
     config_p = mcp_sub.add_parser("config", help="输出 MCP 配置")
     config_p.set_defaults(func=cmd_mcp_config)
+
+    # ---- V11.4: serve ----
+    serve_p = subparsers.add_parser("serve", help="启动 StableAgent Web 服务")
+    _add_server_flags(serve_p)
+    serve_p.set_defaults(func=cmd_serve)
+
+    # ---- V11.4: health ----
+    health_cli_p = subparsers.add_parser("health", help="健康检查 (server/MCP/tools)")
+    _add_server_flags(health_cli_p)
+    _add_json_flag(health_cli_p)
+    health_cli_p.set_defaults(func=cmd_health)
+
+    # ---- V11.4: task run ----
+    task_parser = subparsers.add_parser("task", help="任务管理")
+    task_sub = task_parser.add_subparsers(dest="action")
+
+    run_p = task_sub.add_parser("run", help="执行 StableAgent 任务")
+    run_p.add_argument("--task-input", "-t", required=True, help="任务内容")
+    run_p.add_argument("--open-dashboard", action="store_true", default=False, help="完成后打开 Dashboard")
+    _add_server_flags(run_p)
+    _add_json_flag(run_p)
+    run_p.set_defaults(func=cmd_task_run)
+
+    # ---- V11.4: feedback ----
+    fb_parser = subparsers.add_parser("feedback", help="反馈管理")
+    fb_sub = fb_parser.add_subparsers(dest="action")
+
+    fb_remember_p = fb_sub.add_parser("remember", help="记住这个")
+    fb_remember_p.add_argument("--run-id", required=True, help="Run ID")
+    fb_remember_p.add_argument("--note", required=True, help="用户备注")
+    _add_server_flags(fb_remember_p)
+    _add_json_flag(fb_remember_p)
+    fb_remember_p.set_defaults(func=cmd_feedback_remember)
+
+    fb_dont_p = fb_sub.add_parser("dont", help="下次别这样")
+    fb_dont_p.add_argument("--run-id", required=True, help="Run ID")
+    fb_dont_p.add_argument("--note", required=True, help="用户备注")
+    _add_server_flags(fb_dont_p)
+    _add_json_flag(fb_dont_p)
+    fb_dont_p.set_defaults(func=cmd_feedback_dont)
+
+    fb_correct_p = fb_sub.add_parser("correct", help="纠正并记住")
+    fb_correct_p.add_argument("--run-id", required=True, help="Run ID")
+    fb_correct_p.add_argument("--phrase", required=True, help="需要纠正的表达")
+    fb_correct_p.add_argument("--meaning", required=True, help="正确含义")
+    _add_server_flags(fb_correct_p)
+    _add_json_flag(fb_correct_p)
+    fb_correct_p.set_defaults(func=cmd_feedback_correct)
+
+    # ---- V11.4: effectiveness ----
+    eff_parser = subparsers.add_parser("effectiveness", help="效果评估")
+    eff_sub = eff_parser.add_subparsers(dest="action")
+
+    eff_summary_p = eff_sub.add_parser("summary", help="效果评估摘要")
+    _add_server_flags(eff_summary_p)
+    _add_json_flag(eff_summary_p)
+    eff_summary_p.set_defaults(func=cmd_effectiveness_summary)
+
+    eff_task_p = eff_sub.add_parser("task", help="评测任务管理")
+    eff_task_sub = eff_task_p.add_subparsers(dest="sub_action")
+
+    eff_task_create_p = eff_task_sub.add_parser("create", help="创建评测任务")
+    eff_task_create_p.add_argument("--task-id", required=True, help="任务 ID")
+    eff_task_create_p.add_argument("--description", required=True, help="任务描述")
+    eff_task_create_p.add_argument("--category", default="coding", help="任务类别")
+    _add_server_flags(eff_task_create_p)
+    _add_json_flag(eff_task_create_p)
+    eff_task_create_p.set_defaults(func=cmd_effectiveness_task_create)
+
+    eff_run_p = eff_sub.add_parser("run", help="评测运行管理")
+    eff_run_sub = eff_run_p.add_subparsers(dest="sub_action")
+
+    eff_run_record_p = eff_run_sub.add_parser("record", help="记录评测运行")
+    eff_run_record_p.add_argument("--task-id", required=True, help="任务 ID")
+    eff_run_record_p.add_argument("--mode", required=True, choices=["stableagent", "baseline"], help="运行模式")
+    eff_run_record_p.add_argument("--model", default="other", help="模型名称")
+    eff_run_record_p.add_argument("--stableagent-run-id", default="", help="StableAgent Run ID")
+    eff_run_record_p.add_argument("--success", type=lambda x: x.lower() == "true", default=True, help="是否成功")
+    eff_run_record_p.add_argument("--test-passed", type=lambda x: x.lower() == "true", default=True, help="测试是否通过")
+    eff_run_record_p.add_argument("--intent-drift", type=lambda x: x.lower() == "true", default=False, help="是否意图漂移")
+    eff_run_record_p.add_argument("--over-editing", type=lambda x: x.lower() == "true", default=False, help="是否过度编辑")
+    eff_run_record_p.add_argument("--constraint-preserved", type=lambda x: x.lower() == "true", default=True, help="约束是否保留")
+    eff_run_record_p.add_argument("--rework-count", type=int, default=0, help="返工次数")
+    eff_run_record_p.add_argument("--estimated-tokens", type=int, default=0, help="估算 token 数")
+    eff_run_record_p.add_argument("--user-satisfaction", type=int, default=3, help="用户满意度 1-5")
+    _add_server_flags(eff_run_record_p)
+    _add_json_flag(eff_run_record_p)
+    eff_run_record_p.set_defaults(func=cmd_effectiveness_run_record)
+
+    # ---- V11.4: dashboard ----
+    dash_parser = subparsers.add_parser("dashboard", help="Dashboard 管理")
+    dash_sub = dash_parser.add_subparsers(dest="action")
+
+    dash_open_p = dash_sub.add_parser("open", help="打开 Dashboard")
+    dash_open_p.add_argument("--run-id", default="", help="Run ID (可选)")
+    dash_open_p.add_argument("--print-only", action="store_true", default=False, help="只打印 URL")
+    _add_server_flags(dash_open_p)
+    dash_open_p.set_defaults(func=cmd_dashboard_open)
 
     args = parser.parse_args()
     if not args.command:
