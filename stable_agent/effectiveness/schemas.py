@@ -40,6 +40,15 @@ class EffectivenessRun:
     error_message: str = ""
     created_at: float = field(default_factory=time.time)
 
+    # V11.3 新增字段
+    model: str = ""  # LLM model used (e.g., "qwen-plus", "gpt-4")
+    stableagent_run_id: str = ""  # linked stable agent run ID for traceability
+    test_passed: bool = True  # whether automated tests passed after edits
+    over_editing: bool = False  # whether over-editing was detected
+    rework_count: int = 0  # number of rework iterations needed
+    user_satisfaction: float = 3.0  # 1-5 scale user satisfaction rating
+    constraint_preservation: float = 1.0  # 0-1 ratio of constraints preserved
+
     @property
     def edit_efficiency(self) -> float:
         """Edits per token used (higher = more efficient)."""
@@ -67,6 +76,14 @@ class EffectivenessRun:
             "duration_sec": round(self.duration_sec, 2),
             "error_message": self.error_message,
             "created_at": self.created_at,
+            # V11.3 new fields
+            "model": self.model,
+            "stableagent_run_id": self.stableagent_run_id,
+            "test_passed": self.test_passed,
+            "over_editing": self.over_editing,
+            "rework_count": self.rework_count,
+            "user_satisfaction": round(self.user_satisfaction, 2),
+            "constraint_preservation": round(self.constraint_preservation, 4),
         }
 
 
@@ -83,6 +100,7 @@ class EffectivenessSummary:
     delta_intent_drift: float = 0.0
     delta_edit_efficiency: float = 0.0
     delta_over_editing: float = 0.0
+    delta_constraint_preservation: float = 0.0
 
     verdict: str = "insufficient_data"  # insufficient_data / promising / effective / not_effective
 
@@ -96,6 +114,7 @@ class EffectivenessSummary:
         self.delta_intent_drift = s_avg.get("intent_drift", 0) - b_avg.get("intent_drift", 0)
         self.delta_edit_efficiency = s_avg.get("edit_efficiency", 0) - b_avg.get("edit_efficiency", 0)
         self.delta_over_editing = s_avg.get("over_editing", 0) - b_avg.get("over_editing", 0)
+        self.delta_constraint_preservation = s_avg.get("constraint_preservation", 0) - b_avg.get("constraint_preservation", 0)
 
         # Verdict logic
         b_count = len(self.baseline_runs)
@@ -111,10 +130,12 @@ class EffectivenessSummary:
             positive += 1
         if self.delta_edit_efficiency > 0.01:
             positive += 1
+        if self.delta_constraint_preservation > 0.05:  # higher constraint preservation is better
+            positive += 1
 
-        if positive >= 2:
+        if positive >= 3:
             self.verdict = "effective"
-        elif positive == 1:
+        elif positive >= 2:
             self.verdict = "promising"
         else:
             self.verdict = "not_effective"
@@ -123,7 +144,7 @@ class EffectivenessSummary:
     def _avg(runs: list) -> dict:
         if not runs:
             return {}
-        keys = ["success", "tokens_used", "intent_drift", "edit_efficiency", "over_editing"]
+        keys = ["success", "tokens_used", "intent_drift", "edit_efficiency", "over_editing", "constraint_preservation"]
         totals = {k: 0.0 for k in keys}
         for r in runs:
             if isinstance(r, EffectivenessRun):
@@ -132,6 +153,7 @@ class EffectivenessSummary:
                 totals["intent_drift"] += r.intent_drift
                 totals["edit_efficiency"] += r.edit_efficiency
                 totals["over_editing"] += r.over_editing_ratio
+                totals["constraint_preservation"] += r.constraint_preservation
             elif isinstance(r, dict):
                 totals["success"] += 1.0 if r.get("success") else 0.0
                 totals["tokens_used"] += r.get("tokens_used", 0)
@@ -140,6 +162,7 @@ class EffectivenessSummary:
                 totals["edit_efficiency"] += ee
                 fc = r.get("files_changed", 0)
                 totals["over_editing"] += fc / max(r.get("edits_made", 1), 1)
+                totals["constraint_preservation"] += r.get("constraint_preservation", 1.0)
         count = len(runs)
         return {k: v / count for k, v in totals.items()}
 
@@ -153,5 +176,6 @@ class EffectivenessSummary:
             "delta_intent_drift": round(self.delta_intent_drift, 4),
             "delta_edit_efficiency": round(self.delta_edit_efficiency, 6),
             "delta_over_editing": round(self.delta_over_editing, 4),
+            "delta_constraint_preservation": round(self.delta_constraint_preservation, 4),
             "verdict": self.verdict,
         }

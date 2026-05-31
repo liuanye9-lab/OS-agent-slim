@@ -6,6 +6,29 @@
 
 在执行**任何非平凡的编码任务**之前，**必须先调用** `stableagent.task.os_agent`。
 
+## 调用方式
+
+标准调用格式（必须包含 `task_input` 和 `open_dashboard`）：
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "stableagent.task.os_agent",
+    "arguments": {
+      "task_input": "任务描述",
+      "open_dashboard": true
+    }
+  }
+}
+```
+
+返回字段清单：
+- `result`: 建议方案或执行结果
+- `risk_assessment`: 风险评估（如有）
+- `requires_human_review`: 是否需要人工审批（bool）
+- `task_id`: 任务唯一标识（用于后续效果回传）
+
 ### 调用流程
 
 1. **任务理解**：理解用户请求

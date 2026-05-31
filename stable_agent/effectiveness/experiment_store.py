@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from .schemas import EffectivenessTask, EffectivenessRun, EffectivenessSummary
+from stable_agent.capsule import ensure_capsule
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,9 @@ class ExperimentStore:
 
     def __init__(self, data_dir: Optional[str] = None) -> None:
         if data_dir is None:
-            data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
+            # Default to .stableagent-capsule/effectiveness/
+            capsule_root = ensure_capsule()
+            data_dir = str(capsule_root / "effectiveness")
         self._data_dir = Path(data_dir).resolve()
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._tasks_file = self._data_dir / "effectiveness_tasks.jsonl"
@@ -85,6 +88,16 @@ class ExperimentStore:
                 s = self.get_summary(tid)
                 result.append(s)
         return result
+
+    # V11.3.1: Find task by run_id and return summary
+    def get_summary_by_run_id(self, run_id: str) -> Optional[dict]:
+        """Look up which task a run_id belongs to, then return its summary."""
+        for r in self._read_jsonl(self._runs_file):
+            if r.get("run_id") == run_id:
+                task_id = r.get("task_id")
+                if task_id:
+                    return self.get_summary(task_id)
+        return None
 
     # -- Internal --
 

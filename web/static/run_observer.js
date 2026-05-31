@@ -98,8 +98,13 @@ if (runId) {
   $runId.textContent = runId;
   const v3Link = document.getElementById("v3Link");
   if (v3Link) v3Link.href = `/runs/${runId}`;
+  // V11.3.1: 效果评估链接带上 run_id
+  const effLink = document.getElementById("effLink");
+  if (effLink) effLink.href = `/effectiveness?run_id=${encodeURIComponent(runId)}`;
   // V9.2: 先 API 回放历史事件，再 WebSocket 实时订阅
   loadHistoryAndConnect(runId);
+  // V11.3.1: 页面加载后检查是否有当前 run_id 的效果评估数据，显示快捷入口
+  checkEffectivenessForRun(runId);
 }
 
 // ========== API History Replay + WebSocket ==========
@@ -981,4 +986,71 @@ async function refreshV11Panels() {
 // Load V11 panels after history is loaded
 if (runId) {
   setTimeout(() => loadV11Panels(runId), 1500);
+}
+
+// ==================================================================
+// V11.3.1: Effectiveness Run Check — show badge if A/B data exists
+// ==================================================================
+
+/**
+ * Check if the current run_id has associated effectiveness A/B data.
+ * If so, show a small badge/card in the observer page linking to the comparison.
+ */
+async function checkEffectivenessForRun(runId) {
+  try {
+    const resp = await fetch(`/api/effectiveness/summary?run_id=${encodeURIComponent(runId)}`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (!data.ok || !data.data) return;
+
+    const summary = data.data;
+    // Only show if there's actual comparison data
+    if ((summary.baseline_count || 0) < 1 && (summary.stableagent_count || 0) < 1) return;
+
+    const verdictLabel = {
+      "effective": "✅ 已验证有效",
+      "promising": "🔶 有潜力",
+      "not_effective": "⚠️ 未见效",
+      "insufficient_data": "⏳ 数据不足",
+    }[summary.verdict] || "⏳ 评估中";
+
+    const verdictColor = {
+      "effective": "#2e7d32",
+      "promising": "#e65100",
+      "not_effective": "#bf360c",
+      "insufficient_data": "#86868b",
+    }[summary.verdict] || "#86868b";
+
+    const effBadge = document.createElement("div");
+    effBadge.id = "effectivenessBadge";
+    effBadge.style.cssText = `
+      margin-top:16px;
+      background:var(--glass-bg);
+      backdrop-filter:blur(24px);
+      border:1px solid var(--glass-border);
+      border-radius:12px;
+      padding:12px 16px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+    `;
+    effBadge.innerHTML = `
+      <div>
+        <div style="font-size:13px;font-weight:600;color:${verdictColor}">${verdictLabel}</div>
+        <div style="font-size:11px;color:var(--text-secondary)">
+          baseline: ${summary.baseline_count || 0} runs · stableagent: ${summary.stableagent_count || 0} runs
+        </div>
+      </div>
+      <a href="/effectiveness?run_id=${encodeURIComponent(runId)}" style="font-size:12px;color:var(--accent);text-decoration:none;white-space:nowrap">查看详情 →</a>
+    `;
+
+    // Insert after the status card
+    const statusCard = document.getElementById("statusCard");
+    if (statusCard && statusCard.parentNode) {
+      statusCard.parentNode.appendChild(effBadge);
+    }
+  } catch (e) {
+    // Silently ignore — effectiveness data may not exist yet
+  }
 }

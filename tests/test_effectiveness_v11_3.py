@@ -63,18 +63,22 @@ class TestEffectivenessSummary:
         baseline_runs = [
             EffectivenessRun(run_id="b1", task_id="t1", mode="baseline",
                             success=False, edits_made=5, tokens_used=2000,
-                            files_changed=3, intent_drift=0.5),
+                            files_changed=3, intent_drift=0.5,
+                            constraint_preservation=0.6),
             EffectivenessRun(run_id="b2", task_id="t1", mode="baseline",
                             success=False, edits_made=6, tokens_used=2200,
-                            files_changed=4, intent_drift=0.6),
+                            files_changed=4, intent_drift=0.6,
+                            constraint_preservation=0.5),
         ]
         stableagent_runs = [
             EffectivenessRun(run_id="s1", task_id="t1", mode="stableagent",
                             success=True, edits_made=8, tokens_used=1000,
-                            files_changed=2, intent_drift=0.1),
+                            files_changed=2, intent_drift=0.1,
+                            constraint_preservation=0.95),
             EffectivenessRun(run_id="s2", task_id="t1", mode="stableagent",
                             success=True, edits_made=9, tokens_used=1100,
-                            files_changed=2, intent_drift=0.2),
+                            files_changed=2, intent_drift=0.2,
+                            constraint_preservation=0.9),
         ]
         s = EffectivenessSummary(task_id="t1",
                                 baseline_runs=baseline_runs,

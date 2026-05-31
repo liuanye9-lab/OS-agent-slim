@@ -24,18 +24,26 @@
 
 ## 调用方式
 
+标准调用格式（必须包含 `task_input` 和 `open_dashboard`）：
+
 ```json
 {
   "method": "tools/call",
   "params": {
     "name": "stableagent.task.os_agent",
     "arguments": {
-      "task": "任务描述",
-      "context": "相关上下文信息"
+      "task_input": "任务描述",
+      "open_dashboard": true
     }
   }
 }
 ```
+
+返回字段清单：
+- `result`: 建议方案或执行结果
+- `risk_assessment`: 风险评估（如有）
+- `requires_human_review`: 是否需要人工审批（bool）
+- `task_id`: 任务唯一标识（用于后续效果回传）
 
 ## 返回处理
 

@@ -41,8 +41,20 @@
         <div class="summary-value success" id="effectiveTasks">0</div>
       </div>
       <div class="summary-card">
+        <div class="summary-label">有潜力</div>
+        <div class="summary-value warning" id="promisingTasks">0</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">未见效</div>
+        <div class="summary-value danger" id="notEffectiveTasks">0</div>
+      </div>
+      <div class="summary-card">
         <div class="summary-label">平均 Token 节省</div>
         <div class="summary-value" id="avgTokenSave">--</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">约束保持力平均差值</div>
+        <div class="summary-value" id="avgCpDelta">--</div>
       </div>
     </div>
   </section>
@@ -61,6 +73,7 @@
             <th>成功率差</th>
             <th>Token 差</th>
             <th>意图漂移差</th>
+            <th>约束保持力差</th>
             <th>结论</th>
             <th>操作</th>
           </tr>
@@ -159,6 +172,50 @@
           <label>错误信息 (可选)</label>
           <input type="text" id="runErrorInput" placeholder="失败时的错误描述...">
         </div>
+        <!-- V11.3 new fields -->
+        <details class="form-details">
+          <summary>高级字段 (V11.3)</summary>
+          <div class="form-row">
+            <div class="form-group">
+              <label>模型名称</label>
+              <input type="text" id="runModelInput" placeholder="例如: qwen-plus">
+            </div>
+            <div class="form-group">
+              <label>关联 StableAgent 运行 ID</label>
+              <input type="text" id="runSaRunIdInput" placeholder="例如: sa-001">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>测试通过</label>
+              <select id="runTestPassedSelect">
+                <option value="true">是</option>
+                <option value="false">否</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>过度编辑</label>
+              <select id="runOverEditingSelect">
+                <option value="false">否</option>
+                <option value="true">是</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>返工次数</label>
+              <input type="number" id="runReworkCountInput" value="0" min="0">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>用户满意度 (1-5)</label>
+              <input type="number" id="runSatisfactionInput" value="3.0" min="1" max="5" step="0.5">
+            </div>
+            <div class="form-group">
+              <label>约束保持力 (0-1)</label>
+              <input type="number" id="runCpInput" value="1.0" min="0" max="1" step="0.05">
+            </div>
+          </div>
+        </details>
         <div class="form-actions">
           <button type="button" onclick="closeRunModal()" class="btn btn-secondary">取消</button>
           <button type="submit" class="btn btn-primary">记录</button>

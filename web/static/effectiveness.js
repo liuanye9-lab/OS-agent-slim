@@ -1,4 +1,4 @@
-/* Effectiveness Dashboard JavaScript */
+/* Effectiveness Dashboard JavaScript — V11.3 Updated */
 
 const API = '/api/effectiveness';
 
@@ -16,11 +16,16 @@ async function apiFetch(path, options = {}) {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   });
+  const body = await res.json();
+
+  // New {ok, data/error} contract
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new Error(err.detail || res.statusText);
+    throw new Error(body.error || body.detail || res.statusText);
   }
-  return res.json();
+  if (body.ok === false) {
+    throw new Error(body.error || 'Request failed');
+  }
+  return body.data !== undefined ? body.data : body;
 }
 
 // -- Summary Loading --
@@ -28,17 +33,22 @@ async function apiFetch(path, options = {}) {
 async function loadSummaries() {
   try {
     const data = await apiFetch('/summary');
-    renderSummaryCards(data.summaries);
-    renderComparisonTable(data.summaries);
+    const summaries = data.summaries || [];
+    renderSummaryCards(summaries);
+    renderComparisonTable(summaries);
   } catch (err) {
     console.error('Failed to load summaries:', err);
+    document.getElementById('summaryGrid').innerHTML =
+      '<div class="summary-card empty"><div class="summary-label">加载失败</div><div class="summary-value error">请刷新重试</div></div>';
   }
 }
 
 async function loadTasks() {
   try {
     const data = await apiFetch('/tasks');
-    populateTaskSelect(data.tasks);
+    const tasks = data.tasks || [];
+    _cachedTasks = tasks;
+    populateTaskSelect(tasks);
   } catch (err) {
     console.error('Failed to load tasks:', err);
   }
@@ -50,31 +60,46 @@ function renderSummaryCards(summaries) {
   const totalTasks = summaries.length;
   let totalRuns = 0;
   let effectiveCount = 0;
+  let promisingCount = 0;
+  let notEffectiveCount = 0;
   let totalTokenDelta = 0;
   let tokenDeltaCount = 0;
+  let totalCpDelta = 0;
+  let cpDeltaCount = 0;
 
   summaries.forEach(s => {
     totalRuns += (s.baseline_count || 0) + (s.stableagent_count || 0);
     if (s.verdict === 'effective') effectiveCount++;
+    else if (s.verdict === 'promising') promisingCount++;
+    else if (s.verdict === 'not_effective') notEffectiveCount++;
     if (s.delta_tokens !== 0) {
       totalTokenDelta += s.delta_tokens;
       tokenDeltaCount++;
+    }
+    if (s.delta_constraint_preservation !== undefined) {
+      totalCpDelta += s.delta_constraint_preservation;
+      cpDeltaCount++;
     }
   });
 
   document.getElementById('totalTasks').textContent = totalTasks;
   document.getElementById('totalRuns').textContent = totalRuns;
   document.getElementById('effectiveTasks').textContent = effectiveCount;
+  document.getElementById('promisingTasks').textContent = promisingCount;
+  document.getElementById('notEffectiveTasks').textContent = notEffectiveCount;
 
   const avgSave = tokenDeltaCount > 0 ? (totalTokenDelta / tokenDeltaCount).toFixed(0) : '--';
   document.getElementById('avgTokenSave').textContent = avgSave === '--' ? '--' : `${avgSave} tokens`;
+
+  const avgCpDelta = cpDeltaCount > 0 ? (totalCpDelta / cpDeltaCount).toFixed(4) : '--';
+  document.getElementById('avgCpDelta').textContent = avgCpDelta === '--' ? '--' : avgCpDelta;
 }
 
 function renderComparisonTable(summaries) {
   const tbody = document.getElementById('comparisonBody');
 
   if (!summaries || summaries.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" class="empty-row">暂无数据，请创建任务并记录运行</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" class="empty-row">暂无数据，请创建任务并记录运行</td></tr>';
     return;
   }
 
@@ -91,6 +116,7 @@ function renderComparisonTable(summaries) {
         <td class="${deltaClass(s.delta_success, true)}">${formatDelta(s.delta_success, true)}</td>
         <td class="${deltaClass(s.delta_tokens, false)}">${formatDelta(s.delta_tokens, false)}</td>
         <td class="${deltaClass(s.delta_intent_drift, false)}">${formatDelta(s.delta_intent_drift, true)}</td>
+        <td class="${deltaClass(s.delta_constraint_preservation, true)}">${formatDelta(s.delta_constraint_preservation, true)}</td>
         <td><span class="verdict verdict-${s.verdict}">${verdictLabel(s.verdict)}</span></td>
         <td><button onclick="viewTask('${s.task_id}')" class="btn btn-link">详情</button></td>
       </tr>
@@ -107,21 +133,24 @@ function getTaskById(taskId) {
 }
 
 function populateTaskSelect(tasks) {
-  _cachedTasks = tasks;
   const select = document.getElementById('runTaskIdSelect');
+  if (!tasks.length) {
+    select.innerHTML = '<option value="">-- 请先创建任务 --</option>';
+    return;
+  }
   select.innerHTML = tasks.map(t =>
     `<option value="${t.task_id}">${t.task_id} — ${t.description}</option>`
   ).join('');
 }
 
 function deltaClass(value, higherIsBetter) {
-  if (Math.abs(value) < 0.001) return 'delta-neutral';
+  if (value === undefined || Math.abs(value) < 0.001) return 'delta-neutral';
   const positive = higherIsBetter ? value > 0 : value < 0;
   return positive ? 'delta-positive' : 'delta-negative';
 }
 
 function formatDelta(value, higherIsBetter) {
-  if (Math.abs(value) < 0.001) return '≈ 持平';
+  if (value === undefined || Math.abs(value) < 0.001) return '≈ 持平';
   const arrow = higherIsBetter ? (value > 0 ? '↑' : '↓') : (value < 0 ? '↓' : '↑');
   return `${arrow} ${Math.abs(value).toFixed(2)}`;
 }
@@ -215,6 +244,14 @@ async function submitRun(e) {
     intent_drift: parseFloat(document.getElementById('runDriftInput').value),
     duration_sec: parseFloat(document.getElementById('runDurationInput').value),
     error_message: document.getElementById('runErrorInput').value.trim(),
+    // V11.3 new fields
+    model: document.getElementById('runModelInput').value.trim(),
+    stableagent_run_id: document.getElementById('runSaRunIdInput').value.trim(),
+    test_passed: document.getElementById('runTestPassedSelect').value === 'true',
+    over_editing: document.getElementById('runOverEditingSelect').value === 'true',
+    rework_count: parseInt(document.getElementById('runReworkCountInput').value, 10),
+    user_satisfaction: parseFloat(document.getElementById('runSatisfactionInput').value),
+    constraint_preservation: parseFloat(document.getElementById('runCpInput').value),
   };
 
   if (!body.task_id) {
@@ -236,7 +273,6 @@ async function submitRun(e) {
 }
 
 function viewTask(taskId) {
-  // For now, just show a toast. Could navigate to a detail page.
   showToast(`查看任务详情: ${taskId}`);
   // Future: window.location.href = `/effectiveness/task/${taskId}`;
 }
