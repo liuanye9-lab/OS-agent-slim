@@ -92,11 +92,22 @@ class MCPGateway:
     # ------------------------------------------------------------------
 
     def create_fastapi_app(self) -> FastAPI:
-        """创建包含 /mcp 端点的 FastAPI app。"""
+        """创建包含 /mcp 端点的 FastAPI app。
+
+        支持多种传输方式，兼容 Trae / Claude Code / Codex：
+        - POST / 和 POST /mcp: JSON-RPC 2.0 端点（initialize/tools/list/tools/call）
+        - GET / 和 GET /mcp（无 run_id）: 友好说明 JSON
+        - GET /?run_id=xxx: SSE 事件流端点
+        - GET /tools: 直接返回工具列表（人类调试 / 非标准客户端）
+        - GET /health: 健康检查
+        """
         app: FastAPI = FastAPI(title="StableAgent Cloud — MCP Gateway")
 
-        @app.post("/")
-        async def mcp_post(req: Request):
+        # ------------------------------------------------------------------
+        # JSON-RPC 2.0 POST 端点 — 同时注册 / 和 ""，避免 307 redirect
+        # ------------------------------------------------------------------
+        async def _handle_jsonrpc_post(req: Request) -> JSONResponse:
+            """处理 JSON-RPC 2.0 POST 请求。"""
             body: dict[str, Any] = await req.json()
             result: dict[str, Any] = self.jsonrpc.handle(body)
 
@@ -109,47 +120,116 @@ class MCPGateway:
                     stage_name: str = sc.get("current_stage", "execution")
                     sc["trace_url"] = trace_url
                     sc["dashboard_url"] = trace_url
-                    sc["observer_url"] = f"/observe/{run_id}" if run_id else ""  # V6.0: 推荐入口
+                    sc["observer_url"] = f"/observe/{run_id}" if run_id else ""
                     sc["current_stage"] = stage_name
 
                     # SaaS v1.3: 记录用量 & 审计
                     _record_saas_usage_and_audit(body, result)
 
-            # V6.5: 递归序列化所有 dataclass → dict，防止 JSON 序列化错误
+            # V6.5: 递归序列化所有 dataclass → dict
             result = self._serialize_dataclasses(result)
             return JSONResponse(content=result)
 
+        @app.post("/")
+        async def mcp_post(req: Request):
+            return await _handle_jsonrpc_post(req)
+
+        # ------------------------------------------------------------------
+        # GET 端点 — 区分 SSE 和友好说明
+        # ------------------------------------------------------------------
         @app.get("/")
         async def mcp_get(req: Request):
             run_id: str = req.query_params.get("run_id", "")
-            if not run_id:
-                return JSONResponse(
-                    content={"error": "run_id required for SSE"},
-                    status_code=400,
-                )
+            if run_id:
+                # 有 run_id → 返回 SSE 事件流
+                return self._sse_response(run_id)
+            # 无 run_id → 返回友好说明 JSON
+            return JSONResponse(content=self._get_info_json())
 
-            async def event_generator():
-                """SSE 事件生成器。
+        # ------------------------------------------------------------------
+        # /tools — 直接返回工具列表（人类调试 / 非标准客户端）
+        # ------------------------------------------------------------------
+        @app.get("/tools")
+        async def mcp_tools_list():
+            """直接返回工具列表，复用 JSONRPCHandler 的 tools/list。"""
+            result: dict[str, Any] = self.jsonrpc.handle({
+                "jsonrpc": "2.0",
+                "method": "tools/list",
+                "params": {},
+                "id": "tools-list",
+            })
+            tools = result.get("result", {}).get("tools", [])
+            return JSONResponse(content={
+                "ok": True,
+                "tools": tools,
+                "tool_count": len(tools),
+            })
 
-                订阅指定 run_id 的事件流，持续产出 SSE 格式事件。
-                客户端断开连接时自动取消订阅。
-                """
-                queue = await self.event_stream.subscribe(run_id)
-                try:
-                    while True:
-                        event: dict[str, Any] = await queue.get()
-                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                except asyncio.CancelledError:
-                    pass
-                finally:
-                    self.event_stream.unsubscribe(run_id, queue)
-
-            return StreamingResponse(
-                event_generator(),
-                media_type="text/event-stream",
-            )
+        # ------------------------------------------------------------------
+        # /health — 健康检查
+        # ------------------------------------------------------------------
+        @app.get("/health")
+        async def mcp_health():
+            """MCP Gateway 健康检查。"""
+            tool_list_result = self.jsonrpc.handle({
+                "jsonrpc": "2.0",
+                "method": "tools/list",
+                "params": {},
+                "id": "health-check",
+            })
+            tools = tool_list_result.get("result", {}).get("tools", [])
+            return JSONResponse(content={
+                "ok": True,
+                "service": "StableAgent MCP Gateway",
+                "post_jsonrpc": True,
+                "sse": True,
+                "tool_count": len(tools),
+            })
 
         return app
+
+    def _sse_response(self, run_id: str) -> StreamingResponse:
+        """构建 SSE 事件流响应。"""
+        async def event_generator():
+            """SSE 事件生成器。
+
+            订阅指定 run_id 的事件流，持续产出 SSE 格式事件。
+            客户端断开连接时自动取消订阅。
+            """
+            queue = await self.event_stream.subscribe(run_id)
+            try:
+                while True:
+                    event: dict[str, Any] = await queue.get()
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            except asyncio.CancelledError:
+                pass
+            finally:
+                self.event_stream.unsubscribe(run_id, queue)
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+        )
+
+    def _get_info_json(self) -> dict[str, Any]:
+        """返回 GET /mcp/ 无 run_id 时的友好说明。"""
+        return {
+            "ok": True,
+            "service": "StableAgent MCP Gateway",
+            "transport": {
+                "jsonrpc": "POST /mcp/",
+                "sse": "GET /mcp/?run_id=<run_id>",
+            },
+            "tools_endpoint_hint": {
+                "method": "POST",
+                "body": {
+                    "jsonrpc": "2.0",
+                    "method": "tools/list",
+                    "params": {},
+                    "id": 1,
+                },
+            },
+        }
 
     @staticmethod
     def _serialize_dataclasses(obj: Any) -> Any:
