@@ -16,6 +16,7 @@ import dataclasses
 import logging
 import time
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
 from stable_agent.gateway.run_context import RunContext
@@ -112,6 +113,12 @@ class UnifiedToolRegistry:
         self._register("stableagent.trace.get_run", self._h_trace_get_run)
         self._register("stableagent.approval.respond", self._h_approval_respond)
         self._register("stableagent.task.os_agent", self._h_task_os_agent)  # V6.5: /os-agent
+        # V11 Phase 3: Understanding Trace 语义理解工具
+        self._register("stableagent.understanding.trace", self._h_understanding_trace)
+        self._register("stableagent.understanding.correct", self._h_understanding_correct)
+        self._register("stableagent.expression.list", self._h_expression_list)
+        self._register("stableagent.expression.add", self._h_expression_add)
+        self._register("stableagent.expression.delete", self._h_expression_delete)
         # SaaS v1.2: 12 个商业 SaaS 工具
         self._register("stableagent.workspace.create", self._h_saas_workspace_create)
         self._register("stableagent.project.create", self._h_saas_project_create)
@@ -126,6 +133,33 @@ class UnifiedToolRegistry:
         self._register("stableagent.usage.get", self._h_saas_usage_get)
         self._register("stableagent.apikey.create", self._h_saas_apikey_create)
         self._register("stableagent.apikey.revoke", self._h_saas_apikey_revoke)
+        # V11: Agent Capsule + Memory Lifecycle
+        self._register("stableagent.capsule.status", self._h_capsule_status)
+        self._register("stableagent.capsule.doctor", self._h_capsule_doctor)
+        self._register("stableagent.memory.health", self._h_memory_health)
+        self._register("stableagent.memory.review", self._h_memory_review)
+        self._register("stableagent.memory.prune", self._h_memory_prune)
+        self._register("stableagent.memory.promote", self._h_memory_promote)
+        self._register("stableagent.memory.delete", self._h_memory_delete)
+        # V11 Phase 5: Model Profile
+        self._register("stableagent.model.profile", self._h_model_profile)
+        self._register("stableagent.model.list", self._h_model_list)
+        self._register("stableagent.model.suggest", self._h_model_suggest)
+        self._register("stableagent.model.update", self._h_model_update)
+        # V11 Phase 6: Personal Eval / A-B Regression
+        self._register("stableagent.eval.case.create", self._h_eval_case_create)
+        self._register("stableagent.eval.case.list", self._h_eval_case_list)
+        self._register("stableagent.eval.run_ab", self._h_eval_run_ab)
+        self._register("stableagent.eval.rubric.get", self._h_eval_rubric_get)
+        self._register("stableagent.eval.rubric.update", self._h_eval_rubric_update)
+        # V11 Phase 7: Feedback Loop
+        self._register("stableagent.feedback.remember", self._h_feedback_remember)
+        self._register("stableagent.feedback.dont_do_this_again", self._h_feedback_dont_do_this_again)
+        self._register("stableagent.feedback.correct_and_remember", self._h_feedback_correct_and_remember)
+        # V11 Phase 4: Token Budget Ledger
+        self._register("stableagent.token.report", self._h_token_report)
+        self._register("stableagent.token.run", self._h_token_run)
+        self._register("stableagent.token.summary", self._h_token_summary)
 
     # ------------------------------------------------------------------
     # 辅助方法
@@ -1374,6 +1408,471 @@ class UnifiedToolRegistry:
             )
 
     # ===================================================================
+    # V11: Agent Capsule + Memory Lifecycle handlers
+    # ===================================================================
+
+    def _h_capsule_status(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.capsule.status — 获取胶囊状态。"""
+        tool_name = "stableagent.capsule.status"
+        try:
+            from stable_agent.capsule.capsule_manager import CapsuleManager, get_default_capsule_path
+            capsule_path = args.get("capsule_path") or str(get_default_capsule_path())
+            status = CapsuleManager.get_capsule_status(capsule_path)
+            return self._make_result(
+                ctx, tool_name, ok=True, data=status,
+                plain_text=status.get("message_zh", "胶囊状态查询完成"),
+                plain_text_zh=status.get("message_zh", ""),
+            )
+        except Exception as exc:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"胶囊状态查询失败: {exc}")
+
+    def _h_capsule_doctor(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.capsule.doctor — 胶囊健康检查。"""
+        tool_name = "stableagent.capsule.doctor"
+        try:
+            from stable_agent.capsule.capsule_doctor import CapsuleDoctor
+            from stable_agent.capsule.capsule_manager import get_default_capsule_path
+            capsule_path = args.get("capsule_path") or str(get_default_capsule_path())
+            report = CapsuleDoctor.check(capsule_path)
+            return self._make_result(
+                ctx, tool_name, ok=report.ok, data=report.to_dict(),
+                plain_text=f"健康分数: {report.health_score:.2f}, 错误: {len(report.errors)}, 警告: {len(report.warnings)}",
+                plain_text_zh=f"胶囊体检完成: 健康分数 {report.health_score:.2f}",
+            )
+        except Exception as exc:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"胶囊体检失败: {exc}")
+
+    def _h_memory_health(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.memory.health — 记忆健康报告。"""
+        tool_name = "stableagent.memory.health"
+        try:
+            from stable_agent.capsule.memory_lifecycle import MemoryLifecycleManager
+            from stable_agent.capsule.capsule_manager import get_default_capsule_path
+            capsule_path = Path(args.get("capsule_path") or str(get_default_capsule_path()))
+            mgr = MemoryLifecycleManager(capsule_path=capsule_path)
+            report = mgr.generate_memory_health_report()
+            return self._make_result(
+                ctx, tool_name, ok=True, data=report,
+                plain_text=report.get("summary_zh", "记忆健康报告生成完成"),
+                plain_text_zh=report.get("summary_zh", ""),
+            )
+        except Exception as exc:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"记忆健康报告失败: {exc}")
+
+    def _h_memory_review(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.memory.review — 记忆审核建议。"""
+        tool_name = "stableagent.memory.review"
+        try:
+            from stable_agent.capsule.memory_lifecycle import MemoryLifecycleManager
+            from stable_agent.capsule.capsule_manager import get_default_capsule_path
+            capsule_path = Path(args.get("capsule_path") or str(get_default_capsule_path()))
+            mgr = MemoryLifecycleManager(capsule_path=capsule_path)
+            review_list = mgr.suggest_review()
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data={"items": review_list, "count": len(review_list)},
+                plain_text=f"有 {len(review_list)} 条记忆需要审核",
+                plain_text_zh=f"有 {len(review_list)} 条高价值记忆需要您确认",
+            )
+        except Exception as exc:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"记忆审核建议失败: {exc}")
+
+    def _h_memory_prune(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.memory.prune — 修剪低价值记忆。"""
+        tool_name = "stableagent.memory.prune"
+        try:
+            from stable_agent.capsule.memory_lifecycle import MemoryLifecycleManager
+            from stable_agent.capsule.capsule_manager import get_default_capsule_path
+            capsule_path = Path(args.get("capsule_path") or str(get_default_capsule_path()))
+            memory_ids = args.get("memory_ids", [])
+            if not memory_ids:
+                return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                         plain_text="memory_ids 不能为空")
+            mgr = MemoryLifecycleManager(capsule_path=capsule_path)
+            deleted = 0
+            for mid in memory_ids:
+                if mgr.delete_memory(mid):
+                    deleted += 1
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data={"deleted_count": deleted, "requested_count": len(memory_ids)},
+                plain_text=f"已删除 {deleted}/{len(memory_ids)} 条记忆",
+                plain_text_zh=f"已修剪 {deleted} 条低价值记忆",
+            )
+        except Exception as exc:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"记忆修剪失败: {exc}")
+
+    def _h_memory_promote(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.memory.promote — 晋升记忆为 semantic_memory。"""
+        tool_name = "stableagent.memory.promote"
+        try:
+            from stable_agent.capsule.memory_lifecycle import MemoryLifecycleManager
+            from stable_agent.capsule.capsule_manager import get_default_capsule_path
+            capsule_path = Path(args.get("capsule_path") or str(get_default_capsule_path()))
+            memory_id = args.get("memory_id", "")
+            if not memory_id:
+                return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                         plain_text="memory_id 不能为空")
+            mgr = MemoryLifecycleManager(capsule_path=capsule_path)
+            result = mgr.promote_to_semantic(memory_id, reviewer="user")
+            if result is None:
+                return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                         plain_text=f"记忆 {memory_id} 不存在")
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data={"memory_id": memory_id, "new_type": result.get("memory_type")},
+                plain_text=f"记忆 {memory_id} 已晋升为 semantic_memory",
+                plain_text_zh=f"记忆已晋升为长期保存",
+            )
+        except Exception as exc:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"记忆晋升失败: {exc}")
+
+    def _h_memory_delete(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.memory.delete — 删除记忆。"""
+        tool_name = "stableagent.memory.delete"
+        try:
+            from stable_agent.capsule.memory_lifecycle import MemoryLifecycleManager
+            from stable_agent.capsule.capsule_manager import get_default_capsule_path
+            capsule_path = Path(args.get("capsule_path") or str(get_default_capsule_path()))
+            memory_id = args.get("memory_id", "")
+            if not memory_id:
+                return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                         plain_text="memory_id 不能为空")
+            mgr = MemoryLifecycleManager(capsule_path=capsule_path)
+            deleted = mgr.delete_memory(memory_id)
+            if not deleted:
+                return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                         plain_text=f"记忆 {memory_id} 不存在")
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data={"memory_id": memory_id, "deleted": True},
+                plain_text=f"记忆 {memory_id} 已删除",
+                plain_text_zh=f"记忆已删除",
+            )
+        except Exception as exc:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"记忆删除失败: {exc}")
+
+    # ===================================================================
+    # V11 Phase 5: Model Profile 工具 handler
+    # ===================================================================
+
+    def _h_model_profile(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.model.profile — 获取模型画像。"""
+        tool_name = "stableagent.model.profile"
+        model_id: str = args.get("model_id", "")
+        if not model_id:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text="model_id 不能为空")
+        try:
+            from stable_agent.model_profile import ModelProfileManager
+            from stable_agent.model_profile.adapter_loader import AdapterLoader
+            pm = ModelProfileManager()
+            profile = pm.load_model_profile(model_id)
+            adapter = AdapterLoader(pm).load_adapter(model_id)
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data={"profile": profile.to_dict(), "adapter": adapter},
+                plain_text=f"模型画像: {profile.display_name} (strengths={len(profile.strengths)}, risks={len(profile.risks)})",
+            )
+        except Exception as exc:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"获取模型画像失败: {exc}")
+
+    def _h_model_list(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.model.list — 列出所有模型画像。"""
+        tool_name = "stableagent.model.list"
+        try:
+            from stable_agent.model_profile import ModelProfileManager
+            pm = ModelProfileManager()
+            profiles = pm.list_profiles()
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data={"profiles": [p.to_dict() for p in profiles], "count": len(profiles)},
+                plain_text=f"共 {len(profiles)} 个模型画像",
+            )
+        except Exception as exc:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"列出模型画像失败: {exc}")
+
+    def _h_model_suggest(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.model.suggest — 推荐模型。"""
+        tool_name = "stableagent.model.suggest"
+        task_type: str = args.get("task_type", "")
+        available_models: list[str] = args.get("available_models", [])
+        if not task_type or not available_models:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text="task_type 和 available_models 不能为空")
+        try:
+            from stable_agent.model_profile import ModelProfileManager, ModelRouter
+            pm = ModelProfileManager()
+            router = ModelRouter(pm)
+            suggested = router.suggest_model_for_task(task_type, available_models)
+            adapter_prompt = router.build_model_adapter_prompt(suggested, task_type)
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data={"suggested_model": suggested, "adapter_prompt": adapter_prompt},
+                plain_text=f"推荐模型: {suggested} (任务类型: {task_type})",
+            )
+        except Exception as exc:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"推荐模型失败: {exc}")
+
+    def _h_model_update(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.model.update — 更新模型画像。"""
+        tool_name = "stableagent.model.update"
+        model_id: str = args.get("model_id", "")
+        bad_case: dict = args.get("bad_case", {})
+        if not model_id or not bad_case:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text="model_id 和 bad_case 不能为空")
+        try:
+            from stable_agent.model_profile import ModelProfileManager
+            pm = ModelProfileManager()
+            profile = pm.update_from_bad_case(model_id, bad_case)
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data={"profile": profile.to_dict()},
+                plain_text=f"模型画像已更新: {profile.display_name} (risks={len(profile.risks)})",
+            )
+        except Exception as exc:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"更新模型画像失败: {exc}")
+
+    # ===================================================================
+    # V11 Phase 4: Token Budget Ledger 工具 handler
+    # ===================================================================
+
+    def _h_token_report(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.token.report — Token 节省报告。"""
+        tool_name = "stableagent.token.report"
+        run_id: str = args.get("run_id", ctx.run_id)
+        try:
+            from stable_agent.token import BudgetLedger, SavingsReport
+            ledger = BudgetLedger()
+            report_gen = SavingsReport()
+            report = report_gen.generate(run_id, ledger)
+            if "error" in report:
+                return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                         plain_text=report["error"])
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data=self._json_safe(report),
+                plain_text=f"Token 节省报告: 节省 {report['saved_tokens']} tokens ({report['saving_ratio']:.1%})",
+                plain_text_zh=report.get("summary_zh", ""),
+            )
+        except Exception as exc:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"获取 Token 节省报告失败: {exc}")
+
+    def _h_token_run(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.token.run — Token 运行记录。"""
+        tool_name = "stableagent.token.run"
+        run_id: str = args.get("run_id", ctx.run_id)
+        try:
+            from stable_agent.token import BudgetLedger
+            ledger = BudgetLedger()
+            record = ledger.get_run_record(run_id)
+            if record is None:
+                return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                         plain_text=f"未找到 run_id={run_id} 的 Token 记录")
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data=self._json_safe(record.to_dict()),
+                plain_text=f"Token 记录: baseline={record.baseline_tokens_estimated}, injected={record.injected_tokens}",
+            )
+        except Exception as exc:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"获取 Token 运行记录失败: {exc}")
+
+    def _h_token_summary(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.token.summary — Token 周期汇总。"""
+        tool_name = "stableagent.token.summary"
+        days: int = args.get("days", 7)
+        try:
+            from stable_agent.token import BudgetLedger
+            ledger = BudgetLedger()
+            summary = ledger.summarize_period(days)
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data=self._json_safe(summary),
+                plain_text=f"过去 {days} 天: {summary['total_runs']} 次运行, 节省 {summary['total_saved_tokens']} tokens",
+            )
+        except Exception as exc:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"获取 Token 周期汇总失败: {exc}")
+
+    # ===================================================================
+    # V11 Phase 3: Understanding Trace 语义理解工具 handler
+    # ===================================================================
+
+    def _h_understanding_trace(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.understanding.trace — 语义理解轨迹。"""
+        tool_name = "stableagent.understanding.trace"
+        task_input: str = args.get("task_input", "")
+        run_id: str = args.get("run_id", ctx.run_id)
+
+        try:
+            from stable_agent.understanding.semantic_interpreter import SemanticInterpreter
+            from stable_agent.understanding.expression_profile import ExpressionProfileManager
+            import os
+
+            expr_path = os.path.join("data", "expressions.json")
+            expr_mgr = ExpressionProfileManager(storage_path=expr_path)
+            interpreter = SemanticInterpreter(expression_manager=expr_mgr)
+            trace = interpreter.interpret(task_input, run_id=run_id)
+
+            return self._make_result(
+                ctx, tool_name,
+                ok=True,
+                data=trace.to_dict(),
+                plain_text=f"语义理解完成: 任务类型={trace.task_type}, 置信度={trace.confidence:.2f}",
+                plain_text_zh=f"语义理解完成: {trace.interpreted_goal}",
+                plain_text_en=f"Understanding trace: type={trace.task_type}, confidence={trace.confidence:.2f}",
+                next_actions=["确认理解是否正确"] if trace.needs_user_confirmation else [],
+            )
+        except Exception as exc:
+            return self._make_result(
+                ctx, tool_name,
+                ok=False, is_error=True,
+                plain_text=f"语义理解失败: {exc}",
+            )
+
+    def _h_understanding_correct(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.understanding.correct — 记录纠正。"""
+        tool_name = "stableagent.understanding.correct"
+        wrong = args.get("wrong_interpretation", "")
+        correct = args.get("correct_interpretation", "")
+        trigger = args.get("trigger_phrase", "")
+        run_id: str = args.get("run_id", ctx.run_id)
+
+        try:
+            from stable_agent.understanding.correction_store import CorrectionStore
+            from stable_agent.understanding.schemas import CorrectionRecord
+            import os
+
+            store_path = os.path.join("data", "corrections.jsonl")
+            store = CorrectionStore(storage_path=store_path)
+            record = CorrectionRecord(
+                run_id=run_id,
+                wrong_interpretation=wrong,
+                correct_interpretation=correct,
+                trigger_phrase=trigger,
+            )
+            store.add_correction(record)
+
+            return self._make_result(
+                ctx, tool_name,
+                ok=True,
+                data=record.to_dict(),
+                plain_text=f"纠正已记录: {wrong} -> {correct}",
+                plain_text_zh=f"纠正已记录，ID: {record.correction_id}",
+                plain_text_en=f"Correction recorded: {record.correction_id}",
+                next_actions=["转化为表达规则"],
+            )
+        except Exception as exc:
+            return self._make_result(
+                ctx, tool_name,
+                ok=False, is_error=True,
+                plain_text=f"记录纠正失败: {exc}",
+            )
+
+    def _h_expression_list(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.expression.list — 列出表达习惯。"""
+        tool_name = "stableagent.expression.list"
+        scope = args.get("scope")
+
+        try:
+            from stable_agent.understanding.expression_profile import ExpressionProfileManager
+            import os
+
+            expr_path = os.path.join("data", "expressions.json")
+            mgr = ExpressionProfileManager(storage_path=expr_path)
+            profiles = mgr.list_expressions(scope=scope)
+
+            return self._make_result(
+                ctx, tool_name,
+                ok=True,
+                data={"expressions": [p.to_dict() for p in profiles], "count": len(profiles)},
+                plain_text=f"共 {len(profiles)} 条表达习惯",
+                plain_text_zh=f"共 {len(profiles)} 条表达习惯",
+                plain_text_en=f"Total {len(profiles)} expression profiles",
+            )
+        except Exception as exc:
+            return self._make_result(
+                ctx, tool_name,
+                ok=False, is_error=True,
+                plain_text=f"列出表达习惯失败: {exc}",
+            )
+
+    def _h_expression_add(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.expression.add — 添加表达习惯。"""
+        tool_name = "stableagent.expression.add"
+        phrase = args.get("phrase", "")
+        meaning = args.get("meaning", [])
+        scope = args.get("scope", "global")
+        confirmed = args.get("confirmed", False)
+
+        try:
+            from stable_agent.understanding.expression_profile import ExpressionProfileManager
+            import os
+
+            expr_path = os.path.join("data", "expressions.json")
+            mgr = ExpressionProfileManager(storage_path=expr_path)
+            profile = mgr.add_expression(
+                phrase=phrase, meaning=meaning, scope=scope, confirmed=confirmed,
+            )
+
+            return self._make_result(
+                ctx, tool_name,
+                ok=True,
+                data=profile.to_dict(),
+                plain_text=f"表达习惯已添加: {phrase}",
+                plain_text_zh=f"表达习惯已添加: {phrase}",
+                plain_text_en=f"Expression added: {phrase}",
+            )
+        except Exception as exc:
+            return self._make_result(
+                ctx, tool_name,
+                ok=False, is_error=True,
+                plain_text=f"添加表达习惯失败: {exc}",
+            )
+
+    def _h_expression_delete(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.expression.delete — 删除表达习惯。"""
+        tool_name = "stableagent.expression.delete"
+        phrase = args.get("phrase", "")
+
+        try:
+            from stable_agent.understanding.expression_profile import ExpressionProfileManager
+            import os
+
+            expr_path = os.path.join("data", "expressions.json")
+            mgr = ExpressionProfileManager(storage_path=expr_path)
+            deleted = mgr.delete_expression(phrase)
+
+            return self._make_result(
+                ctx, tool_name,
+                ok=True,
+                data={"deleted": deleted, "phrase": phrase},
+                plain_text=f"表达习惯{'已删除' if deleted else '未找到'}: {phrase}",
+                plain_text_zh=f"表达习惯{'已删除' if deleted else '未找到'}: {phrase}",
+                plain_text_en=f"Expression {'deleted' if deleted else 'not found'}: {phrase}",
+            )
+        except Exception as exc:
+            return self._make_result(
+                ctx, tool_name,
+                ok=False, is_error=True,
+                plain_text=f"删除表达习惯失败: {exc}",
+            )
+
+    # ===================================================================
     # SaaS v1.2: 商业工具 handler
     # ===================================================================
 
@@ -1654,3 +2153,182 @@ class UnifiedToolRegistry:
         repo = SaasRepository(db_path="data/stable_agent.sqlite3")
         repo.init_db()
         return repo
+
+    # ------------------------------------------------------------------
+    # V11 Phase 6: Personal Eval / A-B Regression Handlers
+    # ------------------------------------------------------------------
+
+    def _h_eval_case_create(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.eval.case.create — 创建评估用例。"""
+        tool_name = "stableagent.eval.case.create"
+        try:
+            from stable_agent.personal_eval.eval_case import EvalCaseManager
+            mgr = EvalCaseManager()
+            case = mgr.create_case(
+                task=args.get("task", ""),
+                task_type=args.get("task_type", "general"),
+                must_keep=args.get("must_keep", []),
+                must_avoid=args.get("must_avoid", []),
+                success_criteria=args.get("success_criteria", ""),
+                failure_modes=args.get("failure_modes", []),
+                source_bad_case_id=args.get("source_bad_case_id", ""),
+            )
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data=case.to_dict(),
+                plain_text=f"评估用例已创建: {case.case_id}",
+            )
+        except Exception as e:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"创建评估用例失败: {e}")
+
+    def _h_eval_case_list(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.eval.case.list — 列出评估用例。"""
+        tool_name = "stableagent.eval.case.list"
+        try:
+            from stable_agent.personal_eval.eval_case import EvalCaseManager
+            mgr = EvalCaseManager()
+            task_type = args.get("task_type")
+            cases = mgr.list_cases(task_type=task_type)
+            data = [c.to_dict() for c in cases]
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data={"cases": data, "count": len(data)},
+                plain_text=f"共 {len(data)} 个评估用例",
+            )
+        except Exception as e:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"列出评估用例失败: {e}")
+
+    def _h_eval_run_ab(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.eval.run_ab — 执行 A/B 回归测试。"""
+        tool_name = "stableagent.eval.run_ab"
+        try:
+            from stable_agent.personal_eval.eval_case import EvalCaseManager
+            from stable_agent.personal_eval.ab_regression_runner import ABRegressionRunner
+            from stable_agent.personal_eval.rubric import RubricManager
+
+            case_id = args.get("case_id", "")
+            old_skill = args.get("old_skill", "")
+            new_skill = args.get("new_skill", "")
+            rubric_id = args.get("rubric_id", "vibe_coding_default")
+
+            mgr = EvalCaseManager()
+            case = mgr.get_case(case_id)
+            if case is None:
+                return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                         plain_text=f"评估用例不存在: {case_id}")
+
+            rubric_mgr = RubricManager()
+            rubric = rubric_mgr.load_rubric(rubric_id)
+
+            runner = ABRegressionRunner()
+            result = runner.run_ab(case, old_skill, new_skill, rubric)
+
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data=result.to_dict(),
+                plain_text=f"A/B 回归测试完成: passed={result.passed}, delta={result.delta:.3f}",
+            )
+        except Exception as e:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"A/B 回归测试失败: {e}")
+
+    def _h_eval_rubric_get(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.eval.rubric.get — 获取评分维度。"""
+        tool_name = "stableagent.eval.rubric.get"
+        try:
+            from stable_agent.personal_eval.rubric import RubricManager
+            mgr = RubricManager()
+            rubric = mgr.load_rubric(args.get("rubric_id", "vibe_coding_default"))
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data=rubric.to_dict(),
+                plain_text=f"评分维度: {rubric.rubric_id} ({len(rubric.dimensions)} 个维度)",
+            )
+        except Exception as e:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"获取评分维度失败: {e}")
+
+    def _h_eval_rubric_update(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.eval.rubric.update — 更新评分维度。"""
+        tool_name = "stableagent.eval.rubric.update"
+        try:
+            from stable_agent.personal_eval.rubric import RubricManager
+            mgr = RubricManager()
+            rubric = mgr.update_rubric(
+                rubric_id=args.get("rubric_id", ""),
+                dimensions=args.get("dimensions", {}),
+            )
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data=rubric.to_dict(),
+                plain_text=f"评分维度已更新: {rubric.rubric_id}",
+            )
+        except Exception as e:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"更新评分维度失败: {e}")
+
+    # ------------------------------------------------------------------
+    # V11 Phase 7: Feedback Loop Handlers
+    # ------------------------------------------------------------------
+
+    def _h_feedback_remember(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.feedback.remember — 记住这个。"""
+        tool_name = "stableagent.feedback.remember"
+        try:
+            from stable_agent.personal_eval.feedback_loop import FeedbackProcessor
+            proc = FeedbackProcessor()
+            result = proc.process_remember_this(
+                run_id=args.get("run_id", ctx.run_id),
+                user_note=args.get("user_note", ""),
+                context=args.get("context"),
+            )
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data=self._json_safe(result),
+                plain_text=f"已记住: {args.get('user_note', '')[:60]}",
+            )
+        except Exception as e:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"记住失败: {e}")
+
+    def _h_feedback_dont_do_this_again(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.feedback.dont_do_this_again — 下次别这样。"""
+        tool_name = "stableagent.feedback.dont_do_this_again"
+        try:
+            from stable_agent.personal_eval.feedback_loop import FeedbackProcessor
+            proc = FeedbackProcessor()
+            result = proc.process_dont_do_this_again(
+                run_id=args.get("run_id", ctx.run_id),
+                user_note=args.get("user_note", ""),
+                context=args.get("context"),
+            )
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data=self._json_safe(result),
+                plain_text=f"已记录负面反馈，生成 eval case: {result.get('eval_case', {}).get('case_id', '')}",
+            )
+        except Exception as e:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"记录负面反馈失败: {e}")
+
+    def _h_feedback_correct_and_remember(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.feedback.correct_and_remember — 纠正并记住。"""
+        tool_name = "stableagent.feedback.correct_and_remember"
+        try:
+            from stable_agent.personal_eval.feedback_loop import FeedbackProcessor
+            proc = FeedbackProcessor()
+            result = proc.process_correct_and_remember(
+                run_id=args.get("run_id", ctx.run_id),
+                user_note=args.get("user_note", ""),
+                context=args.get("context"),
+            )
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data=self._json_safe(result),
+                plain_text=f"已纠正并记住: {args.get('user_note', '')[:60]}",
+            )
+        except Exception as e:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"纠正失败: {e}")

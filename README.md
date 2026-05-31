@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/tests-1108_passed-brightgreen?style=for-the-badge" alt="1108 Tests">
+  <img src="https://img.shields.io/badge/tests-1274_passed-brightgreen?style=for-the-badge" alt="1274 Tests">
   <img src="https://img.shields.io/badge/closed_loop-30%2F30-22c55e?style=for-the-badge" alt="30/30 Closed Loop">
   <img src="https://img.shields.io/badge/E2E-6%2F6_REAL_LLM-ff6b35?style=for-the-badge" alt="Real LLM E2E">
   <img src="https://img.shields.io/badge/python-3.13-blue?style=for-the-badge" alt="Python 3.13">
-  <img src="https://img.shields.io/badge/MCP-28_tools-7c3aed?style=for-the-badge" alt="MCP">
+  <img src="https://img.shields.io/badge/MCP-55_tools-7c3aed?style=for-the-badge" alt="MCP">
   <img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" alt="MIT">
 </p>
 
@@ -370,11 +370,14 @@ stable_agent/
 | [DASHBOARD_OBSERVER_SPEC.md](DASHBOARD_OBSERVER_SPEC.md) | Dashboard 规范 |
 | [IMPLEMENTATION_LOG.md](IMPLEMENTATION_LOG.md) | 实施日志 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |
+| [V11_UPGRADE_REPORT.md](docs/V11_UPGRADE_REPORT.md) | V11 升级报告 |
+| [DEVELOPER_QUICKSTART.md](docs/DEVELOPER_QUICKSTART.md) | 快速开始 |
 
 ## 版本历史
 
 | 版本 | 日期 | 核心变更 |
 |------|------|---------|
+| **V11** | 2026-05-31 | Agent Capsule: 胶囊管理 + 记忆生命周期 + 语义理解 + Token 预算 + 模型画像 + 个人评测 + 反馈闭环 + CLI, 1274 tests, 55 MCP tools |
 | **V10** | 2026-05-31 | 100% 闭环: 禁止 emitted_events fallback, event_api_ok, dashboard_replay_ok, 真实 LLM E2E (阿里云), key 安全脱敏, 30/30 checks |
 | V9.2 | 2026-05-31 | 事件链硬化: _tool_router 注入, REQUIRED_NORMAL_EVENTS 13项, fail-fast, 404 未知 run |
 | V9.1 | 2026-05-31 | Validation Gate: force_validation_passed, dry_run 阻止导出, 21/21 checks |

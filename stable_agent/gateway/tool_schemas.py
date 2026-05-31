@@ -228,6 +228,80 @@ TOOLS: dict[str, dict[str, Any]] = {
         "risk_level": "medium",
     },
     # =======================================================================
+    # V11 Phase 3: Understanding Trace 语义理解工具
+    # =======================================================================
+    "stableagent.understanding.trace": {
+        "name": "stableagent.understanding.trace",
+        "title": "语义理解轨迹",
+        "description": "解析用户输入的语义意图，生成 UnderstandingTrace",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_input": {"type": "string", "description": "用户输入文本"},
+                "run_id": {"type": "string", "description": "关联运行 ID"},
+            },
+            "required": ["task_input"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.understanding.correct": {
+        "name": "stableagent.understanding.correct",
+        "title": "记录纠正",
+        "description": "记录用户对系统理解的纠正，可转化为表达规则",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "关联运行 ID"},
+                "wrong_interpretation": {"type": "string", "description": "错误解读"},
+                "correct_interpretation": {"type": "string", "description": "正确解读"},
+                "trigger_phrase": {"type": "string", "description": "触发纠正的短语"},
+            },
+            "required": ["wrong_interpretation", "correct_interpretation"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.expression.list": {
+        "name": "stableagent.expression.list",
+        "title": "列出表达习惯",
+        "description": "列出已记录的用户表达习惯",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "scope": {"type": "string", "description": "按作用域过滤"},
+            },
+        },
+        "risk_level": "low",
+    },
+    "stableagent.expression.add": {
+        "name": "stableagent.expression.add",
+        "title": "添加表达习惯",
+        "description": "添加用户表达习惯规则",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phrase": {"type": "string", "description": "用户表达短语"},
+                "meaning": {"type": "array", "items": {"type": "string"}, "description": "标准化含义"},
+                "scope": {"type": "string", "description": "作用域"},
+                "confirmed": {"type": "boolean", "default": False},
+            },
+            "required": ["phrase", "meaning"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.expression.delete": {
+        "name": "stableagent.expression.delete",
+        "title": "删除表达习惯",
+        "description": "删除指定的用户表达习惯",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phrase": {"type": "string", "description": "要删除的表达短语"},
+            },
+            "required": ["phrase"],
+        },
+        "risk_level": "low",
+    },
+    # =======================================================================
     # SaaS v1.2: 12 个商业 SaaS 工具
     # =======================================================================
     "stableagent.workspace.create": {
@@ -419,6 +493,333 @@ TOOLS: dict[str, dict[str, Any]] = {
         },
         "risk_level": "high",
     },
+    # =======================================================================
+    # V11 Agent Capsule: 胶囊 + 记忆生命周期 + 理解轨迹 + Token + 模型 + 评测 + 反馈
+    # =======================================================================
+    # --- Capsule ---
+    "stableagent.capsule.status": {
+        "name": "stableagent.capsule.status",
+        "title": "胶囊状态",
+        "description": "获取 Agent Capsule 当前状态、统计信息和结构健康",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "capsule_path": {"type": "string", "description": "胶囊路径（可选，默认使用环境变量或项目目录）"},
+            },
+        },
+        "risk_level": "low",
+    },
+    "stableagent.capsule.doctor": {
+        "name": "stableagent.capsule.doctor",
+        "title": "胶囊体检",
+        "description": "对胶囊执行完整健康检查：manifest、目录、sqlite、jsonl、敏感信息、大文件、过期日志",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "capsule_path": {"type": "string"},
+            },
+        },
+        "risk_level": "low",
+    },
+    # --- Memory Lifecycle ---
+    "stableagent.memory.health": {
+        "name": "stableagent.memory.health",
+        "title": "记忆健康报告",
+        "description": "生成记忆健康报告：建议保留、合并、删除、冲突、过期、高价值记忆",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "capsule_path": {"type": "string"},
+            },
+        },
+        "risk_level": "low",
+    },
+    "stableagent.memory.review": {
+        "name": "stableagent.memory.review",
+        "title": "记忆审核建议",
+        "description": "列出需要用户确认的高价值未确认记忆",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "capsule_path": {"type": "string"},
+            },
+        },
+        "risk_level": "low",
+    },
+    "stableagent.memory.prune": {
+        "name": "stableagent.memory.prune",
+        "title": "记忆修剪",
+        "description": "修剪低价值记忆（需确认）",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "memory_ids": {"type": "array", "items": {"type": "string"}, "description": "要修剪的记忆 ID 列表"},
+                "capsule_path": {"type": "string"},
+            },
+            "required": ["memory_ids"],
+        },
+        "risk_level": "medium",
+    },
+    "stableagent.memory.promote": {
+        "name": "stableagent.memory.promote",
+        "title": "记忆晋升",
+        "description": "将记忆晋升为 semantic_memory（长期保存）",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "memory_id": {"type": "string"},
+                "capsule_path": {"type": "string"},
+            },
+            "required": ["memory_id"],
+        },
+        "risk_level": "medium",
+    },
+    "stableagent.memory.delete": {
+        "name": "stableagent.memory.delete",
+        "title": "删除记忆",
+        "description": "删除指定记忆",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "memory_id": {"type": "string"},
+                "capsule_path": {"type": "string"},
+            },
+            "required": ["memory_id"],
+        },
+        "risk_level": "medium",
+    },
+    # --- Model Profile ---
+    "stableagent.model.profile": {
+        "name": "stableagent.model.profile",
+        "title": "获取模型画像",
+        "description": "获取指定模型的画像信息，包括 strengths/risks/adapter rules",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "model_id": {
+                    "type": "string",
+                    "description": "模型标识，如 claude/gpt/qwen/generic",
+                },
+            },
+            "required": ["model_id"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.model.list": {
+        "name": "stableagent.model.list",
+        "title": "列出模型画像",
+        "description": "列出所有已知模型画像",
+        "input_schema": {"type": "object", "properties": {}},
+        "risk_level": "low",
+    },
+    "stableagent.model.suggest": {
+        "name": "stableagent.model.suggest",
+        "title": "推荐模型",
+        "description": "根据任务类型和可用模型列表推荐最佳模型",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_type": {
+                    "type": "string",
+                    "description": "任务类型，如 code_generation/bug_fix/general_qa",
+                },
+                "available_models": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "可用模型 ID 列表",
+                },
+            },
+            "required": ["task_type", "available_models"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.model.update": {
+        "name": "stableagent.model.update",
+        "title": "更新模型画像",
+        "description": "根据失败案例更新模型画像的风险和回避列表",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "model_id": {
+                    "type": "string",
+                    "description": "模型标识",
+                },
+                "bad_case": {
+                    "type": "object",
+                    "description": "失败案例，需包含 failure_reason 和可选 failure_mode",
+                },
+            },
+            "required": ["model_id", "bad_case"],
+        },
+        "risk_level": "low",
+    },
+    # =======================================================================
+    # V11 Phase 6: Personal Eval / A-B Regression 工具
+    # =======================================================================
+    "stableagent.eval.case.create": {
+        "name": "stableagent.eval.case.create",
+        "title": "创建评估用例",
+        "description": "创建一个个人评估用例，用于 A/B 回归测试",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "description": "任务描述"},
+                "task_type": {"type": "string", "default": "general", "description": "任务类型"},
+                "must_keep": {"type": "array", "items": {"type": "string"}, "description": "必须保留的关键词"},
+                "must_avoid": {"type": "array", "items": {"type": "string"}, "description": "必须避免的关键词"},
+                "success_criteria": {"type": "string", "description": "成功标准"},
+                "failure_modes": {"type": "array", "items": {"type": "string"}, "description": "失败模式"},
+                "source_bad_case_id": {"type": "string", "description": "来源 bad case ID"},
+            },
+            "required": ["task"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.eval.case.list": {
+        "name": "stableagent.eval.case.list",
+        "title": "列出评估用例",
+        "description": "列出所有个人评估用例",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_type": {"type": "string", "description": "按任务类型过滤"},
+            },
+        },
+        "risk_level": "low",
+    },
+    "stableagent.eval.run_ab": {
+        "name": "stableagent.eval.run_ab",
+        "title": "执行 A/B 回归测试",
+        "description": "比较 old_skill 和 new_skill 在评估用例上的表现",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "case_id": {"type": "string", "description": "评估用例 ID"},
+                "old_skill": {"type": "string", "description": "旧 skill 文本"},
+                "new_skill": {"type": "string", "description": "新 skill 文本"},
+                "rubric_id": {"type": "string", "default": "vibe_coding_default", "description": "评分维度集 ID"},
+            },
+            "required": ["case_id", "old_skill", "new_skill"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.eval.rubric.get": {
+        "name": "stableagent.eval.rubric.get",
+        "title": "获取评分维度",
+        "description": "获取指定评分维度集的定义",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "rubric_id": {"type": "string", "default": "vibe_coding_default"},
+            },
+        },
+        "risk_level": "low",
+    },
+    "stableagent.eval.rubric.update": {
+        "name": "stableagent.eval.rubric.update",
+        "title": "更新评分维度",
+        "description": "更新评分维度集的维度和权重",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "rubric_id": {"type": "string", "description": "评分维度集 ID"},
+                "dimensions": {
+                    "type": "object",
+                    "description": "维度名称 → 权重映射",
+                    "additionalProperties": {"type": "number"},
+                },
+            },
+            "required": ["rubric_id", "dimensions"],
+        },
+        "risk_level": "low",
+    },
+    # =======================================================================
+    # V11 Phase 7: Feedback Loop 反馈闭环工具
+    # =======================================================================
+    "stableagent.feedback.remember": {
+        "name": "stableagent.feedback.remember",
+        "title": "记住这个",
+        "description": "用户标记'记住这个'，生成 memory candidate",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "关联运行 ID"},
+                "user_note": {"type": "string", "description": "用户备注"},
+                "context": {"type": "object", "description": "附加上下文"},
+            },
+            "required": ["run_id", "user_note"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.feedback.dont_do_this_again": {
+        "name": "stableagent.feedback.dont_do_this_again",
+        "title": "下次别这样",
+        "description": "用户标记'下次别这样'，生成 bad case + eval case + skill patch candidate",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "关联运行 ID"},
+                "user_note": {"type": "string", "description": "用户备注"},
+                "context": {"type": "object", "description": "附加上下文"},
+            },
+            "required": ["run_id", "user_note"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.feedback.correct_and_remember": {
+        "name": "stableagent.feedback.correct_and_remember",
+        "title": "纠正并记住",
+        "description": "用户纠正行为并要求记住，生成 correction + memory + regression case",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "关联运行 ID"},
+                "user_note": {"type": "string", "description": "用户备注"},
+                "context": {"type": "object", "description": "附加上下文"},
+            },
+            "required": ["run_id", "user_note"],
+        },
+        "risk_level": "low",
+    },
+    # --- Token Budget Ledger ---
+    "stableagent.token.report": {
+        "name": "stableagent.token.report",
+        "title": "Token 节省报告",
+        "description": "获取指定运行的 token 节省报告，包含基线对比、节省比例和风险评估",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "运行 ID"},
+            },
+            "required": ["run_id"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.token.run": {
+        "name": "stableagent.token.run",
+        "title": "Token 运行记录",
+        "description": "获取指定运行的完整 token 预算记录",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string", "description": "运行 ID"},
+            },
+            "required": ["run_id"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.token.summary": {
+        "name": "stableagent.token.summary",
+        "title": "Token 周期汇总",
+        "description": "获取指定周期内的 token 消耗汇总统计",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "default": 7, "description": "统计天数"},
+            },
+        },
+        "risk_level": "low",
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -441,6 +842,8 @@ AVATAR_STATE_MAP: dict[str, str] = {
     "skillopt.exported": "archiving",
     "tool.failed": "failed",
     "task.completed": "done",
+    "token.budget.estimated": "calculating",
+    "token.savings.reported": "archiving",
     "default": "listening",
 }
 

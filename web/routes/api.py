@@ -1,4 +1,4 @@
-"""Usage + Audit + Skills + API Keys + Eval + Connect + Feedback + Health API 路由."""
+"""Usage + Audit + Skills + API Keys + Eval + Connect + Feedback + Health + Token API 路由."""
 from __future__ import annotations
 
 from fastapi import FastAPI, Request
