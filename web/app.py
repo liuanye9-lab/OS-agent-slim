@@ -148,6 +148,16 @@ def create_app() -> FastAPI:
     register_run_routes(app, gateway_run_store, dash_sync)
     register_approval_routes(app)
     register_review_routes(app, orchestrator) if orchestrator else None
-    register_api_routes(app, dash_sync)
+
+    # V11.2: Wire FeedbackLearningService for real feedback closed loop
+    feedback_service = None
+    try:
+        from stable_agent.feedback.feedback_learning_service import FeedbackLearningService
+        feedback_service = FeedbackLearningService()
+        logger.info("FeedbackLearningService initialized")
+    except Exception as exc:
+        logger.warning("FeedbackLearningService init failed: %s", exc)
+
+    register_api_routes(app, dash_sync, gateway_run_store=gateway_run_store, feedback_service=feedback_service)
 
     return app

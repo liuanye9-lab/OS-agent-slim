@@ -123,8 +123,8 @@ def register_run_routes(app: FastAPI, gateway_run_store=None, dash_sync=None) ->
             if dash_sync:
                 try:
                     dash_sync.sync_feedback(fb.to_dict())
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("dash_sync.sync_feedback failed: %s", exc)
             return {"ok": True, "feedback_id": fb.feedback_id}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -177,10 +177,8 @@ def register_run_routes(app: FastAPI, gateway_run_store=None, dash_sync=None) ->
                 record = ledger.get_run_record(run_id)
                 if record:
                     return {"run_id": run_id, "ok": True, "token_report": record.to_dict()}
-            except Exception:
-                pass
-
-            # fallback: 从 RunStore events
+            except Exception as exc:
+                logger.debug("BudgetLedger lookup failed, falling back to events: %s", exc)
             store = gateway_run_store
             if store is None:
                 return {"run_id": run_id, "ok": False, "token_report": None}
@@ -205,6 +203,9 @@ def register_run_routes(app: FastAPI, gateway_run_store=None, dash_sync=None) ->
                 "self_improvement.checked", "regression.generated",
                 "memory.update.candidate", "skill.patch.proposed",
                 "validation.checked", "human_review.required",
+                # V11.2: feedback events
+                "feedback.received", "bad_case.recorded",
+                "eval_case.generated", "expression.rule.candidate",
             }
             learning_events = [
                 e for e in events

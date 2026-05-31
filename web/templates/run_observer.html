@@ -537,6 +537,11 @@
       <h3>理解轨迹</h3>
       <p class="v11-desc">系统如何理解你的输入</p>
       <div class="v11-content" id="understandingContent"><div class="empty-state"><div class="empty-icon">🧠</div>暂无理解轨迹数据</div></div>
+      <!-- V11.2: Understanding correction buttons -->
+      <div id="understandingActions" style="display:flex;gap:8px;margin-top:12px">
+        <button onclick="feedbackUnderstandingCorrect()" style="padding:5px 12px;border-radius:6px;border:1px solid #c8e6c9;background:#e8f5e9;color:#2e7d32;font-size:11px;cursor:pointer">理解正确</button>
+        <button onclick="feedbackUnderstandingFix()" style="padding:5px 12px;border-radius:6px;border:1px solid #bbdefb;background:#e8f0fe;color:#0071e3;font-size:11px;cursor:pointer">有偏差，纠正</button>
+      </div>
     </section>
     <section id="tokenBudgetPanel" class="v11-panel">
       <h3>Token 预算</h3>
@@ -552,16 +557,30 @@
       <h3>失败案例库</h3>
       <p class="v11-desc">本次记录的失败案例</p>
       <div class="v11-content" id="badCaseContent"><div class="empty-state"><div class="empty-icon">📋</div>本次未记录失败案例</div></div>
+      <!-- V11.2: Generate regression test button -->
+      <div id="badCaseActions" style="margin-top:12px">
+        <button onclick="generateRegressionTest()" style="padding:5px 12px;border-radius:6px;border:1px solid #b3e5fc;background:#e1f5fe;color:#0277bd;font-size:11px;cursor:pointer">生成回归测试</button>
+        <span id="regressionTestResult" style="font-size:11px;color:var(--text-secondary);margin-left:8px"></span>
+      </div>
     </section>
     <section id="skillEvolutionPanel" class="v11-panel">
       <h3>Skill 进化</h3>
       <p class="v11-desc">Skill 规则的验证与进化</p>
       <div class="v11-content" id="skillEvolutionContent"><div class="empty-state"><div class="empty-icon">🧬</div>暂无 Skill 进化数据</div></div>
+      <!-- V11.2: Review status display -->
+      <div id="skillReviewStatus" style="margin-top:12px;font-size:12px"></div>
     </section>
     <section id="memoryHealthPanel" class="v11-panel">
       <h3>记忆健康</h3>
       <p class="v11-desc">记忆保留/合并/删除建议</p>
       <div class="v11-content" id="memoryHealthContent"><div class="empty-state"><div class="empty-icon">💊</div>暂无记忆健康数据</div></div>
+      <!-- V11.2: Memory action buttons -->
+      <div id="memoryActions" style="display:flex;gap:6px;margin-top:12px;flex-wrap:wrap">
+        <button onclick="memoryAction('keep')" style="padding:4px 10px;border-radius:6px;border:1px solid #c8e6c9;background:#e8f5e9;color:#2e7d32;font-size:11px;cursor:pointer">保留</button>
+        <button onclick="memoryAction('delete')" style="padding:4px 10px;border-radius:6px;border:1px solid #ffcdd2;background:#fbe9e7;color:#bf360c;font-size:11px;cursor:pointer">删除</button>
+        <button onclick="memoryAction('defer')" style="padding:4px 10px;border-radius:6px;border:1px solid #ffe0b2;background:#fff3e0;color:#e65100;font-size:11px;cursor:pointer">稍后处理</button>
+      </div>
+      <div id="memoryActionResult" style="font-size:11px;color:var(--text-secondary);margin-top:4px"></div>
     </section>
   </div>
 </div>

@@ -1060,7 +1060,19 @@ class UnifiedToolRegistry:
             understanding_trace_dict = None
             try:
                 from stable_agent.understanding.semantic_interpreter import SemanticInterpreter
-                interpreter = SemanticInterpreter()
+                # V11.2: Load ExpressionProfileManager for expression habit migration
+                interpreter = None
+                try:
+                    from stable_agent.capsule import ensure_capsule
+                    from stable_agent.understanding.expression_profile import ExpressionProfileManager
+                    capsule_path = ensure_capsule()
+                    expr_mgr = ExpressionProfileManager(storage_path=str(capsule_path / "profile" / "expressions.jsonl"))
+                    interpreter = SemanticInterpreter(expression_manager=expr_mgr)
+                except Exception as expr_exc:
+                    logging.getLogger(__name__).warning(
+                        "ExpressionProfileManager load failed, degraded: %s", expr_exc
+                    )
+                    interpreter = SemanticInterpreter()
                 ut = interpreter.interpret(task_input, run_id=ctx.run_id)
                 understanding_trace_dict = ut.to_dict()
                 _emit("understanding.trace.created", "intent_parsing", {
@@ -1161,10 +1173,15 @@ class UnifiedToolRegistry:
                 from stable_agent.token.schemas import TokenRunRecord
                 from stable_agent.capsule.capsule_manager import ensure_capsule, get_default_capsule_path
                 estimator = TokenEstimator()
+                # V11.2: 获取 estimation method
+                estimation_method = "tiktoken_cl100k" if hasattr(estimator, '_encoding') and estimator._encoding else "char_div4"
                 # 估算各类 token
-                baseline_tokens = estimator.estimate(task_input) + sum(
+                task_tokens = estimator.estimate(task_input)
+                context_token_items = [
                     estimator.estimate(str(c.get("content", ""))) for c in context_items
-                )
+                ]
+                candidate_context_tokens = sum(context_token_items)
+                baseline_tokens = task_tokens + candidate_context_tokens
                 protected_tokens = sum(
                     estimator.estimate(str(i.get("content", ""))) for i in (cc_decision.protected_items if cc_decision else [])
                 )
@@ -1172,23 +1189,32 @@ class UnifiedToolRegistry:
                     estimator.estimate(str(i.get("content", ""))) for i in (cc_decision.dropped_items if cc_decision else [])
                 )
                 injected_tokens = baseline_tokens - dropped_tokens
-                saved_tokens = dropped_tokens
+                saved_tokens = max(0, baseline_tokens - injected_tokens)
                 saving_ratio = (saved_tokens / baseline_tokens) if baseline_tokens > 0 else 0.0
                 risk_level = "high" if (cc_decision and cc_decision.blocked) else ("medium" if saving_ratio > 0.5 else "low")
+
+                # V11.2: summary_zh 对空/少 context 说明估算性质
+                if candidate_context_tokens < 100:
+                    summary_zh = f"节省 {saving_ratio:.0%} token ({saved_tokens}/{baseline_tokens})。当前为候选上下文估算，不代表真实 API 计费。"
+                else:
+                    summary_zh = f"节省 {saving_ratio:.0%} token ({saved_tokens}/{baseline_tokens})"
 
                 token_record = TokenRunRecord(
                     run_id=ctx.run_id,
                     baseline_tokens_estimated=baseline_tokens,
-                    raw_context_tokens=baseline_tokens,
+                    raw_context_tokens=candidate_context_tokens,
+                    candidate_context_tokens=candidate_context_tokens,
                     protected_tokens=protected_tokens,
                     injected_tokens=injected_tokens,
                     dropped_tokens=dropped_tokens,
                     saved_tokens_estimated=saved_tokens,
                     saving_ratio=round(saving_ratio, 4),
+                    estimation_method=estimation_method,
+                    is_estimated=True,
                     risk_level=risk_level,
                     protected_items=[str(i.get("content", ""))[:50] for i in (cc_decision.protected_items if cc_decision else [])],
                     dropped_items=[str(i.get("content", ""))[:50] for i in (cc_decision.dropped_items if cc_decision else [])],
-                    summary_zh=f"节省 {saving_ratio:.0%} token ({saved_tokens}/{baseline_tokens})",
+                    summary_zh=summary_zh,
                 )
 
                 # 写入 BudgetLedger（使用 capsule 路径）

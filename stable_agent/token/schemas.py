@@ -46,6 +46,7 @@ class TokenRunRecord:
     created_at: float = field(default_factory=time.time)
     baseline_tokens_estimated: int = 0
     raw_context_tokens: int = 0
+    candidate_context_tokens: int = 0
     deduped_tokens: int = 0
     retrieved_tokens: int = 0
     protected_tokens: int = 0
@@ -54,6 +55,8 @@ class TokenRunRecord:
     output_tokens_estimated: int = 0
     saved_tokens_estimated: int = 0
     saving_ratio: float = 0.0
+    estimation_method: str = "tiktoken_cl100k"
+    is_estimated: bool = True
     risk_level: str = "low"
     protected_items: list[dict[str, Any]] = field(default_factory=list)
     dropped_items: list[dict[str, Any]] = field(default_factory=list)
@@ -79,6 +82,7 @@ class TokenRunRecord:
             "created_at": self.created_at,
             "baseline_tokens_estimated": self.baseline_tokens_estimated,
             "raw_context_tokens": self.raw_context_tokens,
+            "candidate_context_tokens": self.candidate_context_tokens,
             "deduped_tokens": self.deduped_tokens,
             "retrieved_tokens": self.retrieved_tokens,
             "protected_tokens": self.protected_tokens,
@@ -87,6 +91,8 @@ class TokenRunRecord:
             "output_tokens_estimated": self.output_tokens_estimated,
             "saved_tokens_estimated": self.saved_tokens_estimated,
             "saving_ratio": self.saving_ratio,
+            "estimation_method": self.estimation_method,
+            "is_estimated": self.is_estimated,
             "risk_level": self.risk_level,
             "protected_items": self.protected_items,
             "dropped_items": self.dropped_items,
@@ -109,6 +115,7 @@ class TokenRunRecord:
             created_at=data.get("created_at", time.time()),
             baseline_tokens_estimated=data.get("baseline_tokens_estimated", 0),
             raw_context_tokens=data.get("raw_context_tokens", 0),
+            candidate_context_tokens=data.get("candidate_context_tokens", 0),
             deduped_tokens=data.get("deduped_tokens", 0),
             retrieved_tokens=data.get("retrieved_tokens", 0),
             protected_tokens=data.get("protected_tokens", 0),
@@ -117,6 +124,8 @@ class TokenRunRecord:
             output_tokens_estimated=data.get("output_tokens_estimated", 0),
             saved_tokens_estimated=data.get("saved_tokens_estimated", 0),
             saving_ratio=data.get("saving_ratio", 0.0),
+            estimation_method=data.get("estimation_method", "tiktoken_cl100k"),
+            is_estimated=data.get("is_estimated", True),
             risk_level=data.get("risk_level", "low"),
             protected_items=data.get("protected_items", []),
             dropped_items=data.get("dropped_items", []),

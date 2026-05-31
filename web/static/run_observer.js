@@ -709,6 +709,10 @@ function renderTokenBudgetPanel(data) {
     <div class="v11-item"><span class="label">Protected</span><span class="value">${(t.protected_items || []).length} 条</span></div>
     <div class="v11-item"><span class="label">Dropped</span><span class="value">${(t.dropped_items || []).length} 条</span></div>
     <div class="v11-item"><span class="label">Risk Level</span><span class="value"><span class="v11-tag ${t.risk_level === 'high' ? 'red' : t.risk_level === 'medium' ? 'orange' : 'green'}">${t.risk_level || "low"}</span></span></div>
+    <!-- V11.2: estimation metadata -->
+    <div class="v11-item"><span class="label">是否估算</span><span class="value"><span class="v11-tag ${t.is_estimated ? 'orange' : 'green'}">${t.is_estimated ? '是（估算）' : '否（实际）'}</span></span></div>
+    <div class="v11-item"><span class="label">估算方法</span><span class="value">${esc(t.estimation_method || "unknown")}</span></div>
+    ${t.summary_zh ? `<div style="margin-top:8px;font-size:11px;color:var(--text-secondary)">${esc(t.summary_zh)}</div>` : ""}
   `;
 }
 
@@ -727,8 +731,10 @@ function renderBadCasePanel(data) {
 
 function renderSkillEvolutionPanel(data) {
   const el = document.getElementById("skillEvolutionContent");
+  const reviewEl = document.getElementById("skillReviewStatus");
   if (!data.ok || !data.summary || Object.keys(data.summary).length === 0) {
     el.innerHTML = '<div class="empty-state"><div class="empty-icon">🧬</div>暂无 Skill 进化数据</div>';
+    if (reviewEl) reviewEl.innerHTML = "";
     return;
   }
   const s = data.summary;
@@ -744,6 +750,16 @@ function renderSkillEvolutionPanel(data) {
     <div class="v11-item"><span class="label">验证状态</span><span class="value">${s.validation_passed === true ? '<span class="v11-tag green">通过</span>' : s.validation_passed === false ? '<span class="v11-tag red">未通过</span>' : '--'}</span></div>
     <div class="v11-item"><span class="label">审核状态</span><span class="value">${hrLabel[s.human_review_status] || s.human_review_status || "--"}</span></div>
   `;
+  // V11.2: Show review status detail
+  if (reviewEl) {
+    if (s.human_review_status === "pending") {
+      reviewEl.innerHTML = '<span class="v11-tag orange">待人工审核</span> — 请前往审核队列确认';
+    } else if (s.human_review_status === "validation_failed") {
+      reviewEl.innerHTML = '<span class="v11-tag red">验证未通过</span> — Skill Patch 未进入审核';
+    } else {
+      reviewEl.innerHTML = "";
+    }
+  }
 }
 
 function renderMemoryMapPanel(data) {
@@ -854,6 +870,111 @@ async function feedbackCorrectAndRemember() {
     el.textContent = "网络错误";
     el.style.color = "#bf360c";
   }
+}
+
+// ==================================================================
+// V11.2: Intervention Buttons + Auto-refresh
+// ==================================================================
+
+/**
+ * "理解正确" — POST /api/feedback/remember
+ */
+async function feedbackUnderstandingCorrect() {
+  if (!runId) return;
+  const el = document.getElementById("feedbackResult");
+  el.textContent = "提交中...";
+  try {
+    const resp = await fetch("/api/feedback/remember", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({run_id: runId, note: "本次语义理解正确", context: {source: "understanding_panel"}}),
+    });
+    const data = await resp.json();
+    el.textContent = data.ok ? "✅ 已确认理解正确" : "提交失败";
+    el.style.color = data.ok ? "#2e7d32" : "#bf360c";
+    if (data.ok) refreshV11Panels();
+  } catch (e) {
+    el.textContent = "网络错误";
+    el.style.color = "#bf360c";
+  }
+}
+
+/**
+ * "有偏差，纠正" — POST /api/feedback/correct-and-remember
+ */
+async function feedbackUnderstandingFix() {
+  if (!runId) return;
+  const wrongPart = prompt("你刚才哪里理解错了？");
+  if (!wrongPart) return;
+  const correctMeaning = prompt("正确理解应该是什么？");
+  if (!correctMeaning) return;
+  const el = document.getElementById("feedbackResult");
+  el.textContent = "提交中...";
+  try {
+    const resp = await fetch("/api/feedback/correct-and-remember", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        run_id: runId,
+        note: `${wrongPart} → ${correctMeaning}`,
+        context: {phrase: wrongPart, corrected_meaning: correctMeaning, source: "understanding_panel"},
+      }),
+    });
+    const data = await resp.json();
+    el.textContent = data.ok ? `✅ ${data.summary_zh || "已记录纠正"}` : "提交失败";
+    el.style.color = data.ok ? "#2e7d32" : "#bf360c";
+    if (data.ok) refreshV11Panels();
+  } catch (e) {
+    el.textContent = "网络错误";
+    el.style.color = "#bf360c";
+  }
+}
+
+/**
+ * Memory action buttons — placeholder for future MCP integration
+ */
+function memoryAction(action) {
+  const el = document.getElementById("memoryActionResult");
+  const labels = {keep: "保留", delete: "删除", defer: "稍后处理"};
+  el.textContent = `已记录决策: ${labels[action] || action}（第一版仅记录，不执行删除）`;
+  el.style.color = "#0071e3";
+  addLogLine("info", `Memory action: ${action}`);
+}
+
+/**
+ * "生成回归测试" — show eval_case_id if available
+ */
+async function generateRegressionTest() {
+  if (!runId) return;
+  const el = document.getElementById("regressionTestResult");
+  el.textContent = "查询中...";
+  try {
+    const resp = await fetch(`/api/runs/${runId}/badcases`);
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.badcases && data.badcases.length > 0) {
+        const evalId = data.badcases[0].eval_case_id || data.badcases[0].payload?.eval_case_id;
+        el.textContent = evalId ? `已有关联回归测试: ${evalId}` : "失败案例已记录，回归测试将在下次反馈时自动生成";
+      } else {
+        el.textContent = "暂无失败案例，请先点击「下次别这样」记录";
+      }
+    }
+  } catch (e) {
+    el.textContent = "查询失败";
+  }
+}
+
+/**
+ * Auto-refresh V11 panels after feedback
+ */
+async function refreshV11Panels() {
+  if (!runId) return;
+  await Promise.allSettled([
+    loadUnderstanding(runId),
+    loadTokenBudget(runId),
+    loadLearning(runId),
+    loadMemoryHealth(),
+  ]);
 }
 
 // Load V11 panels after history is loaded
