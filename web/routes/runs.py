@@ -1,8 +1,12 @@
 """Run API 路由 — /api/runs/*"""
 from __future__ import annotations
 
+import json
+import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+
+logger = logging.getLogger("uvicorn")
 
 
 def register_run_routes(app: FastAPI, gateway_run_store=None, dash_sync=None) -> None:
@@ -124,3 +128,123 @@ def register_run_routes(app: FastAPI, gateway_run_store=None, dash_sync=None) ->
             return {"ok": True, "feedback_id": fb.feedback_id}
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
+    # ===================================================================
+    # V11.1: Run 级 API — understanding / token / learning / badcases
+    # ===================================================================
+
+    def _find_event_by_type(events: list, event_type: str) -> dict | None:
+        """从事件列表中查找最新匹配类型的事件。"""
+        for e in reversed(events):
+            if isinstance(e, dict) and e.get("event_type") == event_type:
+                return e
+        return None
+
+    @app.get("/api/runs/{run_id}/understanding")
+    async def get_run_understanding(run_id: str):
+        """获取 Understanding Trace — 从 RunStore events 中提取。"""
+        try:
+            store = gateway_run_store
+            if store is None:
+                return {"run_id": run_id, "ok": False, "error": "store unavailable"}
+            events = store.get_events(run_id)
+            if not events:
+                return {"run_id": run_id, "ok": False, "understanding_trace": None, "event_found": False}
+            evt = _find_event_by_type(events, "understanding.trace.created")
+            if evt is None:
+                return {"run_id": run_id, "ok": False, "understanding_trace": None, "event_found": False}
+            return {
+                "run_id": run_id,
+                "ok": True,
+                "understanding_trace": evt.get("understanding_trace"),
+                "event_found": True,
+            }
+        except Exception as e:
+            logger.warning("get_run_understanding failed: %s", e)
+            return {"run_id": run_id, "ok": False, "error": str(e)}
+
+    @app.get("/api/runs/{run_id}/token")
+    async def get_run_token(run_id: str):
+        """获取 Token Report — 优先从 BudgetLedger，fallback 从 events。"""
+        try:
+            # 先尝试 BudgetLedger
+            try:
+                from stable_agent.token.budget_ledger import BudgetLedger
+                from stable_agent.capsule.capsule_manager import ensure_capsule
+                capsule_path = ensure_capsule()
+                db_path = str(capsule_path / "token_ledger" / "usage.sqlite")
+                ledger = BudgetLedger(db_path=db_path)
+                record = ledger.get_run_record(run_id)
+                if record:
+                    return {"run_id": run_id, "ok": True, "token_report": record.to_dict()}
+            except Exception:
+                pass
+
+            # fallback: 从 RunStore events
+            store = gateway_run_store
+            if store is None:
+                return {"run_id": run_id, "ok": False, "token_report": None}
+            events = store.get_events(run_id)
+            evt = _find_event_by_type(events, "token.budget.estimated")
+            if evt and "token_report" in evt:
+                return {"run_id": run_id, "ok": True, "token_report": evt["token_report"]}
+            return {"run_id": run_id, "ok": False, "token_report": None}
+        except Exception as e:
+            logger.warning("get_run_token failed: %s", e)
+            return {"run_id": run_id, "ok": False, "error": str(e)}
+
+    @app.get("/api/runs/{run_id}/learning")
+    async def get_run_learning(run_id: str):
+        """获取 Learning Events — 从 RunStore 提取自我优化相关事件。"""
+        try:
+            store = gateway_run_store
+            if store is None:
+                return {"run_id": run_id, "ok": False, "learning_events": []}
+            events = store.get_events(run_id)
+            learning_types = {
+                "self_improvement.checked", "regression.generated",
+                "memory.update.candidate", "skill.patch.proposed",
+                "validation.checked", "human_review.required",
+            }
+            learning_events = [
+                e for e in events
+                if isinstance(e, dict) and e.get("event_type") in learning_types
+            ]
+            # 生成摘要
+            si_evt = _find_event_by_type(events, "self_improvement.checked")
+            summary = {}
+            if si_evt:
+                summary = {
+                    "learning_triggered": si_evt.get("learning_triggered", False),
+                    "validation_passed": si_evt.get("validation_passed"),
+                    "regression_cases": si_evt.get("regression_cases", 0),
+                    "memory_candidates": si_evt.get("memory_candidates", 0),
+                    "skill_patches": si_evt.get("skill_patches", 0),
+                    "human_review_status": si_evt.get("human_review_status", "none"),
+                }
+            return {
+                "run_id": run_id,
+                "ok": True,
+                "learning_events": learning_events,
+                "summary": summary,
+            }
+        except Exception as e:
+            logger.warning("get_run_learning failed: %s", e)
+            return {"run_id": run_id, "ok": False, "learning_events": [], "error": str(e)}
+
+    @app.get("/api/runs/{run_id}/badcases")
+    async def get_run_badcases(run_id: str):
+        """获取 Bad Cases — 从 learning events 中提取。"""
+        try:
+            store = gateway_run_store
+            if store is None:
+                return {"run_id": run_id, "ok": True, "badcases": []}
+            events = store.get_events(run_id)
+            badcases = [
+                e for e in events
+                if isinstance(e, dict) and e.get("event_type") in ("regression.generated", "bad_case.recorded")
+            ]
+            return {"run_id": run_id, "ok": True, "badcases": badcases}
+        except Exception as e:
+            logger.warning("get_run_badcases failed: %s", e)
+            return {"run_id": run_id, "ok": True, "badcases": []}

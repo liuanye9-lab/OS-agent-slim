@@ -957,6 +957,7 @@ class UnifiedToolRegistry:
         事件同步健康检查: emitted_events / sync_errors / event_sync_ok。
         """
         tool_name = "stableagent.task.os_agent"
+        logger = logging.getLogger(__name__)
         task_input: str = args.get("task_input", "")
         mode: str = args.get("mode", "auto")
         open_dashboard: bool = args.get("open_dashboard", True)
@@ -1052,8 +1053,35 @@ class UnifiedToolRegistry:
             except Exception:
                 logging.getLogger(__name__).warning("RunStore.create_run failed for %s", ctx.run_id, exc_info=True)
 
-            # === Phase 1: 接收 → 意图解析 ===
+            # === Phase 1: 接收 → 语义理解 → 意图解析 ===
             _emit("task.received", "received")
+
+            # V11.1: Understanding Trace — 语义理解轨迹（可选事件，不破坏必需链）
+            understanding_trace_dict = None
+            try:
+                from stable_agent.understanding.semantic_interpreter import SemanticInterpreter
+                interpreter = SemanticInterpreter()
+                ut = interpreter.interpret(task_input, run_id=ctx.run_id)
+                understanding_trace_dict = ut.to_dict()
+                _emit("understanding.trace.created", "intent_parsing", {
+                    "understanding_trace": understanding_trace_dict,
+                    "decision_summary_zh": f"系统理解：{ut.interpreted_goal}",
+                    "why_zh": "先暴露系统对用户意图的理解，避免语义漂移。",
+                    "next_step_zh": "继续解析意图并构建上下文。",
+                })
+                if ut.needs_user_confirmation:
+                    _emit("understanding.confirmation.required", "intent_parsing", {
+                        "uncertainties": ut.uncertainties,
+                        "confidence": ut.confidence,
+                        "decision_summary_zh": "语义理解置信度较低，建议用户确认。",
+                        "why_zh": "存在不确定点，可能需要澄清。",
+                    })
+            except Exception as exc:
+                _emit("understanding.trace.created", "intent_parsing", {
+                    "error": str(exc),
+                    "decision_summary_zh": "语义理解轨迹生成失败，已降级继续执行。",
+                })
+
             _emit("intent.parsed", "intent_parsing",
                   {"task_input": task_input[:200],
                    "decision_summary_zh": f"正在理解任务意图: {task_input[:60]}",
@@ -1125,6 +1153,66 @@ class UnifiedToolRegistry:
                 "next_step_zh": "开始执行任务。" if not (cc_decision and cc_decision.blocked) else "需要人工处理。",
             }
             _emit("context.compression_guard.checked", "context_compressing", guard_payload)
+
+            # V11.1: Token Budget — 记录 token 使用情况（可选事件）
+            token_report = None
+            try:
+                from stable_agent.token.token_estimator import TokenEstimator
+                from stable_agent.token.schemas import TokenRunRecord
+                from stable_agent.capsule.capsule_manager import ensure_capsule, get_default_capsule_path
+                estimator = TokenEstimator()
+                # 估算各类 token
+                baseline_tokens = estimator.estimate(task_input) + sum(
+                    estimator.estimate(str(c.get("content", ""))) for c in context_items
+                )
+                protected_tokens = sum(
+                    estimator.estimate(str(i.get("content", ""))) for i in (cc_decision.protected_items if cc_decision else [])
+                )
+                dropped_tokens = sum(
+                    estimator.estimate(str(i.get("content", ""))) for i in (cc_decision.dropped_items if cc_decision else [])
+                )
+                injected_tokens = baseline_tokens - dropped_tokens
+                saved_tokens = dropped_tokens
+                saving_ratio = (saved_tokens / baseline_tokens) if baseline_tokens > 0 else 0.0
+                risk_level = "high" if (cc_decision and cc_decision.blocked) else ("medium" if saving_ratio > 0.5 else "low")
+
+                token_record = TokenRunRecord(
+                    run_id=ctx.run_id,
+                    baseline_tokens_estimated=baseline_tokens,
+                    raw_context_tokens=baseline_tokens,
+                    protected_tokens=protected_tokens,
+                    injected_tokens=injected_tokens,
+                    dropped_tokens=dropped_tokens,
+                    saved_tokens_estimated=saved_tokens,
+                    saving_ratio=round(saving_ratio, 4),
+                    risk_level=risk_level,
+                    protected_items=[str(i.get("content", ""))[:50] for i in (cc_decision.protected_items if cc_decision else [])],
+                    dropped_items=[str(i.get("content", ""))[:50] for i in (cc_decision.dropped_items if cc_decision else [])],
+                    summary_zh=f"节省 {saving_ratio:.0%} token ({saved_tokens}/{baseline_tokens})",
+                )
+
+                # 写入 BudgetLedger（使用 capsule 路径）
+                try:
+                    capsule_path = ensure_capsule()
+                    db_path = str(capsule_path / "token_ledger" / "usage.sqlite")
+                    from stable_agent.token.budget_ledger import BudgetLedger
+                    ledger = BudgetLedger(db_path=db_path)
+                    ledger.record_run(token_record)
+                except Exception as ledger_exc:
+                    logger.warning("BudgetLedger 写入失败: %s", ledger_exc)
+
+                token_report = token_record.to_dict()
+                _emit("token.budget.estimated", "context_compressing", {
+                    "token_report": token_report,
+                    "decision_summary_zh": token_record.summary_zh,
+                    "why_zh": "记录上下文压缩的 token 节省情况。",
+                    "next_step_zh": "开始执行任务。",
+                })
+            except Exception as exc:
+                _emit("token.budget.estimated", "context_compressing", {
+                    "error": str(exc),
+                    "decision_summary_zh": "Token 预算记录失败，已降级继续执行。",
+                })
 
             if cc_decision and cc_decision.blocked:
                 _emit("task.failed", "failed",
@@ -1374,6 +1462,9 @@ class UnifiedToolRegistry:
                     "dry_run_learning": dry_run_learning,
                     # V9.1: force_validation_passed 参数回显
                     "force_validation_passed": force_validation_passed,
+                    # V11.1: Understanding Trace + Token Report
+                    "understanding_trace": understanding_trace_dict,
+                    "token_report": token_report,
                 },
                 plain_text=f"任务完成: {task_input[:80]}",
                 plain_text_zh=f"任务完成: {task_input[:80]}",

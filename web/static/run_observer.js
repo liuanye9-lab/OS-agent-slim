@@ -277,6 +277,28 @@ function applyEvent(evt) {
     updateSIReport(evt.si_report || evt.self_improvement || evt);
   }
 
+  // 6. V11.1: Update V11 panels on real-time events
+  if (evt.event_type === "understanding.trace.created" && evt.understanding_trace) {
+    renderUnderstandingPanel({ok: true, understanding_trace: evt.understanding_trace});
+  }
+  if (evt.event_type === "token.budget.estimated" && evt.token_report) {
+    renderTokenBudgetPanel({ok: true, token_report: evt.token_report});
+  }
+  if (evt.event_type === "regression.generated" || evt.event_type === "bad_case.recorded") {
+    const bcEl = document.getElementById("badCaseContent");
+    if (bcEl) {
+      const item = document.createElement("div");
+      item.className = "v11-item";
+      item.innerHTML = `<span class="label">${esc(evt.event_type)}</span><span class="value">${esc(evt.decision_summary_zh || evt.summary_zh || "")}</span>`;
+      bcEl.appendChild(item);
+    }
+  }
+  if (evt.event_type === "skill.patch.proposed" || evt.event_type === "validation.checked" || evt.event_type === "human_review.required") {
+    if (evt.si_report || evt.learning_triggered !== undefined) {
+      loadLearning(runId).catch(() => {});
+    }
+  }
+
   // 6. Update task name
   if (evt.run_id && evt.run_id !== $runId.textContent) {
     $runId.textContent = evt.run_id;
@@ -573,3 +595,268 @@ function switchPrimaryAgent(runId) {
 
 // Auto-refresh multi-agent display every 2 seconds
 setInterval(updateMultiAgentDisplay, 2000);
+
+// ==================================================================
+// V11.1: Six Panels + Feedback Buttons
+// ==================================================================
+
+/**
+ * Load V11 panels data after history events are loaded.
+ */
+async function loadV11Panels(runId) {
+  // Load in parallel
+  await Promise.allSettled([
+    loadUnderstanding(runId),
+    loadTokenBudget(runId),
+    loadLearning(runId),
+    loadMemoryHealth(),
+  ]);
+}
+
+async function loadUnderstanding(runId) {
+  try {
+    const resp = await fetch(`/api/runs/${runId}/understanding`);
+    if (resp.ok) {
+      const data = await resp.json();
+      renderUnderstandingPanel(data);
+    }
+  } catch (e) {
+    renderErrorPanel("understandingContent", e.message);
+  }
+}
+
+async function loadTokenBudget(runId) {
+  try {
+    const resp = await fetch(`/api/runs/${runId}/token`);
+    if (resp.ok) {
+      const data = await resp.json();
+      renderTokenBudgetPanel(data);
+    }
+  } catch (e) {
+    renderErrorPanel("tokenBudgetContent", e.message);
+  }
+}
+
+async function loadLearning(runId) {
+  try {
+    const [learningResp, badcaseResp] = await Promise.all([
+      fetch(`/api/runs/${runId}/learning`),
+      fetch(`/api/runs/${runId}/badcases`),
+    ]);
+    if (learningResp.ok) {
+      const data = await learningResp.json();
+      renderSkillEvolutionPanel(data);
+    }
+    if (badcaseResp.ok) {
+      const data = await badcaseResp.json();
+      renderBadCasePanel(data);
+    }
+  } catch (e) {
+    renderErrorPanel("badCaseContent", e.message);
+  }
+}
+
+async function loadMemoryHealth() {
+  try {
+    const resp = await fetch("/api/memory/health");
+    if (resp.ok) {
+      const data = await resp.json();
+      renderMemoryHealthPanel(data);
+      renderMemoryMapPanel(data);
+    }
+  } catch (e) {
+    renderErrorPanel("memoryHealthContent", e.message);
+  }
+}
+
+// ========== Render Functions ==========
+
+function renderUnderstandingPanel(data) {
+  const el = document.getElementById("understandingContent");
+  if (!data.ok || !data.understanding_trace) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">🧠</div>暂无理解轨迹数据</div>';
+    return;
+  }
+  const t = data.understanding_trace;
+  el.innerHTML = `
+    <div class="v11-item"><span class="label">用户原话</span><span class="value">${esc(t.user_original_input || "").slice(0,60)}</span></div>
+    <div class="v11-item"><span class="label">系统理解</span><span class="value">${esc(t.interpreted_goal || "").slice(0,60)}</span></div>
+    <div class="v11-item"><span class="label">任务类型</span><span class="value"><span class="v11-tag blue">${esc(t.task_type || "unknown")}</span></span></div>
+    <div class="v11-item"><span class="label">置信度</span><span class="value">${((t.confidence || 0) * 100).toFixed(0)}%</span></div>
+    <div class="v11-item"><span class="label">需要确认</span><span class="value">${t.needs_user_confirmation ? '<span class="v11-tag orange">是</span>' : '<span class="v11-tag green">否</span>'}</span></div>
+    ${(t.assumptions || []).length > 0 ? `<div class="v11-item"><span class="label">假设</span><span class="value">${t.assumptions.map(a => `<span class="v11-tag blue">${esc(a)}</span>`).join("")}</span></div>` : ""}
+    ${(t.protected_constraints || []).length > 0 ? `<div class="v11-item"><span class="label">保护约束</span><span class="value">${t.protected_constraints.map(c => `<span class="v11-tag green">${esc(c)}</span>`).join("")}</span></div>` : ""}
+    ${(t.uncertainties || []).length > 0 ? `<div class="v11-item"><span class="label">不确定点</span><span class="value">${t.uncertainties.map(u => `<span class="v11-tag orange">${esc(u)}</span>`).join("")}</span></div>` : ""}
+    ${(t.semantic_risk_flags || []).length > 0 ? `<div class="v11-item"><span class="label">风险标记</span><span class="value">${t.semantic_risk_flags.map(f => `<span class="v11-tag red">${esc(f)}</span>`).join("")}</span></div>` : ""}
+  `;
+}
+
+function renderTokenBudgetPanel(data) {
+  const el = document.getElementById("tokenBudgetContent");
+  if (!data.ok || !data.token_report) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div>暂无 Token 数据</div>';
+    return;
+  }
+  const t = data.token_report;
+  const ratio = ((t.saving_ratio || 0) * 100).toFixed(0);
+  const barColor = t.risk_level === "high" ? "#bf360c" : t.risk_level === "medium" ? "#e65100" : "#2e7d32";
+  el.innerHTML = `
+    <div class="v11-item"><span class="label">Baseline Tokens</span><span class="value">${t.baseline_tokens_estimated || 0}</span></div>
+    <div class="v11-item"><span class="label">Injected Tokens</span><span class="value">${t.injected_tokens || 0}</span></div>
+    <div class="v11-item"><span class="label">Saved Tokens</span><span class="value">${t.saved_tokens_estimated || 0}</span></div>
+    <div class="v11-item"><span class="label">Saving Ratio</span><span class="value">${ratio}%</span></div>
+    <div class="v11-bar"><div class="v11-bar-fill" style="width:${ratio}%;background:${barColor}"></div></div>
+    <div class="v11-item"><span class="label">Protected</span><span class="value">${(t.protected_items || []).length} 条</span></div>
+    <div class="v11-item"><span class="label">Dropped</span><span class="value">${(t.dropped_items || []).length} 条</span></div>
+    <div class="v11-item"><span class="label">Risk Level</span><span class="value"><span class="v11-tag ${t.risk_level === 'high' ? 'red' : t.risk_level === 'medium' ? 'orange' : 'green'}">${t.risk_level || "low"}</span></span></div>
+  `;
+}
+
+function renderBadCasePanel(data) {
+  const el = document.getElementById("badCaseContent");
+  if (!data.ok || !data.badcases || data.badcases.length === 0) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div>本次未记录失败案例</div>';
+    return;
+  }
+  let html = "";
+  for (const bc of data.badcases) {
+    html += `<div class="v11-item"><span class="label">${esc(bc.event_type || "bad_case")}</span><span class="value">${esc(bc.decision_summary_zh || bc.summary_zh || "").slice(0,60)}</span></div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderSkillEvolutionPanel(data) {
+  const el = document.getElementById("skillEvolutionContent");
+  if (!data.ok || !data.summary || Object.keys(data.summary).length === 0) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">🧬</div>暂无 Skill 进化数据</div>';
+    return;
+  }
+  const s = data.summary;
+  const hrLabel = {
+    "pending": "⏳ 等待审核", "approved": "✅ 已通过", "rejected": "❌ 已拒绝",
+    "validation_failed": "⚠️ 验证失败", "dry_run": "🧪 试运行", "none": "无需审核",
+  };
+  el.innerHTML = `
+    <div class="v11-item"><span class="label">触发学习</span><span class="value">${s.learning_triggered ? '<span class="v11-tag orange">是</span>' : '<span class="v11-tag green">否</span>'}</span></div>
+    <div class="v11-item"><span class="label">回归用例</span><span class="value">${s.regression_cases || 0}</span></div>
+    <div class="v11-item"><span class="label">记忆候选</span><span class="value">${s.memory_candidates || 0}</span></div>
+    <div class="v11-item"><span class="label">Skill Patches</span><span class="value">${s.skill_patches || 0}</span></div>
+    <div class="v11-item"><span class="label">验证状态</span><span class="value">${s.validation_passed === true ? '<span class="v11-tag green">通过</span>' : s.validation_passed === false ? '<span class="v11-tag red">未通过</span>' : '--'}</span></div>
+    <div class="v11-item"><span class="label">审核状态</span><span class="value">${hrLabel[s.human_review_status] || s.human_review_status || "--"}</span></div>
+  `;
+}
+
+function renderMemoryMapPanel(data) {
+  const el = document.getElementById("memoryMapContent");
+  if (!data.ok || data.total_memories === 0) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">🗂️</div>暂无长期记忆</div>';
+    return;
+  }
+  el.innerHTML = `
+    <div class="v11-item"><span class="label">总记忆数</span><span class="value">${data.total_memories || 0}</span></div>
+    <div class="v11-item"><span class="label">建议保留</span><span class="value">${(data.suggest_keep || []).length} 条</span></div>
+    <div class="v11-item"><span class="label">建议合并</span><span class="value">${(data.suggest_merge || []).length} 对</span></div>
+    <div class="v11-item"><span class="label">建议删除</span><span class="value">${(data.suggest_delete || []).length} 条</span></div>
+    <div class="v11-item"><span class="label">冲突记忆</span><span class="value">${(data.conflicts || []).length} 条</span></div>
+    <div class="v11-item"><span class="label">高价值</span><span class="value">${(data.high_value_items || []).length} 条</span></div>
+  `;
+}
+
+function renderMemoryHealthPanel(data) {
+  const el = document.getElementById("memoryHealthContent");
+  if (!data.ok) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">💊</div>暂无记忆健康数据</div>';
+    return;
+  }
+  el.innerHTML = `
+    <div class="v11-item"><span class="label">总记忆数</span><span class="value">${data.total_memories || 0}</span></div>
+    <div class="v11-item"><span class="label">建议保留</span><span class="value"><span class="v11-tag green">${(data.suggest_keep || []).length} 条</span></span></div>
+    <div class="v11-item"><span class="label">建议合并</span><span class="value"><span class="v11-tag blue">${(data.suggest_merge || []).length} 对</span></span></div>
+    <div class="v11-item"><span class="label">建议删除</span><span class="value"><span class="v11-tag red">${(data.suggest_delete || []).length} 条</span></span></div>
+    <div class="v11-item"><span class="label">过期条目</span><span class="value"><span class="v11-tag orange">${(data.stale_items || []).length} 条</span></span></div>
+    <div class="v11-item"><span class="label">冲突</span><span class="value">${(data.conflicts || []).length} 条</span></div>
+    ${data.summary_zh ? `<div style="margin-top:8px;font-size:12px;color:var(--text-secondary)">${esc(data.summary_zh)}</div>` : ""}
+  `;
+}
+
+function renderErrorPanel(panelId, error) {
+  const el = document.getElementById(panelId);
+  if (el) el.innerHTML = `<div class="empty-state" style="color:#bf360c">加载失败: ${esc(error)}</div>`;
+}
+
+function esc(text) {
+  const d = document.createElement("div");
+  d.textContent = text || "";
+  return d.innerHTML;
+}
+
+// ========== Real-time V11 event handling ==========
+// Patch applyEvent to handle V11 events
+const _originalApplyEvent = applyEvent;
+// We can't reassign applyEvent since it's already used, so we extend it via a wrapper
+// Instead, we'll add V11 handling in the existing applyEvent by extending the WebSocket handler
+
+// ========== Feedback Buttons ==========
+async function feedbackRemember() {
+  if (!runId) return;
+  const el = document.getElementById("feedbackResult");
+  el.textContent = "提交中...";
+  try {
+    const resp = await fetch("/api/feedback/remember", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({run_id: runId, user_note: "用户标记: 记住这个"}),
+    });
+    const data = await resp.json();
+    el.textContent = data.ok ? data.summary_zh : "提交失败";
+    el.style.color = data.ok ? "#2e7d32" : "#bf360c";
+  } catch (e) {
+    el.textContent = "网络错误";
+    el.style.color = "#bf360c";
+  }
+}
+
+async function feedbackDontDoThis() {
+  if (!runId) return;
+  const el = document.getElementById("feedbackResult");
+  el.textContent = "提交中...";
+  try {
+    const resp = await fetch("/api/feedback/dont-do-this-again", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({run_id: runId, user_note: "用户标记: 下次别这样"}),
+    });
+    const data = await resp.json();
+    el.textContent = data.ok ? data.summary_zh : "提交失败";
+    el.style.color = data.ok ? "#2e7d32" : "#bf360c";
+  } catch (e) {
+    el.textContent = "网络错误";
+    el.style.color = "#bf360c";
+  }
+}
+
+async function feedbackCorrectAndRemember() {
+  if (!runId) return;
+  const correction = prompt("请输入纠正内容:");
+  if (!correction) return;
+  const el = document.getElementById("feedbackResult");
+  el.textContent = "提交中...";
+  try {
+    const resp = await fetch("/api/feedback/correct-and-remember", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({run_id: runId, user_note: correction}),
+    });
+    const data = await resp.json();
+    el.textContent = data.ok ? data.summary_zh : "提交失败";
+    el.style.color = data.ok ? "#2e7d32" : "#bf360c";
+  } catch (e) {
+    el.textContent = "网络错误";
+    el.style.color = "#bf360c";
+  }
+}
+
+// Load V11 panels after history is loaded
+if (runId) {
+  setTimeout(() => loadV11Panels(runId), 1500);
+}

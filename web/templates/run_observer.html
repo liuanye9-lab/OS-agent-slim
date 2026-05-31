@@ -519,8 +519,119 @@
       .agent-label { font-size:12px; color:var(--text-secondary); }
       .agent-event-count { font-size:11px; color:var(--text-tertiary); margin-top:2px; }
     </style>
+
+    <!-- V11.1: Feedback Buttons -->
+    <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+      <button onclick="feedbackRemember()" style="padding:6px 14px;border-radius:8px;border:1px solid var(--glass-border);background:#e8f5e9;color:#2e7d32;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.2s">记住这个</button>
+      <button onclick="feedbackDontDoThis()" style="padding:6px 14px;border-radius:8px;border:1px solid var(--glass-border);background:#fbe9e7;color:#bf360c;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.2s">下次别这样</button>
+      <button onclick="feedbackCorrectAndRemember()" style="padding:6px 14px;border-radius:8px;border:1px solid var(--glass-border);background:#e8f0fe;color:#0071e3;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.2s">纠正并记住</button>
+      <span id="feedbackResult" style="font-size:12px;color:var(--text-secondary);align-self:center"></span>
+    </div>
   </div>
 </div>
+
+<!-- V11.1: Six Panels -->
+<div class="bottom-bar">
+  <div class="v11-grid">
+    <section id="understandingPanel" class="v11-panel">
+      <h3>理解轨迹</h3>
+      <p class="v11-desc">系统如何理解你的输入</p>
+      <div class="v11-content" id="understandingContent"><div class="empty-state"><div class="empty-icon">🧠</div>暂无理解轨迹数据</div></div>
+    </section>
+    <section id="tokenBudgetPanel" class="v11-panel">
+      <h3>Token 预算</h3>
+      <p class="v11-desc">上下文压缩的 token 节省情况</p>
+      <div class="v11-content" id="tokenBudgetContent"><div class="empty-state"><div class="empty-icon">📊</div>暂无 Token 数据</div></div>
+    </section>
+    <section id="memoryMapPanel" class="v11-panel">
+      <h3>记忆地图</h3>
+      <p class="v11-desc">系统记住了什么</p>
+      <div class="v11-content" id="memoryMapContent"><div class="empty-state"><div class="empty-icon">🗂️</div>暂无长期记忆</div></div>
+    </section>
+    <section id="badCasePanel" class="v11-panel">
+      <h3>失败案例库</h3>
+      <p class="v11-desc">本次记录的失败案例</p>
+      <div class="v11-content" id="badCaseContent"><div class="empty-state"><div class="empty-icon">📋</div>本次未记录失败案例</div></div>
+    </section>
+    <section id="skillEvolutionPanel" class="v11-panel">
+      <h3>Skill 进化</h3>
+      <p class="v11-desc">Skill 规则的验证与进化</p>
+      <div class="v11-content" id="skillEvolutionContent"><div class="empty-state"><div class="empty-icon">🧬</div>暂无 Skill 进化数据</div></div>
+    </section>
+    <section id="memoryHealthPanel" class="v11-panel">
+      <h3>记忆健康</h3>
+      <p class="v11-desc">记忆保留/合并/删除建议</p>
+      <div class="v11-content" id="memoryHealthContent"><div class="empty-state"><div class="empty-icon">💊</div>暂无记忆健康数据</div></div>
+    </section>
+  </div>
+</div>
+
+<style>
+  .v11-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+    max-width: 1440px;
+    margin: 0 auto;
+    padding: 0 24px 24px;
+  }
+  .v11-panel {
+    background: var(--glass-bg);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--card-radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+  }
+  .v11-panel h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .v11-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+  }
+  .v11-content {
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .v11-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .v11-item:last-child { border-bottom: none }
+  .v11-item .label { color: var(--text-secondary); font-size: 12px }
+  .v11-item .value { font-weight: 500; font-size: 13px }
+  .v11-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    margin: 2px 2px;
+  }
+  .v11-tag.green { background: #e8f5e9; color: #2e7d32 }
+  .v11-tag.red { background: #fbe9e7; color: #bf360c }
+  .v11-tag.blue { background: #e8f0fe; color: #0071e3 }
+  .v11-tag.orange { background: #fff3e0; color: #e65100 }
+  .v11-bar {
+    height: 8px;
+    background: rgba(0,0,0,0.06);
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 8px 0;
+  }
+  .v11-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+</style>
 
 <script src="/static/avatar_scene.js"></script>
 <script src="/static/run_observer.js"></script>
