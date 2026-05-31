@@ -98,3 +98,8 @@ def register_pages(app, templates_dir: str) -> None:
 
     @app.get("/observer")
     async def observer_page(): return _serve_html(_observer)
+
+    # V11.3: Effectiveness Dashboard page
+    _effectiveness = os.path.join(templates_dir, "effectiveness.html")
+    @app.get("/effectiveness")
+    async def effectiveness_page(): return _serve_html(_effectiveness)

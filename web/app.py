@@ -160,4 +160,26 @@ def create_app() -> FastAPI:
 
     register_api_routes(app, dash_sync, gateway_run_store=gateway_run_store, feedback_service=feedback_service)
 
+    # V11.3: Wire Effectiveness Dashboard
+    effectiveness_store = None
+    try:
+        from stable_agent.effectiveness import ExperimentStore
+        from web.routes.effectiveness import register_effectiveness_routes
+        effectiveness_store = ExperimentStore()
+        register_effectiveness_routes(app, effectiveness_store)
+        logger.info("Effectiveness Dashboard routes registered")
+    except Exception as exc:
+        logger.warning("Effectiveness Dashboard init failed: %s", exc)
+
+    # V11.3: Effectiveness page route
+    effectiveness_template = os.path.join(templates_dir, "effectiveness.html")
+    if os.path.exists(effectiveness_template):
+        @app.get("/effectiveness")
+        async def effectiveness_page():
+            with open(effectiveness_template, "r", encoding="utf-8") as f:
+                return HTMLResponse(content=f.read())
+        logger.info("Effectiveness page route registered")
+    else:
+        logger.warning("effectiveness.html template not found")
+
     return app

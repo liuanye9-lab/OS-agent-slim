@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Effectiveness Dashboard — StableAgent OS</title>
+<link rel="stylesheet" href="/static/effectiveness.css">
+</head>
+<body>
+
+<!-- Top Bar -->
+<header class="top-bar">
+  <div>
+    <div class="page-title">效果评估仪表盘</div>
+    <div class="page-subtitle">StableAgent A/B 对比实验</div>
+  </div>
+  <div class="top-actions">
+    <button onclick="openTaskModal()" class="btn btn-primary">新建任务</button>
+    <button onclick="openRunModal()" class="btn btn-secondary">记录运行</button>
+    <a href="/dashboard/observer" class="btn btn-link">← 返回 Observer</a>
+  </div>
+</header>
+
+<!-- Main Content -->
+<main class="main-content">
+
+  <!-- Summary Cards -->
+  <section class="summary-section">
+    <h2 class="section-title">总览</h2>
+    <div class="summary-grid" id="summaryGrid">
+      <div class="summary-card">
+        <div class="summary-label">总任务数</div>
+        <div class="summary-value" id="totalTasks">0</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">总运行数</div>
+        <div class="summary-value" id="totalRuns">0</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">有效任务</div>
+        <div class="summary-value success" id="effectiveTasks">0</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">平均 Token 节省</div>
+        <div class="summary-value" id="avgTokenSave">--</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Comparison Table -->
+  <section class="table-section">
+    <h2 class="section-title">任务对比</h2>
+    <div class="table-wrap">
+      <table class="comparison-table" id="comparisonTable">
+        <thead>
+          <tr>
+            <th>任务 ID</th>
+            <th>描述</th>
+            <th>Baseline</th>
+            <th>StableAgent</th>
+            <th>成功率差</th>
+            <th>Token 差</th>
+            <th>意图漂移差</th>
+            <th>结论</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="comparisonBody">
+          <tr><td colspan="9" class="empty-row">暂无数据，请创建任务并记录运行</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Task Form Modal -->
+  <div class="modal" id="taskModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>新建评估任务</h3>
+        <button onclick="closeTaskModal()" class="close-btn">&times;</button>
+      </div>
+      <form onsubmit="submitTask(event)">
+        <div class="form-group">
+          <label>任务 ID</label>
+          <input type="text" id="taskIdInput" placeholder="例如: fix-auth-bug">
+        </div>
+        <div class="form-group">
+          <label>任务描述</label>
+          <textarea id="taskDescInput" rows="3" placeholder="描述这个任务的内容..."></textarea>
+        </div>
+        <div class="form-group">
+          <label>分类</label>
+          <select id="taskCategoryInput">
+            <option value="general">通用</option>
+            <option value="architecture">架构设计</option>
+            <option value="refactoring">重构</option>
+            <option value="bugfix">Bug 修复</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" onclick="closeTaskModal()" class="btn btn-secondary">取消</button>
+          <button type="submit" class="btn btn-primary">创建</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Run Form Modal -->
+  <div class="modal" id="runModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>记录运行结果</h3>
+        <button onclick="closeRunModal()" class="close-btn">&times;</button>
+      </div>
+      <form onsubmit="submitRun(event)">
+        <div class="form-group">
+          <label>任务 ID</label>
+          <select id="runTaskIdSelect"></select>
+        </div>
+        <div class="form-group">
+          <label>模式</label>
+          <select id="runModeSelect">
+            <option value="baseline">Baseline</option>
+            <option value="stableagent">StableAgent</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>是否成功</label>
+            <select id="runSuccessSelect">
+              <option value="true">成功</option>
+              <option value="false">失败</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>编辑次数</label>
+            <input type="number" id="runEditsInput" value="0" min="0">
+          </div>
+          <div class="form-group">
+            <label>文件变更数</label>
+            <input type="number" id="runFilesInput" value="0" min="0">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Token 用量</label>
+            <input type="number" id="runTokensInput" value="0" min="0">
+          </div>
+          <div class="form-group">
+            <label>意图漂移 (0-1)</label>
+            <input type="number" id="runDriftInput" value="0" min="0" max="1" step="0.01">
+          </div>
+          <div class="form-group">
+            <label>耗时 (秒)</label>
+            <input type="number" id="runDurationInput" value="0" min="0" step="0.1">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>错误信息 (可选)</label>
+          <input type="text" id="runErrorInput" placeholder="失败时的错误描述...">
+        </div>
+        <div class="form-actions">
+          <button type="button" onclick="closeRunModal()" class="btn btn-secondary">取消</button>
+          <button type="submit" class="btn btn-primary">记录</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</main>
+
+<script src="/static/effectiveness.js"></script>
+</body>
+</html>
