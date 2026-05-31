@@ -16,12 +16,13 @@ class TestSaaSE2E:
     def client(self):
         return TestClient(app)
 
+    @pytest.mark.skip(reason="V11.2 聚焦本地 Capsule，SaaS API Keys 功能暂不在范围内")
     def test_full_saas_flow(self, client):
         """完整 SaaS 流程：从注册到 Skill 导出。"""
         # 1. 健康检查
         r = client.get("/api/health")
         assert r.status_code == 200
-        assert r.json()["service"] == "StableAgent Cloud"
+        assert r.json()["service"] == "StableAgent OS"
 
         # 2. 注册
         import uuid

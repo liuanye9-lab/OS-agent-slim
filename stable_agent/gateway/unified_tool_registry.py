@@ -1066,7 +1066,7 @@ class UnifiedToolRegistry:
                     from stable_agent.capsule import ensure_capsule
                     from stable_agent.understanding.expression_profile import ExpressionProfileManager
                     capsule_path = ensure_capsule()
-                    expr_mgr = ExpressionProfileManager(storage_path=str(capsule_path / "profile" / "expressions.jsonl"))
+                    expr_mgr = ExpressionProfileManager(storage_path=str(capsule_path / "profile" / "expressions.json"))
                     interpreter = SemanticInterpreter(expression_manager=expr_mgr)
                 except Exception as expr_exc:
                     logging.getLogger(__name__).warning(
@@ -1838,9 +1838,10 @@ class UnifiedToolRegistry:
         try:
             from stable_agent.understanding.semantic_interpreter import SemanticInterpreter
             from stable_agent.understanding.expression_profile import ExpressionProfileManager
-            import os
+            from stable_agent.capsule import ensure_capsule
 
-            expr_path = os.path.join("data", "expressions.json")
+            capsule_path = ensure_capsule()
+            expr_path = str(capsule_path / "profile" / "expressions.json")
             expr_mgr = ExpressionProfileManager(storage_path=expr_path)
             interpreter = SemanticInterpreter(expression_manager=expr_mgr)
             trace = interpreter.interpret(task_input, run_id=run_id)
@@ -1907,9 +1908,10 @@ class UnifiedToolRegistry:
 
         try:
             from stable_agent.understanding.expression_profile import ExpressionProfileManager
-            import os
+            from stable_agent.capsule import ensure_capsule
 
-            expr_path = os.path.join("data", "expressions.json")
+            capsule_path = ensure_capsule()
+            expr_path = str(capsule_path / "profile" / "expressions.json")
             mgr = ExpressionProfileManager(storage_path=expr_path)
             profiles = mgr.list_expressions(scope=scope)
 
@@ -1938,9 +1940,10 @@ class UnifiedToolRegistry:
 
         try:
             from stable_agent.understanding.expression_profile import ExpressionProfileManager
-            import os
+            from stable_agent.capsule import ensure_capsule
 
-            expr_path = os.path.join("data", "expressions.json")
+            capsule_path = ensure_capsule()
+            expr_path = str(capsule_path / "profile" / "expressions.json")
             mgr = ExpressionProfileManager(storage_path=expr_path)
             profile = mgr.add_expression(
                 phrase=phrase, meaning=meaning, scope=scope, confirmed=confirmed,
@@ -1968,9 +1971,10 @@ class UnifiedToolRegistry:
 
         try:
             from stable_agent.understanding.expression_profile import ExpressionProfileManager
-            import os
+            from stable_agent.capsule import ensure_capsule
 
-            expr_path = os.path.join("data", "expressions.json")
+            capsule_path = ensure_capsule()
+            expr_path = str(capsule_path / "profile" / "expressions.json")
             mgr = ExpressionProfileManager(storage_path=expr_path)
             deleted = mgr.delete_expression(phrase)
 

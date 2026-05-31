@@ -59,7 +59,7 @@ def _make_service(tmp_dir: str, validation_passes: bool = True) -> FeedbackLearn
     runner = PassValidationRunner() if validation_passes else FailValidationRunner()
     return FeedbackLearningService(
         eval_case_manager=EvalCaseManager(storage_path=os.path.join(tmp_dir, "evals.jsonl")),
-        skill_patch_store=SkillPatchStore(storage_path=os.path.join(tmp_dir, "patches.jsonl")),
+        skill_patch_store=SkillPatchStore(),  # SkillPatchStore 不接受 storage_path 参数
         regression_runner=runner,
         human_review_queue=HumanReviewQueue(),
         memory_store=MemoryUpdateStore(),

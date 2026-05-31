@@ -49,3 +49,4 @@ htmlcov/
 start.ps1
 data/*.json
 data/*.backup
+.stableagent-capsule/

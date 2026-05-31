@@ -688,6 +688,7 @@ function renderUnderstandingPanel(data) {
     ${(t.protected_constraints || []).length > 0 ? `<div class="v11-item"><span class="label">保护约束</span><span class="value">${t.protected_constraints.map(c => `<span class="v11-tag green">${esc(c)}</span>`).join("")}</span></div>` : ""}
     ${(t.uncertainties || []).length > 0 ? `<div class="v11-item"><span class="label">不确定点</span><span class="value">${t.uncertainties.map(u => `<span class="v11-tag orange">${esc(u)}</span>`).join("")}</span></div>` : ""}
     ${(t.semantic_risk_flags || []).length > 0 ? `<div class="v11-item"><span class="label">风险标记</span><span class="value">${t.semantic_risk_flags.map(f => `<span class="v11-tag red">${esc(f)}</span>`).join("")}</span></div>` : ""}
+    ${(t.expression_matches || []).length > 0 ? `<div class="v11-item"><span class="label">表达习惯匹配</span><span class="value">${t.expression_matches.map(m => `<span class="v11-tag green">${esc(m.phrase || m.normalized_meaning || JSON.stringify(m))}</span>`).join("")}</span></div>` : ""}
   `;
 }
 

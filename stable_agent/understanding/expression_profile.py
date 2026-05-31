@@ -134,6 +134,60 @@ class ExpressionProfileManager:
                 matches.append(profile)
         return matches
 
+    def update_expression_rule(
+        self,
+        phrase: str,
+        corrected_meaning: str | list[str],
+        source: str = "user_correction",
+        confirmed: bool = False,
+        confidence: float = 0.7,
+    ) -> str:
+        """更新或创建表达规则。
+
+        如果 phrase 已存在，更新 normalized_meaning、confidence、examples/source。
+        如果 phrase 不存在，创建新的 ExpressionProfile（默认非 confirmed）。
+
+        Args:
+            phrase: 用户表达短语（key）。
+            corrected_meaning: 标准化含义，str 或 list[str]。
+            source: 来源标签。
+            confirmed: 是否经用户确认（默认 False，candidate 状态）。
+            confidence: 置信度（默认 0.7）。
+
+        Returns:
+            phrase 作为 rule_id。
+        """
+        meanings = [corrected_meaning] if isinstance(corrected_meaning, str) else corrected_meaning
+
+        # 检查是否已存在
+        for p in self._profiles:
+            if p.phrase == phrase:
+                # 更新已有记录
+                p.normalized_meaning = meanings
+                p.confirmed_by_user = confirmed
+                p.confidence = confidence
+                if not p.examples:
+                    p.examples = []
+                if source not in p.examples:
+                    p.examples.append(f"[{source}]")
+                # 更新 scope 为 global（用户纠正的表达默认全局）
+                p.scope = ExpressionScope.GLOBAL
+                self._save()
+                return p.phrase
+
+        # 新建
+        profile = ExpressionProfile(
+            phrase=phrase,
+            normalized_meaning=meanings,
+            scope=ExpressionScope.GLOBAL,
+            confirmed_by_user=confirmed,
+            confidence=confidence,
+            examples=[f"[{source}]"],
+        )
+        self._profiles.append(profile)
+        self._save()
+        return phrase
+
     def _load(self) -> None:
         """从 JSON 文件加载。"""
         if not self._storage_path or not os.path.exists(self._storage_path):

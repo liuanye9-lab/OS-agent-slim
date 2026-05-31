@@ -56,7 +56,7 @@ class FeedbackLearningService:
         self.human_review_queue = human_review_queue or HumanReviewQueue()
         self.memory_store = memory_store or MemoryUpdateStore()
         self.expression_manager = expression_manager or ExpressionProfileManager(
-            data_dir=os.path.join(base, "profile"),
+            storage_path=os.path.join(base, "profile", "expressions.json"),
         )
         self._bad_cases_path = os.path.join(base, "bad_cases.jsonl")
 
@@ -84,6 +84,7 @@ class FeedbackLearningService:
         except Exception as exc:
             logger.warning("Failed to create memory candidate: %s", exc)
             errors.append({"stage": "memory_candidate", "error": str(exc)})
+            memory_candidate = None  # 写入失败，标记为 None
 
         return {
             "ok": len(errors) == 0,
@@ -157,15 +158,14 @@ class FeedbackLearningService:
         patch_candidate = None
         try:
             patch_candidate = SkillPatchCandidate(
-                run_id=run_id or "feedback-dont-do-this",
-                trigger="user_feedback:dont_do_this_again",
-                task_type=ctx.get("task_type", "general"),
+                source_run_id=run_id or "feedback-dont-do-this",
+                failure_mode=f"[user_feedback] {user_note or '下次别这样'}",
                 old_rule=ctx.get("old_rule", ""),
                 new_rule=user_note or "用户反馈: 下次别这样",
-                summary=user_note or "用户反馈: 下次别这样",
-                source_run_ids=[run_id] if run_id else [],
+                expected_improvement=f"避免重复: {user_note}" if user_note else "避免重复之前的错误",
+                risk_level="low",
             )
-            self.skill_patch_store.save(patch_candidate)
+            self.skill_patch_store.add(patch_candidate)
             logger.info("Created skill patch candidate %s", patch_candidate.patch_id)
         except Exception as exc:
             logger.warning("Failed to create skill patch candidate: %s", exc)

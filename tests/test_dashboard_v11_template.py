@@ -170,38 +170,41 @@ class TestDashboardV11API:
         assert "get_run_badcases" in content
 
     def test_api_file_has_v11_global_endpoints(self):
-        """api.py 包含 V11 全局端点定义。"""
+        """api.py 包含 V11 全局端点路由定义。"""
         api_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "web", "routes", "api.py",
         )
         with open(api_path, "r", encoding="utf-8") as f:
             content = f.read()
-        assert "api_token_summary" in content
-        assert "api_capsule_status" in content
-        assert "api_memory_health" in content
-        assert "api_feedback_remember" in content
-        assert "api_feedback_dont_do_this_again" in content
-        assert "api_feedback_correct_and_remember" in content
+        # V11.2: 路由使用 @router.get("/api/...")，不需要 api_ 前缀
+        assert '"/api/token/summary"' in content
+        assert '"/api/capsule/status"' in content
+        assert '"/api/memory/health"' in content
+        assert '"/api/feedback/remember"' in content
+        assert '"/api/feedback/dont-do-this-again"' in content
+        assert '"/api/feedback/correct-and-remember"' in content
 
     def test_feedback_uses_memory_lifecycle(self):
-        """反馈 API 使用 MemoryLifecycleManager 做持久化。"""
+        """反馈 API 使用 FeedbackLearningService 内部处理记忆生命周期。"""
         api_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "web", "routes", "api.py",
         )
         with open(api_path, "r", encoding="utf-8") as f:
             content = f.read()
-        assert "MemoryLifecycleManager" in content
-        assert "add_candidate" in content
+        # V11.2: feedback_service 是闭环入口，内部调用 memory_store
+        assert "feedback_service" in content
+        assert "handle_remember" in content
 
     def test_feedback_uses_eval_case_manager(self):
-        """dont_do_this_again 使用 EvalCaseManager。"""
+        """dont_do_this_again 使用 FeedbackLearningService 内部 EvalCaseManager。"""
         api_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "web", "routes", "api.py",
         )
         with open(api_path, "r", encoding="utf-8") as f:
             content = f.read()
-        assert "EvalCaseManager" in content
-        assert "create_case" in content
+        # V11.2: FeedbackLearningService 内部使用 eval_case_manager
+        assert "feedback_service" in content
+        assert "handle_dont_do_this_again" in content

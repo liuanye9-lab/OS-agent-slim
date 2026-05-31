@@ -11,7 +11,7 @@ from stable_agent.capsule.schemas import (
     CapsuleStats,
 )
 from stable_agent.capsule.manifest import ManifestManager
-from stable_agent.capsule.capsule_manager import CapsuleManager
+from stable_agent.capsule.capsule_manager import CapsuleManager, ensure_capsule
 from stable_agent.capsule.import_export import CapsuleImportExport
 from stable_agent.capsule.capsule_doctor import CapsuleDoctor
 from stable_agent.capsule.memory_lifecycle import MemoryLifecycleManager
@@ -22,6 +22,7 @@ __all__ = [
     "CapsuleStats",
     "ManifestManager",
     "CapsuleManager",
+    "ensure_capsule",
     "CapsuleImportExport",
     "CapsuleDoctor",
     "MemoryLifecycleManager",

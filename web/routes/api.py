@@ -16,6 +16,34 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# ===================================================================
+# Health
+# ===================================================================
+
+@router.get("/api/health")
+async def health():
+    """服务健康检查。"""
+    return {"ok": True, "service": "StableAgent OS", "version": "v11.2"}
+
+# ===================================================================
+# Usage
+# ===================================================================
+
+@router.get("/api/usage")
+async def usage(workspace_id: str | None = None):
+    """查询用量摘要。V11.2: 读取 BudgetLedger 真实数据。"""
+    try:
+        from stable_agent.token.budget_ledger import BudgetLedger
+        from stable_agent.capsule import ensure_capsule
+        capsule_path = ensure_capsule()
+        db_path = str(capsule_path / "token_ledger" / "usage.sqlite")
+        ledger = BudgetLedger(db_path=db_path)
+        summary = ledger.summarize_period(days=30)
+        return {"ok": True, "workspace_id": workspace_id, **summary}
+    except Exception as exc:
+        logger.warning("usage endpoint failed: %s", exc)
+        return {"ok": False, "workspace_id": workspace_id, "errors": [str(exc)]}
+
 # Dependencies injected by register_api_routes
 _dash_sync = None
 _gateway_run_store = None
@@ -67,33 +95,98 @@ async def graph():
 
 @router.get("/api/token/summary")
 async def token_summary():
-    """Token 总消耗。"""
-    return {
-        "total_tokens": 0,
-        "prompt_tokens": 0,
-        "context_tokens": 0,
-        "result_tokens": 0,
-        "by_tool": {},
-    }
+    """Token 总消耗 — 读取 BudgetLedger 真实数据。"""
+    try:
+        from stable_agent.token.budget_ledger import BudgetLedger
+        from stable_agent.capsule import ensure_capsule
+        capsule_path = ensure_capsule()
+        db_path = str(capsule_path / "token_ledger" / "usage.sqlite")
+        ledger = BudgetLedger(db_path=db_path)
+        days = 7
+        summary = ledger.summarize_period(days=days)
+        return {"ok": True, **summary}
+    except Exception as exc:
+        logger.warning("token_summary failed: %s", exc)
+        return {"ok": False, "errors": [{"stage": "token_summary", "error": str(exc)}]}
 
 
 @router.get("/api/capsule/status")
 async def capsule_status():
-    """Capsule 状态。"""
-    return {
-        "status": "active",
-        "skills": 0,
-        "memories": 0,
-        "expression_rules": 0,
-    }
+    """Capsule 状态 — 读取胶囊目录真实数据。"""
+    try:
+        from stable_agent.capsule import ensure_capsule
+        from pathlib import Path
+        import json
+
+        capsule_path = ensure_capsule()
+        manifest_path = capsule_path / "manifest.json"
+        manifest = {}
+        if manifest_path.exists():
+            try:
+                with open(manifest_path, encoding="utf-8") as f:
+                    manifest = json.load(f)
+            except Exception as exc:
+                logger.debug("Failed to load capsule manifest: %s", exc)
+
+        # 统计各项数据
+        stats = {
+            "memory_count": 0,
+            "skill_count": 0,
+            "bad_case_count": 0,
+            "eval_case_count": 0,
+            "expression_rules": 0,
+        }
+
+        # 统计 expression rules
+        expr_path = capsule_path / "profile" / "expressions.json"
+        if expr_path.exists():
+            try:
+                with open(expr_path, encoding="utf-8") as f:
+                    expr_data = json.load(f)
+                    if isinstance(expr_data, list):
+                        stats["expression_rules"] = len(expr_data)
+            except Exception as exc:
+                logger.debug("Failed to load capsule manifest: %s", exc)
+
+        # 统计 bad cases
+        bc_path = capsule_path / "bad_cases.jsonl"
+        if bc_path.exists():
+            try:
+                with open(bc_path, encoding="utf-8") as f:
+                    stats["bad_case_count"] = sum(1 for _ in f)
+            except Exception as exc:
+                logger.debug("Failed to load capsule manifest: %s", exc)
+
+        # 统计 eval cases
+        eval_path = capsule_path / "evals" / "personal_eval_cases.jsonl"
+        if eval_path.exists():
+            try:
+                with open(eval_path, encoding="utf-8") as f:
+                    stats["eval_case_count"] = sum(1 for _ in f)
+            except Exception as exc:
+                logger.debug("Failed to load capsule manifest: %s", exc)
+
+        return {
+            "ok": True,
+            "exists": True,
+            "path": str(capsule_path),
+            "schema_version": manifest.get("version", "v11"),
+            "stats": stats,
+        }
+    except Exception as exc:
+        logger.warning("capsule_status failed: %s", exc)
+        return {"ok": False, "errors": [{"stage": "capsule_status", "error": str(exc)}]}
 
 
 @router.get("/api/memory/health")
 async def memory_health():
-    """记忆健康状态。"""
+    """记忆健康状态 — 读取 MemoryLifecycleManager 真实数据。"""
     try:
-        manager = MemoryLifecycleManager()
-        stats = manager.get_stats()
+        from stable_agent.capsule import ensure_capsule
+        from stable_agent.capsule.memory_lifecycle import MemoryLifecycleManager
+        capsule_path = ensure_capsule()
+        manager = MemoryLifecycleManager(capsule_path=capsule_path)
+        stats = manager.generate_memory_health_report()
         return {"ok": True, "data": stats}
     except Exception as exc:
         logger.warning("memory_health failed: %s", exc)
@@ -103,19 +196,27 @@ async def memory_health():
 # ---- V11.1: Feedback endpoints ----
 
 def _append_run_event(event_type: str, payload: dict | None = None):
-    """向 gateway_run_store 追加事件（如果可用）。"""
+    """向 gateway_run_store 追加事件（如果可用）。
+
+    事件格式：所有 payload 字段展开到顶层，保证 Dashboard 和 /learning API 都能读到。
+    """
     if _gateway_run_store is None:
         return
     try:
         import time
-        _gateway_run_store.append_event(
-            payload.get("run_id", "feedback") if payload else "feedback",
-            {
-                "event_type": event_type,
-                "timestamp": time.time(),
-                "payload": payload or {},
-            },
-        )
+        run_id = (payload or {}).get("run_id", "feedback")
+        event_data = {
+            "event_type": event_type,
+            "run_id": run_id,
+            "timestamp": time.time(),
+        }
+        # 展开 payload 字段到顶层
+        if payload:
+            for k, v in payload.items():
+                if k != "run_id":
+                    event_data[k] = v
+            event_data["payload"] = payload
+        _gateway_run_store.append_event(run_id, event_data)
     except Exception as exc:
         logger.warning("Failed to append run event %s: %s", event_type, exc)
 
@@ -139,7 +240,7 @@ async def feedback_remember(request: Request):
         )
         _append_run_event("feedback.received", {"action": "remember", "run_id": run_id})
         if result.get("generated", {}).get("memory_update_candidate"):
-            _append_run_event("memory.candidate.created", {"run_id": run_id})
+            _append_run_event("memory.update.candidate", {"run_id": run_id})
         return result
 
     # Fallback: 无 service 时降级
