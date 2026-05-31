@@ -18,7 +18,9 @@
 
 ## 为什么需要 StableAgent？
 
-AI Agent 在长任务中会**降智**：遗忘关键约束、偏离原始目标、产生幻觉。StableAgent 是一个 MCP 协议的"外脑"，接入 Claude Code / Cursor / Codex，通过**时间感知记忆 + 上下文保护 + 真闭环自我优化**来防止降智。
+AI Agent 在长任务中会**降智**：遗忘关键约束、偏离原始目标、产生幻觉。StableAgent 是一个 MCP 协议的"外脑"，接入 Claude Code / Cursor / Codex，通过**时间感知记忆 + 上下文保护 + 语义理解 + Token 预算 + 真闭环自我优化**来防止降智。
+
+StableAgent 不训练模型权重，而是优化模型的外部使用层 — 让不同模型和不同 AI 工具都能更稳定地理解同一个用户。
 
 ```
                     ┌─────────────────────────────────────────────┐
@@ -59,7 +61,7 @@ StableAgent 最核心的承诺：**每一个事件从产生到展示，全链路
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │                          MCP Gateway (V5)                           │
-│  28 个标准工具 · JSON-RPC 2.0 · WebSocket 实时推送                    │
+│  55 个标准工具 · JSON-RPC 2.0 · WebSocket 实时推送                    │
 └──────────────────────┬───────────────────────────────────────────────┘
                        │
 ┌──────────────────────▼───────────────────────────────────────────────┐
@@ -102,6 +104,12 @@ StableAgent 最核心的承诺：**每一个事件从产生到展示，全链路
 │                    Web Layer (FastAPI)                                │
 │  ├── /mcp                 — MCP JSON-RPC                             │
 │  ├── /api/runs/{id}/events — 结构化 {run_id, event_count, events}    │
+│  ├── /api/runs/{id}/understanding — V11 语义理解轨迹                 │
+│  ├── /api/runs/{id}/token — V11 Token 预算报告                      │
+│  ├── /api/runs/{id}/learning — V11 自我优化事件                     │
+│  ├── /api/token/summary   — V11 Token 使用摘要                      │
+│  ├── /api/capsule/status  — V11 胶囊状态                            │
+│  ├── /api/memory/health   — V11 记忆健康报告                        │
 │  ├── /observe/{id}        — Dashboard Observer (302 from /runs/{id}) │
 │  └── /ws/runs/{id}        — WebSocket 实时事件                       │
 ├──────────────────────────────────────────────────────────────────────┤
@@ -110,6 +118,8 @@ StableAgent 最核心的承诺：**每一个事件从产生到展示，全链路
 │  ├── WebSocket 实时补充                                              │
 │  ├── API/WebSocket/Replay 状态显示                                    │
 │  ├── 像素人 Canvas 17 场景 (avatar_state 驱动)                       │
+│  ├── V11 六大面板: 理解轨迹/Token预算/记忆地图/失败案例/Skill进化/记忆健康│
+│  ├── V11 反馈按钮: 记住这个/下次别这样/纠正并记住                      │
 │  └── 无事件 → "同步异常" (不允许静默空白)                              │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -246,16 +256,37 @@ cp .env.example .env
 # 3. 安装依赖
 pip install -r requirements.txt
 
-# 4. 运行测试
+# 4. 初始化 Agent Capsule (V11)
+python -m stable_agent.cli capsule init
+
+# 5. 运行测试
 pytest tests/ -q --ignore=tests/test_mcp_gateway.py
 
-# 5. 启动
+# 6. 启动
 uvicorn web.server:app --host 0.0.0.0 --port 8000
 
-# 6. 访问
+# 7. 访问
 #   Dashboard: http://127.0.0.1:8000
 #   MCP:       http://127.0.0.1:8000/mcp
 #   API Docs:  http://127.0.0.1:8000/docs
+```
+
+## 开发者使用流程
+
+```
+创建 capsule → 启动 server → 接入 MCP → 运行 os_agent
+     │              │            │            │
+     ▼              ▼            ▼            ▼
+  capsule init   uvicorn    mcpServers   stableagent.task.os_agent
+     │                                      │
+     ▼                                      ▼
+  .stableagent-capsule/              Dashboard 自动展示:
+  ├── capsule_manifest.json          ├── 理解轨迹
+  ├── memory/                        ├── Token 预算
+  ├── skills/                        ├── 记忆地图
+  └── model_profiles/                ├── 失败案例
+                                     ├── Skill 进化
+                                     └── 记忆健康
 ```
 
 ## MCP 集成
@@ -277,6 +308,13 @@ uvicorn web.server:app --host 0.0.0.0 --port 8000
 | `stableagent.task.os_agent` | 主入口: 多阶段编排 + 事件链 + 自我优化 |
 | `stableagent.task.quickstart` | 快速启动: 简化参数 |
 | `stableagent.memory.query` | 查询时间感知记忆 |
+| `stableagent.memory.health` | 记忆健康报告 (V11) |
+| `stableagent.capsule.status` | 胶囊状态 (V11) |
+| `stableagent.capsule.doctor` | 胶囊体检 (V11) |
+| `stableagent.understanding.trace` | 语义理解轨迹 (V11) |
+| `stableagent.token.report` | Token 报告 (V11) |
+| `stableagent.feedback.remember` | 记住这个 (V11) |
+| `stableagent.feedback.dont_do_this_again` | 下次别这样 (V11) |
 | `stableagent.skill.list` | 列出已验证技能 |
 | `stableagent.run.list` | 列出运行历史 |
 | `stableagent.run.observe` | 观察运行详情 |
@@ -285,7 +323,7 @@ uvicorn web.server:app --host 0.0.0.0 --port 8000
 
 | 测试 | 命令 | 结果 |
 |------|------|------|
-| **单元测试** | `pytest tests/ -q --ignore=tests/test_mcp_gateway.py` | **1108 passed**, 0 failures |
+| **单元测试** | `pytest tests/ -q --ignore=tests/test_mcp_gateway.py` | **1274 passed**, 0 failures |
 | **闭环结构检查** | `python tools/check_closed_loop.py` | **30/30 PASS** |
 | **集成测试** | `bash scripts/integration_test.sh` | 三条路径 fail-fast |
 | **真实 LLM E2E** | `bash scripts/real_llm_e2e_test.sh` | **6/6 PASS** (阿里云 qwen-plus) |
@@ -301,16 +339,17 @@ uvicorn web.server:app --host 0.0.0.0 --port 8000
 
 | 指标 | 数值 |
 |------|------|
-| Python 代码 | ~55K 行 |
+| Python 代码 | ~57K 行 |
 | JavaScript 代码 | ~271K 行 |
-| HTML 模板 | ~2.4K 行 |
-| Python 模块 | 239 文件 |
-| 测试用例 | 1108 个 |
-| MCP 工具 | 28 个 |
+| HTML 模板 | ~2.5K 行 |
+| Python 模块 | 245 文件 |
+| 测试用例 | 1274 个 |
+| MCP 工具 | 55 个 |
 | 必需事件类型 | 13 (正常) + 4 (失败) |
+| V11 可选事件 | 6 (understanding + token + feedback) |
 | 闭环结构检查 | 30 项 |
 | RunLifecycle 阶段 | 22 个 |
-| 核心子模块 | 15 个 |
+| 核心子模块 | 22 个 |
 
 ## 核心模块
 
@@ -328,12 +367,29 @@ stable_agent/
 │   └── context_compression_guard.py  # 6 层保护
 ├── self_improvement/     # 自我优化闭环
 │   └── proof_loop.py     # Eval→Failure→Regression→Validation→HumanReview→Export
+├── capsule/              # V11: Agent Capsule 本地胶囊层
+│   ├── capsule_manager.py # 胶囊生命周期管理
+│   ├── memory_lifecycle.py # 四层记忆结构 + SQLite 持久化
+│   └── capsule_doctor.py  # 胶囊健康检查
+├── understanding/        # V11: 语义理解轨迹
+│   ├── semantic_interpreter.py # 规则版语义理解
+│   └── expression_profile.py  # 用户表达习惯管理
+├── token/                # V11: Token 预算账本
+│   ├── budget_ledger.py  # SQLite 持久化
+│   └── token_estimator.py # Token 估算
+├── model_profile/        # V11: 模型学生档案
+│   ├── model_profile.py  # 模型画像管理
+│   └── model_router.py   # 模型推荐路由
+├── personal_eval/        # V11: 个人评测 + 反馈闭环
+│   ├── ab_regression_runner.py # A-B 回归验证器
+│   └── feedback_loop.py  # 反馈处理器
 ├── observation/          # 观测层
 │   ├── run_store.py      # 内存存储 (单例)
 │   ├── event_stream.py   # 事件流
 │   └── decision_trace_builder.py  # 可解释决策
 ├── security/             # 安全
 │   └── secret_masker.py  # 密钥脱敏
+├── cli.py                # V11: CLI 入口
 ├── evals/                # 评估
 ├── intent/               # 意图解析
 ├── skill_optimizer/      # 技能优化
@@ -351,11 +407,37 @@ stable_agent/
 | 前端 | Vanilla HTML/CSS/JS (零框架依赖) |
 | UI 风格 | 玻璃拟态 + Canvas 像素人 |
 | 架构 | 分层 + EventBus 事件驱动 |
-| 测试 | pytest (1108 tests) |
+| 测试 | pytest (1274 tests) |
 | 持久化 | SQLite (sqlite3 标准库) |
 | Token 估算 | tiktoken 优先, fallback 启发式 |
 | LLM 集成 | OpenAI Compatible API (阿里云 qwen-plus 验证) |
 | 协议 | MCP (JSON-RPC 2.0) |
+
+## V11 API 列表
+
+### Run 级 API
+
+| 端点 | 说明 |
+|------|------|
+| `GET /api/runs/{run_id}/events` | 事件列表 (V10) |
+| `GET /api/runs/{run_id}/understanding` | 语义理解轨迹 (V11) |
+| `GET /api/runs/{run_id}/token` | Token 预算报告 (V11) |
+| `GET /api/runs/{run_id}/learning` | 自我优化事件 (V11) |
+| `GET /api/runs/{run_id}/badcases` | 失败案例 (V11) |
+| `POST /api/runs/{run_id}/feedback` | 用户反馈 (V10) |
+
+### 全局 API
+
+| 端点 | 说明 |
+|------|------|
+| `GET /api/token/summary?days=7` | Token 使用摘要 (V11) |
+| `GET /api/capsule/status` | 胶囊状态 (V11) |
+| `GET /api/memory/health` | 记忆健康报告 (V11) |
+| `POST /api/feedback/remember` | 记住这个 (V11) |
+| `POST /api/feedback/dont-do-this-again` | 下次别这样 (V11) |
+| `POST /api/feedback/correct-and-remember` | 纠正并记住 (V11) |
+| `GET /api/health` | 服务健康检查 |
+| `GET /api/connect/health` | MCP 连通性检查 |
 
 ## 文档
 
@@ -371,12 +453,14 @@ stable_agent/
 | [IMPLEMENTATION_LOG.md](IMPLEMENTATION_LOG.md) | 实施日志 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更记录 |
 | [V11_UPGRADE_REPORT.md](docs/V11_UPGRADE_REPORT.md) | V11 升级报告 |
+| [V11_PRODUCTION_WIRING.md](docs/V11_PRODUCTION_WIRING.md) | V11.1 生产接线报告 |
 | [DEVELOPER_QUICKSTART.md](docs/DEVELOPER_QUICKSTART.md) | 快速开始 |
 
 ## 版本历史
 
 | 版本 | 日期 | 核心变更 |
 |------|------|---------|
+| **V11.1** | 2026-05-31 | Production Wiring: os_agent 接入 Understanding Trace + Token Budget, V11 API 路由 (10个), Dashboard 六大面板 + 反馈三按钮 |
 | **V11** | 2026-05-31 | Agent Capsule: 胶囊管理 + 记忆生命周期 + 语义理解 + Token 预算 + 模型画像 + 个人评测 + 反馈闭环 + CLI, 1274 tests, 55 MCP tools |
 | **V10** | 2026-05-31 | 100% 闭环: 禁止 emitted_events fallback, event_api_ok, dashboard_replay_ok, 真实 LLM E2E (阿里云), key 安全脱敏, 30/30 checks |
 | V9.2 | 2026-05-31 | 事件链硬化: _tool_router 注入, REQUIRED_NORMAL_EVENTS 13项, fail-fast, 404 未知 run |
