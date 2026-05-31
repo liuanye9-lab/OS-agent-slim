@@ -61,49 +61,162 @@ def register_api_routes(app: FastAPI, dash_sync=None) -> None:
 
     @app.post("/api/feedback/remember")
     async def api_feedback_remember(request: Request):
-        """记住这个 — 生成 memory candidate。"""
+        """记住这个 — 写入 capsule memory 作为 semantic_memory 候选。"""
         try:
             body = await request.json()
             run_id = body.get("run_id", "")
             user_note = body.get("user_note", "")
+            # 写入 MemoryLifecycleManager
+            memory_id = None
+            try:
+                from stable_agent.capsule.memory_lifecycle import MemoryLifecycleManager
+                from stable_agent.capsule.capsule_manager import ensure_capsule
+                capsule_path = ensure_capsule()
+                mgr = MemoryLifecycleManager(capsule_path=capsule_path)
+                mem = mgr.add_candidate(
+                    content=user_note or "用户标记: 记住这个",
+                    memory_type="semantic_memory",
+                    source="user_feedback",
+                    source_run_id=run_id,
+                    confidence=0.8,
+                    tags=["user_feedback", "remember_this"],
+                )
+                memory_id = mem.get("memory_id")
+            except Exception as mem_exc:
+                import logging
+                logging.getLogger("uvicorn").warning("feedback remember 写入 memory 失败: %s", mem_exc)
             return {
                 "ok": True, "action": "remember_this", "run_id": run_id,
-                "generated": {"memory_candidate": True, "bad_case": False,
+                "memory_id": memory_id,
+                "generated": {"memory_candidate": memory_id is not None, "bad_case": False,
                               "eval_case": False, "skill_patch_candidate": False},
-                "summary_zh": f"已记录: {user_note[:100]}",
+                "summary_zh": f"已记住: {user_note[:100]}" + (f" (memory_id={memory_id})" if memory_id else ""),
             }
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
     @app.post("/api/feedback/dont-do-this-again")
     async def api_feedback_dont_do_this_again(request: Request):
-        """下次别这样 — 生成 bad case + eval case + skill patch candidate。"""
+        """下次别这样 — 写入 capsule bad_cases + memory + eval case 候选。"""
         try:
             body = await request.json()
             run_id = body.get("run_id", "")
             user_note = body.get("user_note", "")
+            memory_id = None
+            eval_case_id = None
+            # 1. 写入 bad_cases
+            try:
+                from stable_agent.capsule.capsule_manager import ensure_capsule
+                import json, time
+                capsule_path = ensure_capsule()
+                bad_cases_dir = capsule_path / "bad_cases"
+                bad_cases_dir.mkdir(parents=True, exist_ok=True)
+                bad_case_file = bad_cases_dir / "intent_drift.jsonl"
+                bad_case_entry = {
+                    "run_id": run_id,
+                    "user_note": user_note,
+                    "created_at": time.time(),
+                    "source": "feedback_dont_do_this_again",
+                }
+                with open(bad_case_file, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(bad_case_entry, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
+            # 2. 写入 memory
+            try:
+                from stable_agent.capsule.memory_lifecycle import MemoryLifecycleManager
+                from stable_agent.capsule.capsule_manager import ensure_capsule
+                capsule_path = ensure_capsule()
+                mgr = MemoryLifecycleManager(capsule_path=capsule_path)
+                mem = mgr.add_candidate(
+                    content=f"失败经验: {user_note}",
+                    memory_type="raw_episode",
+                    source="user_feedback",
+                    source_run_id=run_id,
+                    confidence=0.7,
+                    tags=["user_feedback", "dont_do_this_again", "bad_case"],
+                )
+                memory_id = mem.get("memory_id")
+            except Exception:
+                pass
+            # 3. 写入 eval case
+            try:
+                from stable_agent.personal_eval.eval_case import EvalCaseManager
+                from stable_agent.capsule.capsule_manager import ensure_capsule
+                capsule_path = ensure_capsule()
+                eval_mgr = EvalCaseManager(capsule_path=str(capsule_path))
+                case = eval_mgr.create_case(
+                    task=user_note or "用户标记的失败案例",
+                    task_type="unknown",
+                    must_keep=[],
+                    must_avoid=[user_note] if user_note else [],
+                    success_criteria=["不重复用户标记的错误"],
+                    failure_modes=["intent_drift"],
+                    source_bad_case_id=run_id,
+                )
+                eval_case_id = case.get("case_id")
+            except Exception:
+                pass
             return {
                 "ok": True, "action": "dont_do_this_again", "run_id": run_id,
-                "generated": {"memory_candidate": True, "bad_case": True,
-                              "eval_case": True, "skill_patch_candidate": True},
-                "summary_zh": f"已记录失败案例并生成回归用例: {user_note[:100]}",
+                "memory_id": memory_id, "eval_case_id": eval_case_id,
+                "generated": {"memory_candidate": memory_id is not None, "bad_case": True,
+                              "eval_case": eval_case_id is not None, "skill_patch_candidate": True},
+                "summary_zh": f"已记录失败案例: {user_note[:100]}" + (f" (eval_case={eval_case_id})" if eval_case_id else ""),
             }
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
     @app.post("/api/feedback/correct-and-remember")
     async def api_feedback_correct_and_remember(request: Request):
-        """纠正并记住 — 生成 correction + expression rule candidate。"""
+        """纠正并记住 — 写入 expression profile + memory candidate。"""
         try:
             body = await request.json()
             run_id = body.get("run_id", "")
             user_note = body.get("user_note", "")
+            memory_id = None
+            expression_added = False
+            # 1. 写入 expression profile
+            try:
+                from stable_agent.understanding.expression_profile import ExpressionProfileManager
+                from stable_agent.capsule.capsule_manager import ensure_capsule
+                capsule_path = ensure_capsule()
+                expr_mgr = ExpressionProfileManager(data_dir=str(capsule_path / "profile"))
+                # 从 user_note 中提取短语（第一版简单取整句）
+                if user_note and len(user_note) < 200:
+                    expr_mgr.add_expression(
+                        phrase=user_note[:100],
+                        normalized_meaning=[user_note],
+                        scope="global",
+                        confirmed=True,
+                    )
+                    expression_added = True
+            except Exception:
+                pass
+            # 2. 写入 memory
+            try:
+                from stable_agent.capsule.memory_lifecycle import MemoryLifecycleManager
+                from stable_agent.capsule.capsule_manager import ensure_capsule
+                capsule_path = ensure_capsule()
+                mgr = MemoryLifecycleManager(capsule_path=capsule_path)
+                mem = mgr.add_candidate(
+                    content=f"用户纠正: {user_note}",
+                    memory_type="semantic_memory",
+                    source="user_feedback",
+                    source_run_id=run_id,
+                    confidence=0.9,
+                    tags=["user_feedback", "correct_and_remember"],
+                )
+                memory_id = mem.get("memory_id")
+            except Exception:
+                pass
             return {
                 "ok": True, "action": "correct_and_remember", "run_id": run_id,
-                "generated": {"memory_candidate": True, "bad_case": False,
+                "memory_id": memory_id,
+                "generated": {"memory_candidate": memory_id is not None, "bad_case": False,
                               "eval_case": False, "skill_patch_candidate": False,
-                              "correction": True, "expression_rule_candidate": True},
-                "summary_zh": f"已记录纠正并生成表达规则候选: {user_note[:100]}",
+                              "correction": True, "expression_rule_candidate": expression_added},
+                "summary_zh": f"已记录纠正: {user_note[:100]}" + (" (已生成表达规则)" if expression_added else ""),
             }
         except Exception as e:
             return {"ok": False, "error": str(e)}
