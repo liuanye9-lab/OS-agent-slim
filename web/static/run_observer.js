@@ -92,7 +92,28 @@ const $siReport    = document.getElementById("siReport");
 
 // ========== URL param ==========
 const params = new URLSearchParams(window.location.search);
-const runId   = params.get("run_id");
+
+// V11.4: 从三个位置获取 run_id（按优先级）：
+// 1. URL 查询参数 ?run_id=xxx
+// 2. 页面 meta 标签 <meta name="run-id" content="xxx">
+// 3. URL 路径 /observe/{run_id}
+let runId = params.get("run_id");
+
+if (!runId) {
+  // 尝试从 meta 标签获取（由 /observe/{run_id} 路由注入）
+  const metaEl = document.querySelector('meta[name="run-id"]');
+  if (metaEl) {
+    runId = metaEl.getAttribute("content");
+  }
+}
+
+if (!runId) {
+  // 尝试从 URL 路径提取 /observe/{run_id}
+  const pathMatch = window.location.pathname.match(/^\/observe\/([^\/]+)$/);
+  if (pathMatch) {
+    runId = pathMatch[1];
+  }
+}
 
 if (runId) {
   $runId.textContent = runId;
@@ -105,6 +126,11 @@ if (runId) {
   loadHistoryAndConnect(runId);
   // V11.3.1: 页面加载后检查是否有当前 run_id 的效果评估数据，显示快捷入口
   checkEffectivenessForRun(runId);
+} else {
+  // 没有 run_id 时显示提示
+  addLogLine("warn", "未提供 run_id 参数");
+  $mcpStatus.textContent = "未连接";
+  $mcpStatus.className = "mcp-status disconnected";
 }
 
 // ========== API History Replay + WebSocket ==========
@@ -112,11 +138,16 @@ async function loadHistoryAndConnect(runId) {
   let historyEvents = [];
   let apiEventCount = 0;
   let dashboardReplayOk = false;
+  let apiOk = false;
+
+  addLogLine("info", `开始加载历史事件: ${runId}`);
 
   // Step 1: 请求 API 获取历史事件
   try {
     const resp = await fetch(`/api/runs/${runId}/events`);
+
     if (resp.ok) {
+      apiOk = true;
       const data = await resp.json();
       // V10: 结构化返回 { run_id, event_count, events: [...] }
       if (data && typeof data === "object" && Array.isArray(data.events)) {
@@ -129,41 +160,71 @@ async function loadHistoryAndConnect(runId) {
       }
 
       if (historyEvents.length > 0) {
-        // 回放历史事件到 UI
+        // V11.4: 回放历史事件到 UI
+        addLogLine("info", `API 返回 ${historyEvents.length} 个事件，开始回放...`);
         for (const evt of historyEvents) {
           applyEvent(evt);
         }
-        addLogLine("info", `API 回放 ${historyEvents.length} 个历史事件 (event_count=${apiEventCount})`);
+        addLogLine("info", `✅ API 回放 ${historyEvents.length} 个历史事件 (event_count=${apiEventCount})`);
         dashboardReplayOk = true;
+
+        // V11.4: 检查是否有完成事件
+        const hasCompletedEvent = historyEvents.some(evt =>
+          evt.event_type === "run.completed" ||
+          evt.event_type === "run.finished" ||
+          evt.progress_pct >= 100
+        );
+
+        if (hasCompletedEvent) {
+          addLogLine("info", "✅ 检测到完成事件");
+        }
+      } else {
+        addLogLine("warn", "API 返回事件列表为空");
       }
+
       // 更新 API 状态显示
       updateEventApiStatus(true, apiEventCount, dashboardReplayOk);
     } else if (resp.status === 404) {
       addLogLine("warn", `Run ${runId} 不存在 (404)`);
       updateEventApiStatus(false, 0, false);
+      // V11.4: 显示明确错误
+      $nowStatus.textContent = "运行不存在";
+      $whyText.textContent = `Run ID: ${runId} 未找到`;
     } else {
       addLogLine("warn", `API 返回 HTTP ${resp.status}`);
       updateEventApiStatus(false, 0, false);
+      // V11.4: 显示 API 错误
+      $nowStatus.textContent = "事件 API 读取失败";
+      $whyText.textContent = `HTTP ${resp.status}`;
     }
   } catch (err) {
-    addLogLine("warn", `API 回放失败: ${err.message}`);
+    console.error("API 回放失败:", err);
+    addLogLine("error", `API 回放失败: ${err.message}`);
     updateEventApiStatus(false, 0, false);
+    // V11.4: 显示网络错误
+    $nowStatus.textContent = "事件 API 读取失败";
+    $whyText.textContent = err.message;
   }
 
   // Step 2: 连接 WebSocket 获取实时事件
   connectWebSocket(runId);
 
-  // Step 3: 如果 API 和 WebSocket 都无事件，显示同步错误
+  // Step 3: 如果 API 和 WebSocket 都无事件，显示提示
   setTimeout(() => {
     const ws = activeConnections.get(runId);
     const wsConnected = ws && ws.readyState === WebSocket.OPEN;
-    const timelineEmpty = $timelineCol && $timelineCol.children.length === 0;
 
-    if (historyEvents.length === 0 && !wsConnected) {
-      showSyncError("同步异常：未收到任何事件（API 和 WebSocket 均无数据）");
+    if (!apiOk) {
+      showSyncError("事件 API 读取失败，请检查后端服务");
+    } else if (historyEvents.length === 0 && !wsConnected) {
+      showSyncError("暂无历史事件，WebSocket 也未连接");
     } else if (historyEvents.length === 0 && wsConnected) {
-      addLogLine("warn", "历史事件为空，仅显示实时事件");
+      addLogLine("info", "暂无历史事件，等待实时事件...");
       showHistoryEmptyNotice();
+      $nowStatus.textContent = "等待事件";
+      $whyText.textContent = "暂无历史事件，等待实时事件流";
+    } else if (historyEvents.length > 0 && !dashboardReplayOk) {
+      showSyncError("事件回放失败");
     }
   }, 3000);
 }
