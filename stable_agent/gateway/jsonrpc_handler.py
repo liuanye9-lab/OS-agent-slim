@@ -11,9 +11,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from stable_agent.gateway.response_adapter import ResponseAdapter
+
+logger = logging.getLogger(__name__)
 
 
 class JSONRPCHandler:
@@ -35,7 +38,7 @@ class JSONRPCHandler:
 
     # 服务器名称和版本
     SERVER_NAME: str = "StableAgent OS"
-    SERVER_VERSION: str = "5.0.0"
+    SERVER_VERSION: str = "11.4.0"
     PROTOCOL_VERSION: str = "2024-11-05"
 
     def __init__(
@@ -183,6 +186,7 @@ class JSONRPCHandler:
                 "result": mcp_content,
             }
         except Exception as exc:
+            logger.exception("tools/call 异常: tool=%s, args=%s", tool_name, arguments)
             error_response: dict[str, Any] = self._adapter.to_error_response(
                 "", tool_name, f"工具调用失败：{exc}"
             )

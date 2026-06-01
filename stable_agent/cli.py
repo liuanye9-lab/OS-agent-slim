@@ -179,7 +179,10 @@ def cmd_mcp_config(args: argparse.Namespace) -> None:
 
 
 def cmd_task_run(args: argparse.Namespace) -> None:
-    """执行 StableAgent 任务 (CLI Mode)。"""
+    """执行 StableAgent 任务 (CLI Mode)。
+
+    优先调用本地 HTTP MCP，如果 server 不可达则返回明确错误。
+    """
     task_input: str = args.task_input
     open_dashboard: bool = args.open_dashboard
     use_json: bool = args.json
@@ -199,15 +202,47 @@ def cmd_task_run(args: argparse.Namespace) -> None:
     try:
         result = _http_post(mcp_url, rpc_body, timeout=60.0)
     except Exception as exc:
-        error_data = {"ok": False, "error": f"StableAgent server 未启动或请求失败: {exc}",
-                       "hint": "请先运行: python -m stable_agent.cli serve"}
+        error_data = {
+            "ok": False,
+            "run_id": "",
+            "dashboard_url": "",
+            "observer_url": "",
+            "missing_required_events": [],
+            "understanding_trace": None,
+            "token_report": None,
+            "expression_matches": None,
+            "error": f"StableAgent server 未启动或请求失败: {exc}",
+            "suggestion": "请先运行: PYTHONPATH=. .venv/bin/python -m stable_agent.cli serve",
+            "hint": "检查服务是否运行: PYTHONPATH=. .venv/bin/python -m stable_agent.cli health --json"
+        }
+        _output(error_data, args)
+        sys.exit(1)
+
+    # V11.4: 检查 JSON-RPC 错误
+    if "error" in result:
+        rpc_error = result["error"]
+        error_data = {
+            "ok": False,
+            "run_id": "",
+            "dashboard_url": "",
+            "observer_url": "",
+            "missing_required_events": [],
+            "understanding_trace": None,
+            "token_report": None,
+            "expression_matches": None,
+            "error": f"JSON-RPC 错误: {rpc_error.get('message', '未知错误')}",
+            "code": rpc_error.get("code"),
+            "suggestion": "检查工具名称和参数是否正确"
+        }
         _output(error_data, args)
         sys.exit(1)
 
     rpc_result = result.get("result", {})
     sc = rpc_result.get("structuredContent", {})
+
+    # V11.4: 从 structuredContent 提取核心字段，确保都有默认值
     output = {
-        "ok": rpc_result.get("ok", not rpc_result.get("isError", False)),
+        "ok": sc.get("ok", not rpc_result.get("isError", False)),
         "run_id": sc.get("run_id", ""),
         "dashboard_url": f"{base}{sc.get('dashboard_url', '')}" if sc.get("dashboard_url") else "",
         "observer_url": f"{base}{sc.get('observer_url', '')}" if sc.get("observer_url") else "",
@@ -215,7 +250,13 @@ def cmd_task_run(args: argparse.Namespace) -> None:
         "understanding_trace": sc.get("understanding_trace"),
         "token_report": sc.get("token_report"),
         "expression_matches": sc.get("expression_matches"),
+        "error": sc.get("error"),  # V11.4: 错误信息
     }
+
+    # V11.4: 确保 ok=false 时必须有 error 字段
+    if not output["ok"] and not output["error"]:
+        output["error"] = sc.get("plain_text") or rpc_result.get("plain_text") or "工具调用失败，原因未知"
+
     _output(output, args)
 
     if open_dashboard and output.get("observer_url"):

@@ -9,9 +9,79 @@
 <h1 align="center">StableAgent OS</h1>
 
 <p align="center">
-  <strong>给 AI Coding Agent 配一套“外接大脑”</strong><br />
+  <strong>给 AI Coding Agent 配一套"外接大脑"</strong><br />
   <sub>记住你的习惯 · 防止任务跑偏 · 记录失败经验 · 可视化每一次 Agent 思考</sub>
 </p>
+
+---
+
+## V11.4 MCP + CLI Dual Gateway
+
+V11.4 彻底打通 StableAgent 的 MCP 和 CLI 通道，提供三种可用入口：
+
+### 三种模式对比
+
+| 模式 | 是否需要 server | Claude Code 是否识别为工具 | 稳定性 | 适合场景 |
+|---|---|---|---|---|
+| HTTP MCP | 需要 | 是 | 中高 | 正式集成 |
+| stdio MCP | 不需要 | 是 | 高 | Claude Code 本地稳定集成 |
+| CLI | 不需要工具识别 | 否，通过 Bash | 最高 | fallback / 自动化 |
+
+### 1. HTTP MCP Mode
+
+Claude Code / Codex / Trae 通过 `http://127.0.0.1:8000/mcp/` 连接 StableAgent。
+
+**配置**：
+
+```json
+{
+  "mcpServers": {
+    "stableagent-http": {
+      "type": "http",
+      "url": "http://127.0.0.1:8000/mcp/",
+      "timeout": 60000
+    }
+  }
+}
+```
+
+**启动服务**：
+
+```bash
+PYTHONPATH=. .venv/bin/python -m stable_agent.cli serve
+```
+
+### 2. Native CLI Mode
+
+任何 Coding 软件都可以通过命令行调用：
+
+```bash
+PYTHONPATH=. .venv/bin/python -m stable_agent.cli task run \
+  --task-input "任务描述" \
+  --open-dashboard \
+  --json
+```
+
+### 3. Stdio MCP Mode
+
+把 CLI 包装成一个 stdio MCP server，让 Claude Code 可以通过本地命令方式加载 StableAgent，不依赖 HTTP 服务：
+
+```json
+{
+  "mcpServers": {
+    "stableagent-stdio": {
+      "type": "stdio",
+      "command": "/Users/Zhuanz/OS-Agent/OS-Agent/.venv/bin/python",
+      "args": ["-m", "stable_agent.mcp_stdio"],
+      "env": {
+        "PYTHONPATH": "/Users/Zhuanz/OS-Agent/OS-Agent"
+      }
+    }
+  }
+}
+```
+
+**详细配置指南**：[docs/CLAUDE_CODE_MCP_SETUP.md](docs/CLAUDE_CODE_MCP_SETUP.md)
 
 ---
 
@@ -373,7 +443,7 @@ python -m pip install -r requirements.txt
 
 ```bash
 # 推荐使用 CLI 启动
-PYTHONPATH=. python -m stable_agent.cli serve
+PYTHONPATH=. .venv/bin/python -m stable_agent.cli serve
 
 # 或直接使用 uvicorn
 # PYTHONPATH=. uvicorn web.server:app --host 127.0.0.1 --port 8000
@@ -397,13 +467,13 @@ http://127.0.0.1:8000/api/health
 ### 4. 健康检查（V11.4）
 
 ```bash
-PYTHONPATH=. python -m stable_agent.cli health --json
+PYTHONPATH=. .venv/bin/python -m stable_agent.cli health --json
 ```
 
 ### 5. 执行任务（V11.4 CLI Mode）
 
 ```bash
-PYTHONPATH=. python -m stable_agent.cli task run \
+PYTHONPATH=. .venv/bin/python -m stable_agent.cli task run \
   --task-input "你的任务描述" \
   --open-dashboard \
   --json
@@ -476,19 +546,19 @@ MCP 是推荐集成方式，但不同 Coding 软件对 MCP 的支持不稳定（
 ### 启动服务（推荐用 CLI）
 
 ```bash
-PYTHONPATH=. python -m stable_agent.cli serve
+PYTHONPATH=. .venv/bin/python -m stable_agent.cli serve
 ```
 
 ### 健康检查
 
 ```bash
-PYTHONPATH=. python -m stable_agent.cli health --json
+PYTHONPATH=. .venv/bin/python -m stable_agent.cli health --json
 ```
 
 ### 执行任务
 
 ```bash
-PYTHONPATH=. python -m stable_agent.cli task run \
+PYTHONPATH=. .venv/bin/python -m stable_agent.cli task run \
   --task-input "继续优化这个项目，不要AI味，不要大范围重构无关文件" \
   --open-dashboard \
   --json
@@ -498,15 +568,15 @@ PYTHONPATH=. python -m stable_agent.cli task run \
 
 ```bash
 # 记住这个
-PYTHONPATH=. python -m stable_agent.cli feedback remember \
+PYTHONPATH=. .venv/bin/python -m stable_agent.cli feedback remember \
   --run-id run_xxx --note "以后记住这个约束" --json
 
 # 下次别这样
-PYTHONPATH=. python -m stable_agent.cli feedback dont \
+PYTHONPATH=. .venv/bin/python -m stable_agent.cli feedback dont \
   --run-id run_xxx --note "下次不要大范围重构无关文件" --json
 
 # 纠正表达习惯
-PYTHONPATH=. python -m stable_agent.cli feedback correct \
+PYTHONPATH=. .venv/bin/python -m stable_agent.cli feedback correct \
   --run-id run_xxx \
   --phrase "不要AI味" \
   --meaning "避免模板化表达，保持克制，减少空泛营销腔" \
@@ -516,7 +586,7 @@ PYTHONPATH=. python -m stable_agent.cli feedback correct \
 ### 效果评估
 
 ```bash
-PYTHONPATH=. python -m stable_agent.cli effectiveness summary --json
+PYTHONPATH=. .venv/bin/python -m stable_agent.cli effectiveness summary --json
 ```
 
 ### MCP Mode vs CLI Mode
@@ -537,6 +607,7 @@ PYTHONPATH=. python -m stable_agent.cli effectiveness summary --json
 |---|---|
 | MCP Gateway | 已支持 JSON-RPC / tools / health / SSE |
 | CLI Mode (V11.4) | 已支持 task run / serve / health / feedback / effectiveness / dashboard |
+| stdio MCP Server (V11.4) | 已支持 initialize / tools/list / tools/call |
 | stableagent.task.os_agent | 已接入主流程 |
 | Understanding Trace | 已支持 |
 | Expression Profile | 已支持 |
@@ -545,7 +616,7 @@ PYTHONPATH=. python -m stable_agent.cli effectiveness summary --json
 | Bad Case → Eval Case → Skill Patch | 已支持 |
 | Validation → Human Review | 已支持 |
 | Dashboard 六大面板 | 已支持 |
-| AGENTS.md / CLAUDE.md | 已支持（含 CLI fallback 规则） |
+| AGENTS.md / CLAUDE.md | 已支持（含 MCP/CLI 优先级规则） |
 | Effectiveness Dashboard | MVP 已支持，仍需真实 A/B 数据积累 |
 
 ---
@@ -592,7 +663,7 @@ flowchart TB
     V11 --> V112[V11.2<br/>Trustworthy Feedback Loop]
     V112 --> V113[V11.3<br/>Default Agent Rules + Effectiveness MVP]
     V113 --> V1131[V11.3.1<br/>Effectiveness Hardening]
-    V1131 --> V114[V11.4<br/>CLI Mode + MCP Fallback]
+    V1131 --> V114[V11.4<br/>MCP + CLI Dual Gateway]
     V114 --> V12[V12<br/>多工具稳定接入与真实数据评测]
 ```
 

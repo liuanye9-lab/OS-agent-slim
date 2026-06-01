@@ -68,19 +68,29 @@ class UnifiedToolRegistry:
     def list_tools(self) -> list[dict[str, Any]]:
         """返回所有 14 个注册工具的 MCP 格式列表。
 
-        每个工具条目包含 name、title、description 和 input_schema。
+        每个工具条目包含 name、title、description 和 inputSchema（MCP 标准字段名）。
+        同时保留 input_schema 以兼容旧版调试端点。
 
         Returns:
             MCP 格式工具定义列表。
         """
         result: list[dict[str, Any]] = []
         for tool_name, tool_def in TOOLS.items():
-            result.append({
+            # MCP 标准要求 inputSchema (camelCase)；
+            # 优先取 inputSchema，否则从 input_schema 转换，兜底空 object
+            input_schema = (
+                tool_def.get("inputSchema")
+                or tool_def.get("input_schema")
+                or {"type": "object", "properties": {}}
+            )
+            entry: dict[str, Any] = {
                 "name": tool_def["name"],
-                "title": tool_def.get("title", ""),
                 "description": tool_def.get("description", ""),
-                "input_schema": tool_def.get("input_schema", {}),
-            })
+                "inputSchema": input_schema,
+            }
+            if "title" in tool_def:
+                entry["title"] = tool_def["title"]
+            result.append(entry)
         return result
 
     # ------------------------------------------------------------------

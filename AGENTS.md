@@ -22,28 +22,34 @@
 - 运行已知的测试命令
 - 执行 git 操作（status、log、diff）
 
-## 调用方式
-
 ## StableAgent Calling Priority
 
-1. **Prefer MCP**: call `stableagent.task.os_agent`
+1. **优先使用 HTTP MCP**：call `stableagent.task.os_agent`
 
-2. **If MCP tool is not visible or unavailable**, use CLI fallback:
+2. **如果 HTTP MCP 不可用，使用 stdio MCP**：call `stableagent-stdio.task.os_agent`
+
+3. **如果 MCP 都不可用，使用 CLI fallback**：
 
 ```bash
-PYTHONPATH=. python -m stable_agent.cli task run \
+PYTHONPATH=. /Users/Zhuanz/OS-Agent/OS-Agent/.venv/bin/python -m stable_agent.cli task run \
   --task-input "<user task>" \
   --open-dashboard \
   --json
 ```
 
-After the CLI call, parse JSON and return:
+**禁止**：
+- 不要使用 `python`（会调用系统 Python 3.9，触发 StrEnum ImportError）
+- 不要使用 `python3`（会调用系统 Python 3.9，触发 StrEnum ImportError）
+- 必须使用 `.venv/bin/python`
+
+**必须返回**：
 - `run_id`
 - `dashboard_url`
 - `observer_url`
 - `missing_required_events`
 - `understanding_trace`
 - `token_report`
+- `expression_matches`
 
 Do not start editing files before either MCP or CLI creates a StableAgent run.
 
@@ -65,10 +71,14 @@ Do not start editing files before either MCP or CLI creates a StableAgent run.
 ```
 
 返回字段清单：
-- `result`: 建议方案或执行结果
-- `risk_assessment`: 风险评估（如有）
-- `requires_human_review`: 是否需要人工审批（bool）
-- `task_id`: 任务唯一标识（用于后续效果回传）
+- `ok`: 执行是否成功
+- `run_id`: 运行 ID
+- `dashboard_url`: Dashboard URL
+- `observer_url`: Observer URL
+- `missing_required_events`: 缺失的事件列表
+- `understanding_trace`: 理解轨迹
+- `token_report`: Token 报告
+- `expression_matches`: 表达匹配
 
 ## 返回处理
 
