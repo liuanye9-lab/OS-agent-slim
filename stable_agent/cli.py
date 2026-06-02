@@ -273,8 +273,14 @@ def cmd_task_run(args: argparse.Namespace) -> None:
 
 def cmd_serve(args: argparse.Namespace) -> None:
     """启动 StableAgent Web 服务。"""
+    import os
     host: str = args.host
     port: int = args.port
+    profile: str = getattr(args, "profile", "slim")
+
+    # 设置环境变量
+    os.environ["STABLEAGENT_PROFILE"] = profile
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         sock.bind((host, port))
@@ -285,15 +291,23 @@ def cmd_serve(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     base = f"http://{host}:{port}"
-    print(f"启动 StableAgent 服务...")
-    print(f"  Health URL:        {base}/api/health")
-    print(f"  MCP URL:           {base}/mcp/")
-    print(f"  Dashboard URL:     {base}/")
-    print(f"  Effectiveness URL: {base}/effectiveness")
+    print(f"启动 StableAgent 服务 (profile={profile})...")
+    if profile == "slim":
+        print(f"  Health URL:    {base}/api/cloud/health")
+        print(f"  MCP URL:       {base}/mcp/")
+        print(f"  Dashboard URL: {base}/slim")
+        app_module = "web.server_slim:app"
+    else:
+        print(f"  Health URL:        {base}/api/health")
+        print(f"  MCP URL:           {base}/mcp/")
+        print(f"  Dashboard URL:     {base}/")
+        print(f"  Effectiveness URL: {base}/effectiveness")
+        app_module = "web.server:app"
     print()
     try:
         import uvicorn
-        uvicorn.run("web.server:app", host=host, port=port, log_level="info")
+        uvicorn.run(app_module, host=host, port=port, log_level="info",
+                     workers=1 if profile == "slim" else 1)
     except ImportError:
         print("错误: uvicorn 未安装。请运行: pip install uvicorn")
         sys.exit(1)
@@ -438,8 +452,207 @@ def cmd_dashboard_open(args: argparse.Namespace) -> None:
             print("无法打开浏览器，请手动访问上述 URL。")
 
 
+def cmd_cloud_health(args: argparse.Namespace) -> None:
+    """Cloud Center 健康检查。"""
+    base = _base_url(args)
+    try:
+        result = _http_get(f"{base}/api/cloud/health", timeout=3.0)
+    except Exception as exc:
+        _output({"ok": False, "error": f"Cloud Center 不可达: {exc}",
+                 "suggestion": "请先运行: PYTHONPATH=. .venv/bin/python -m stable_agent.cli serve --profile slim"}, args)
+        sys.exit(1)
+    _output(result, args)
+    if not result.get("ok"):
+        sys.exit(1)
+
+
+def cmd_worker_start(args: argparse.Namespace) -> None:
+    """启动 Worker Agent。"""
+    from stable_agent.cloud.worker_client import WorkerClient
+    caps = args.capability if args.capability else ["coding", "shell"]
+    client = WorkerClient(
+        server_url=args.server,
+        worker_id=args.worker_id,
+        name=args.name,
+        machine_type=args.machine_type,
+        capabilities=caps,
+        poll_interval=args.poll_interval,
+        allow_shell=args.allow_shell,
+        token=args.token,
+    )
+    client.run()
+
+
+def cmd_worker_list(args: argparse.Namespace) -> None:
+    """列出 Workers。"""
+    base = _base_url(args)
+    try:
+        result = _http_get(f"{base}/api/workers", timeout=5.0)
+    except Exception as exc:
+        _output({"ok": False, "error": f"请求失败: {exc}",
+                 "suggestion": "请先运行: PYTHONPATH=. .venv/bin/python -m stable_agent.cli serve --profile slim"}, args)
+        sys.exit(1)
+    _output(result, args)
+
+
+def cmd_task_list(args: argparse.Namespace) -> None:
+    """列出任务。"""
+    base = _base_url(args)
+    status = getattr(args, "status", None)
+    url = f"{base}/api/tasks"
+    if status:
+        url += f"?status={status}"
+    try:
+        result = _http_get(url, timeout=5.0)
+    except Exception as exc:
+        _output({"ok": False, "error": f"请求失败: {exc}",
+                 "suggestion": "请先运行: PYTHONPATH=. .venv/bin/python -m stable_agent.cli serve --profile slim"}, args)
+        sys.exit(1)
+    _output(result, args)
+
+
 def _add_json_flag(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", default=False, help="JSON 输出模式")
+
+
+# ===================================================================
+# V12: Skill CLI Commands
+# ===================================================================
+
+
+def cmd_skill_search(args: argparse.Namespace) -> None:
+    """搜索技能。"""
+    try:
+        from stable_agent.skills.repo import SkillRepo
+        from stable_agent.skills.retriever import SkillRetriever
+        repo = SkillRepo()
+        retriever = SkillRetriever(repo)
+        results = retriever.search(args.query, top_k=args.top_k)
+        output = {
+            "ok": True,
+            "query": args.query,
+            "results": [r.to_dict() for r in results],
+            "count": len(results),
+        }
+    except Exception as exc:
+        output = {"ok": False, "error": str(exc)}
+        _output(output, args)
+        sys.exit(1)
+    _output(output, args)
+
+
+def cmd_skill_list(args: argparse.Namespace) -> None:
+    """列出技能。"""
+    try:
+        from stable_agent.skills.repo import SkillRepo
+        repo = SkillRepo()
+        skills = repo.list_skills(status=args.status)
+        output = {
+            "ok": True,
+            "skills": [s.to_dict() for s in skills],
+            "count": len(skills),
+        }
+    except Exception as exc:
+        output = {"ok": False, "error": str(exc)}
+        _output(output, args)
+        sys.exit(1)
+    _output(output, args)
+
+
+def cmd_skill_get(args: argparse.Namespace) -> None:
+    """获取技能详情。"""
+    try:
+        from stable_agent.skills.repo import SkillRepo
+        repo = SkillRepo()
+        skill = repo.get_skill(args.skill_id)
+        if skill is None:
+            output = {"ok": False, "error": f"Skill not found: {args.skill_id}"}
+            _output(output, args)
+            sys.exit(1)
+        output = {"ok": True, "skill": skill.to_dict()}
+    except Exception as exc:
+        output = {"ok": False, "error": str(exc)}
+        _output(output, args)
+        sys.exit(1)
+    _output(output, args)
+
+
+def cmd_skill_propose(args: argparse.Namespace) -> None:
+    """从 run 提议策展操作。"""
+    try:
+        from stable_agent.skills.repo import SkillRepo
+        from stable_agent.skills.curator_service import SkillCuratorService
+        repo = SkillRepo()
+        curator = SkillCuratorService(repo)
+        result = curator.curate_after_run(run_id=args.run_id)
+        output = result.to_dict()
+    except Exception as exc:
+        output = {"ok": False, "error": str(exc)}
+        _output(output, args)
+        sys.exit(1)
+    _output(output, args)
+
+
+def cmd_skill_apply(args: argparse.Namespace) -> None:
+    """应用策展操作。"""
+    output = {"ok": False, "error": "apply 需要通过 MCP 或 Dashboard 执行", "hint": "使用 stableagent.skill.apply_op MCP 工具"}
+    _output(output, args)
+    sys.exit(1)
+
+
+def cmd_skill_rollback(args: argparse.Namespace) -> None:
+    """回滚技能版本。"""
+    try:
+        from stable_agent.skills.repo import SkillRepo
+        from stable_agent.skills.rollback import SkillRollbackManager
+        repo = SkillRepo()
+        manager = SkillRollbackManager(repo)
+        result = manager.rollback(
+            skill_id=args.skill_id,
+            target_version=args.target_version,
+            reason="CLI rollback",
+        )
+        if result is None:
+            output = {"ok": False, "error": f"Rollback failed: version {args.target_version} not found"}
+            _output(output, args)
+            sys.exit(1)
+        output = {
+            "ok": True,
+            "skill_id": args.skill_id,
+            "new_version": result.version,
+            "rolled_back_to": args.target_version,
+        }
+    except Exception as exc:
+        output = {"ok": False, "error": str(exc)}
+        _output(output, args)
+        sys.exit(1)
+    _output(output, args)
+
+
+def cmd_skill_health(args: argparse.Namespace) -> None:
+    """技能库健康检查。"""
+    try:
+        from stable_agent.skills.repo import SkillRepo
+        repo = SkillRepo()
+        output = repo.health_check()
+    except Exception as exc:
+        output = {"ok": False, "error": str(exc)}
+        _output(output, args)
+        sys.exit(1)
+    _output(output, args)
+
+
+def cmd_skill_seed(args: argparse.Namespace) -> None:
+    """生成默认种子技能。"""
+    try:
+        from scripts.seed_default_skills import seed_default_skills
+        count = seed_default_skills()
+        output = {"ok": True, "created": count}
+    except Exception as exc:
+        output = {"ok": False, "error": str(exc)}
+        _output(output, args)
+        sys.exit(1)
+    _output(output, args)
 
 
 def _add_server_flags(parser: argparse.ArgumentParser) -> None:
@@ -506,6 +719,8 @@ def main() -> None:
     # ---- V11.4: serve ----
     serve_p = subparsers.add_parser("serve", help="启动 StableAgent Web 服务")
     _add_server_flags(serve_p)
+    serve_p.add_argument("--profile", default="slim", choices=["slim", "full"],
+                         help="运行 profile (默认: slim)")
     serve_p.set_defaults(func=cmd_serve)
 
     # ---- V11.4: health ----
@@ -600,6 +815,94 @@ def main() -> None:
     dash_open_p.add_argument("--print-only", action="store_true", default=False, help="只打印 URL")
     _add_server_flags(dash_open_p)
     dash_open_p.set_defaults(func=cmd_dashboard_open)
+
+    # ---- Slim Cloud: cloud ----
+    cloud_parser = subparsers.add_parser("cloud", help="Cloud Center 管理")
+    cloud_sub = cloud_parser.add_subparsers(dest="action")
+
+    cloud_health_p = cloud_sub.add_parser("health", help="Cloud 健康检查")
+    _add_server_flags(cloud_health_p)
+    _add_json_flag(cloud_health_p)
+    cloud_health_p.set_defaults(func=cmd_cloud_health)
+
+    # ---- Slim Cloud: worker ----
+    worker_parser = subparsers.add_parser("worker", help="Worker 管理")
+    worker_sub = worker_parser.add_subparsers(dest="action")
+
+    worker_start_p = worker_sub.add_parser("start", help="启动 Worker")
+    worker_start_p.add_argument("--server", default="http://127.0.0.1:18789", help="云端服务器地址")
+    worker_start_p.add_argument("--worker-id", required=True, help="Worker ID")
+    worker_start_p.add_argument("--name", default="", help="Worker 名称")
+    worker_start_p.add_argument("--machine-type", default="macos", help="机器类型")
+    worker_start_p.add_argument("--capability", action="append", default=[], help="能力 (可重复)")
+    worker_start_p.add_argument("--poll-interval", type=int, default=5, help="轮询间隔 (秒)")
+    worker_start_p.add_argument("--allow-shell", action="store_true", default=False, help="允许执行 shell 命令")
+    worker_start_p.add_argument("--token", default="", help="API Token")
+    worker_start_p.set_defaults(func=cmd_worker_start)
+
+    worker_list_p = worker_sub.add_parser("list", help="列出 Workers")
+    _add_server_flags(worker_list_p)
+    _add_json_flag(worker_list_p)
+    worker_list_p.set_defaults(func=cmd_worker_list)
+
+    # ---- Slim Cloud: task list ----
+    task_list_p = task_sub.add_parser("list", help="列出任务")
+    _add_server_flags(task_list_p)
+    _add_json_flag(task_list_p)
+    task_list_p.add_argument("--status", default=None, help="过滤状态")
+    task_list_p.set_defaults(func=cmd_task_list)
+
+    # ---- V12: skill ----
+    skill_parser = subparsers.add_parser("skill", help="技能管理 (SkillOS)")
+    skill_sub = skill_parser.add_subparsers(dest="action")
+
+    skill_search_p = skill_sub.add_parser("search", help="搜索技能")
+    skill_search_p.add_argument("--query", "-q", required=True, help="搜索查询")
+    skill_search_p.add_argument("--top-k", type=int, default=5, help="返回数量")
+    _add_server_flags(skill_search_p)
+    _add_json_flag(skill_search_p)
+    skill_search_p.set_defaults(func=cmd_skill_search)
+
+    skill_list_p = skill_sub.add_parser("list", help="列出技能")
+    skill_list_p.add_argument("--status", default="active", help="过滤状态")
+    _add_server_flags(skill_list_p)
+    _add_json_flag(skill_list_p)
+    skill_list_p.set_defaults(func=cmd_skill_list)
+
+    skill_get_p = skill_sub.add_parser("get", help="获取技能详情")
+    skill_get_p.add_argument("--skill-id", required=True, help="技能 ID")
+    _add_server_flags(skill_get_p)
+    _add_json_flag(skill_get_p)
+    skill_get_p.set_defaults(func=cmd_skill_get)
+
+    skill_propose_p = skill_sub.add_parser("propose", help="从 run 提议策展操作")
+    skill_propose_p.add_argument("--run-id", required=True, help="Run ID")
+    _add_server_flags(skill_propose_p)
+    _add_json_flag(skill_propose_p)
+    skill_propose_p.set_defaults(func=cmd_skill_propose)
+
+    skill_apply_p = skill_sub.add_parser("apply", help="应用策展操作")
+    skill_apply_p.add_argument("--op-id", required=True, help="操作 ID")
+    _add_server_flags(skill_apply_p)
+    _add_json_flag(skill_apply_p)
+    skill_apply_p.set_defaults(func=cmd_skill_apply)
+
+    skill_rollback_p = skill_sub.add_parser("rollback", help="回滚技能版本")
+    skill_rollback_p.add_argument("--skill-id", required=True, help="技能 ID")
+    skill_rollback_p.add_argument("--target-version", type=int, required=True, help="目标版本号")
+    _add_server_flags(skill_rollback_p)
+    _add_json_flag(skill_rollback_p)
+    skill_rollback_p.set_defaults(func=cmd_skill_rollback)
+
+    skill_health_p = skill_sub.add_parser("health", help="技能库健康检查")
+    _add_server_flags(skill_health_p)
+    _add_json_flag(skill_health_p)
+    skill_health_p.set_defaults(func=cmd_skill_health)
+
+    skill_seed_p = skill_sub.add_parser("seed", help="生成默认种子技能")
+    skill_seed_p.add_argument("--default", action="store_true", default=False, help="生成默认种子技能")
+    _add_json_flag(skill_seed_p)
+    skill_seed_p.set_defaults(func=cmd_skill_seed)
 
     args = parser.parse_args()
     if not args.command:

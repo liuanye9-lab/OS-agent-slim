@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StableAgent OS — Skill Dashboard</title>
+<link rel="stylesheet" href="/static/styles_v2.css">
+<link rel="stylesheet" href="/static/liquid_glass.css">
+<style>
+  .skill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .skill-card { padding: 16px; cursor: pointer; transition: transform 0.2s; }
+  .skill-card:hover { transform: translateY(-2px); }
+  .skill-card .name { font-weight: 700; font-size: 1rem; margin-bottom: 4px; }
+  .skill-card .desc { font-size: 0.85rem; color: var(--text-muted, #666); margin-bottom: 8px; }
+  .skill-card .meta { font-size: 0.75rem; color: var(--text-muted, #999); display: flex; gap: 12px; }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat-card { padding: 16px; text-align: center; }
+  .stat-card .value { font-size: 1.8rem; font-weight: 700; }
+  .stat-card .label { font-size: 0.8rem; color: var(--text-muted, #666); margin-top: 4px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+  .badge-active { background: #10b981; color: white; }
+  .badge-archived { background: #f59e0b; color: white; }
+  .badge-deleted { background: #ef4444; color: white; }
+  .badge-draft { background: #6b7280; color: white; }
+  .detail-panel { display: none; }
+  .detail-panel.active { display: block; }
+  .version-list { max-height: 300px; overflow-y: auto; }
+  .version-item { padding: 8px 12px; border-bottom: 1px solid var(--glass-border, #eee); }
+  .version-item:last-child { border-bottom: none; }
+  .search-box { display: flex; gap: 8px; margin-bottom: 16px; }
+  .search-box input { flex: 1; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--glass-border, #ddd); background: var(--glass-bg, #fff); }
+  .search-box button { padding: 8px 16px; border-radius: 8px; border: none; background: var(--accent, #3b82f6); color: white; cursor: pointer; }
+  .event-list { max-height: 400px; overflow-y: auto; }
+  .event-item { padding: 8px 12px; border-bottom: 1px solid var(--glass-border, #eee); font-size: 0.85rem; }
+  .event-item .op { font-weight: 600; }
+  .event-item .reason { color: var(--text-muted, #666); }
+  .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted, #999); }
+  .tab-bar { display: flex; gap: 4px; margin-bottom: 16px; }
+  .tab-bar button { padding: 8px 16px; border: none; background: transparent; cursor: pointer; border-bottom: 2px solid transparent; }
+  .tab-bar button.active { border-bottom-color: var(--accent, #3b82f6); font-weight: 600; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+</style>
+</head>
+<body class="liquid-bg">
+<div style="max-width:1200px;margin:0 auto;padding:20px;">
+  <!-- Header -->
+  <div class="glass-card" style="padding:12px 20px;margin-bottom:16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;">
+    <a href="/slim" style="font-weight:700;font-size:1.1rem;text-decoration:none;color:var(--text-primary,#333);">☁️ StableAgent OS</a>
+    <span style="flex:1;"></span>
+    <a href="/slim" class="btn-glass" style="text-decoration:none;padding:6px 14px;">📊 Dashboard</a>
+    <a href="/skills" class="btn-glass" style="text-decoration:none;padding:6px 14px;background:var(--accent,#3b82f6);color:#fff;">🧠 Skills</a>
+  </div>
+
+  <!-- Stats -->
+  <div class="stat-grid" id="stats-grid">
+    <div class="glass-card stat-card">
+      <div class="value" id="stat-active">-</div>
+      <div class="label">Active Skills</div>
+    </div>
+    <div class="glass-card stat-card">
+      <div class="value" id="stat-archived">-</div>
+      <div class="label">Archived</div>
+    </div>
+    <div class="glass-card stat-card">
+      <div class="value" id="stat-versions">-</div>
+      <div class="label">Total Versions</div>
+    </div>
+    <div class="glass-card stat-card">
+      <div class="value" id="stat-ops">-</div>
+      <div class="label">Curation Ops</div>
+    </div>
+    <div class="glass-card stat-card">
+      <div class="value" id="stat-usage">-</div>
+      <div class="label">Usage Records</div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tab-bar">
+    <button class="active" onclick="switchTab('skills')">📚 Skills</button>
+    <button onclick="switchTab('events')">📋 Curation Events</button>
+    <button onclick="switchTab('search')">🔍 Search</button>
+    <button onclick="switchTab('detail')">📄 Detail</button>
+  </div>
+
+  <!-- Skills Tab -->
+  <div class="tab-content active" id="tab-skills">
+    <div class="glass-card" style="padding:16px;">
+      <div style="font-weight:600;margin-bottom:12px;">📚 Skill Library</div>
+      <div class="skill-grid" id="skill-list">
+        <div class="empty-state">Loading skills...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Events Tab -->
+  <div class="tab-content" id="tab-events">
+    <div class="glass-card" style="padding:16px;">
+      <div style="font-weight:600;margin-bottom:12px;">📋 Curation Events</div>
+      <div class="event-list" id="event-list">
+        <div class="empty-state">Loading events...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search Tab -->
+  <div class="tab-content" id="tab-search">
+    <div class="glass-card" style="padding:16px;">
+      <div style="font-weight:600;margin-bottom:12px;">🔍 Search Skills</div>
+      <div class="search-box">
+        <input type="text" id="search-input" placeholder="搜索技能..." onkeyup="if(event.key==='Enter')searchSkills()">
+        <button onclick="searchSkills()">搜索</button>
+      </div>
+      <div id="search-results"></div>
+    </div>
+  </div>
+
+  <!-- Detail Tab -->
+  <div class="tab-content" id="tab-detail">
+    <div class="glass-card" style="padding:16px;">
+      <div style="font-weight:600;margin-bottom:12px;">📄 Skill Detail</div>
+      <div id="skill-detail">
+        <div class="empty-state">选择一个技能查看详情</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Tab switching
+function switchTab(tabName) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-bar button').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + tabName).classList.add('active');
+  event.target.classList.add('active');
+}
+
+// Load health stats
+async function loadStats() {
+  try {
+    const r = await fetch('/api/skills/health');
+    const d = await r.json();
+    document.getElementById('stat-active').textContent = d.active_skills || 0;
+    document.getElementById('stat-archived').textContent = d.archived_skills || 0;
+    document.getElementById('stat-versions').textContent = d.total_versions || 0;
+    document.getElementById('stat-ops').textContent = d.curation_ops_count || 0;
+    document.getElementById('stat-usage').textContent = d.usage_records || 0;
+  } catch(e) {
+    console.error('Failed to load stats:', e);
+  }
+}
+
+// Load skills
+async function loadSkills() {
+  try {
+    const r = await fetch('/api/skills?status=active');
+    const d = await r.json();
+    const skills = d.skills || [];
+    let html = '';
+    if (skills.length === 0) {
+      html = '<div class="empty-state">暂无技能，运行 <code>PYTHONPATH=. .venv/bin/python -m stable_agent.cli skill seed --default</code> 创建默认技能</div>';
+    } else {
+      skills.forEach(s => {
+        const badge = s.status === 'active' ? 'badge-active' :
+                      s.status === 'archived' ? 'badge-archived' :
+                      s.status === 'deleted' ? 'badge-deleted' : 'badge-draft';
+        html += `<div class="glass-card skill-card" onclick="loadDetail('${s.skill_id}')">
+          <div class="name">${s.name} <span class="badge ${badge}">${s.status}</span></div>
+          <div class="desc">${s.description || 'No description'}</div>
+          <div class="meta">
+            <span>v${s.version}</span>
+            <span>Score: ${(s.quality_score*100).toFixed(0)}%</span>
+            <span>Used: ${s.usage_count}</span>
+            <span>Success: ${s.success_count}</span>
+          </div>
+        </div>`;
+      });
+    }
+    document.getElementById('skill-list').innerHTML = html;
+  } catch(e) {
+    document.getElementById('skill-list').innerHTML = '<div class="empty-state">加载失败: ' + e.message + '</div>';
+  }
+}
+
+// Load events
+async function loadEvents() {
+  try {
+    const r = await fetch('/api/skills/curation/events?limit=50');
+    const d = await r.json();
+    const events = d.events || [];
+    let html = '';
+    if (events.length === 0) {
+      html = '<div class="empty-state">暂无策展事件</div>';
+    } else {
+      events.forEach(e => {
+        const date = new Date(e.created_at * 1000).toLocaleString();
+        html += `<div class="event-item">
+          <span class="op">${e.op}</span>
+          <span style="color:var(--text-muted,#999);margin-left:8px;">${e.skill_id}</span>
+          <span class="reason" style="margin-left:8px;">${e.reason || ''}</span>
+          <span style="float:right;color:var(--text-muted,#999);font-size:0.75rem;">${date}</span>
+        </div>`;
+      });
+    }
+    document.getElementById('event-list').innerHTML = html;
+  } catch(e) {
+    document.getElementById('event-list').innerHTML = '<div class="empty-state">加载失败: ' + e.message + '</div>';
+  }
+}
+
+// Search skills
+async function searchSkills() {
+  const query = document.getElementById('search-input').value;
+  if (!query) return;
+  try {
+    const r = await fetch('/api/skills/search', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query, top_k: 10}),
+    });
+    const d = await r.json();
+    const results = d.results || [];
+    let html = '';
+    if (results.length === 0) {
+      html = '<div class="empty-state">未找到匹配的技能</div>';
+    } else {
+      results.forEach(r => {
+        html += `<div class="glass-card skill-card" onclick="loadDetail('${r.skill_id}')">
+          <div class="name">${r.name}</div>
+          <div class="desc">${r.description || ''}</div>
+          <div class="meta">
+            <span>Score: ${r.score.toFixed(2)}</span>
+            <span>${r.reason}</span>
+          </div>
+        </div>`;
+      });
+    }
+    document.getElementById('search-results').innerHTML = html;
+  } catch(e) {
+    document.getElementById('search-results').innerHTML = '<div class="empty-state">搜索失败: ' + e.message + '</div>';
+  }
+}
+
+// Load skill detail
+async function loadDetail(skillId) {
+  switchTab('detail');
+  document.querySelectorAll('.tab-bar button')[3].classList.add('active');
+  try {
+    const r = await fetch('/api/skills/' + skillId);
+    const d = await r.json();
+    const skill = d.skill;
+    const versions = d.versions || [];
+    const events = d.curation_events || [];
+
+    let html = `
+      <div style="margin-bottom:16px;">
+        <div style="font-size:1.2rem;font-weight:700;margin-bottom:8px;">${skill.name}</div>
+        <div style="color:var(--text-muted,#666);margin-bottom:8px;">${skill.description}</div>
+        <div style="display:flex;gap:12px;font-size:0.85rem;">
+          <span>Status: <span class="badge badge-${skill.status}">${skill.status}</span></span>
+          <span>Version: ${skill.version}</span>
+          <span>Quality: ${(skill.quality_score*100).toFixed(0)}%</span>
+          <span>Used: ${skill.usage_count} times</span>
+        </div>
+      </div>
+      <div style="margin-bottom:16px;">
+        <div style="font-weight:600;margin-bottom:8px;">Tags</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;">
+          ${(skill.tags.topic||[]).map(t=>'<span class="badge badge-active">'+t+'</span>').join('')}
+          ${(skill.tags.capabilities||[]).map(t=>'<span class="badge badge-archived">'+t+'</span>').join('')}
+        </div>
+      </div>
+      <div style="margin-bottom:16px;">
+        <div style="font-weight:600;margin-bottom:8px;">Trigger Phrases</div>
+        <div style="font-size:0.85rem;color:var(--text-muted,#666);">${(skill.trigger_phrases||[]).join(', ') || 'None'}</div>
+      </div>
+      <div style="margin-bottom:16px;">
+        <div style="font-weight:600;margin-bottom:8px;">Version History (${versions.length})</div>
+        <div class="version-list">
+          ${versions.map(v => `<div class="version-item">
+            <span style="font-weight:600;">v${v.version}</span>
+            <span style="color:var(--text-muted,#999);margin-left:8px;">${new Date(v.created_at*1000).toLocaleString()}</span>
+          </div>`).join('') || '<div class="empty-state">No versions</div>'}
+        </div>
+      </div>
+      <div>
+        <div style="font-weight:600;margin-bottom:8px;">Recent Events (${events.length})</div>
+        <div class="event-list">
+          ${events.map(e => `<div class="event-item">
+            <span class="op">${e.op}</span>
+            <span class="reason" style="margin-left:8px;">${e.reason || ''}</span>
+          </div>`).join('') || '<div class="empty-state">No events</div>'}
+        </div>
+      </div>
+    `;
+    document.getElementById('skill-detail').innerHTML = html;
+  } catch(e) {
+    document.getElementById('skill-detail').innerHTML = '<div class="empty-state">加载失败: ' + e.message + '</div>';
+  }
+}
+
+// Init
+loadStats();
+loadSkills();
+loadEvents();
+// Auto-refresh every 5 seconds
+setInterval(() => { loadStats(); loadSkills(); }, 5000);
+</script>
+</body>
+</html>
