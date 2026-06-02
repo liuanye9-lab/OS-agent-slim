@@ -1,734 +1,433 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/StableAgent-OS-111827?style=for-the-badge" alt="StableAgent OS">
-  <img src="https://img.shields.io/badge/MCP-55_tools-7c3aed?style=for-the-badge" alt="MCP Tools">
-  <img src="https://img.shields.io/badge/Closed_Loop-30%2F30-22c55e?style=for-the-badge" alt="Closed Loop">
-  <img src="https://img.shields.io/badge/Dashboard-Visualized-0ea5e9?style=for-the-badge" alt="Dashboard">
-  <img src="https://img.shields.io/badge/Agent_Capsule-Portable-f59e0b?style=for-the-badge" alt="Agent Capsule">
+  <img src="https://img.shields.io/badge/StableAgent-OS--Slim-111827?style=for-the-badge" alt="StableAgent OS Slim">
+  <img src="https://img.shields.io/badge/Cloud_Control_Center-Ready-7c3aed?style=for-the-badge" alt="Cloud Control Center">
+  <img src="https://img.shields.io/badge/SkillOS-Runtime-22c55e?style=for-the-badge" alt="SkillOS Runtime">
+  <img src="https://img.shields.io/badge/2_Core_2GB-Lightweight-f59e0b?style=for-the-badge" alt="Lightweight">
 </p>
 
-<h1 align="center">StableAgent OS</h1>
+<h1 align="center">StableAgent OS — Slim Cloud Edition</h1>
 
 <p align="center">
-  <strong>给 AI Coding Agent 配一套"外接大脑"</strong><br />
-  <sub>记住你的习惯 · 防止任务跑偏 · 记录失败经验 · 可视化每一次 Agent 思考</sub>
+  <strong>给 AI Coding Agent 配一个云端"调度塔"</strong><br />
+  <sub>2 核 2GB 云服务器可跑 · SQLite 单文件 · 无重型依赖 · 技能库自进化</sub>
 </p>
 
 ---
 
-## V11.4 MCP + CLI Dual Gateway
+## 一句话：这是什么？
 
-V11.4 彻底打通 StableAgent 的 MCP 和 CLI 通道，提供三种可用入口：
+**OS-agent-slim 是一套跑在云服务器上的"AI 任务调度塔"。**
 
-### 三种模式对比
+它不训练模型，不做聊天壳。它做的事情用一个比喻就能说清——
 
-| 模式 | 是否需要 server | Claude Code 是否识别为工具 | 稳定性 | 适合场景 |
-|---|---|---|---|---|
-| HTTP MCP | 需要 | 是 | 中高 | 正式集成 |
-| stdio MCP | 不需要 | 是 | 高 | Claude Code 本地稳定集成 |
-| CLI | 不需要工具识别 | 否，通过 Bash | 最高 | fallback / 自动化 |
-
-### 1. HTTP MCP Mode
-
-Claude Code / Codex / Trae 通过 `http://127.0.0.1:8000/mcp/` 连接 StableAgent。
-
-**配置**：
-
-```json
-{
-  "mcpServers": {
-    "stableagent-http": {
-      "type": "http",
-      "url": "http://127.0.0.1:8000/mcp/",
-      "timeout": 60000
-    }
-  }
-}
-```
-
-**启动服务**：
-
-```bash
-PYTHONPATH=. .venv/bin/python -m stable_agent.cli serve
-```
-
-### 2. Native CLI Mode
-
-任何 Coding 软件都可以通过命令行调用：
-
-```bash
-PYTHONPATH=. .venv/bin/python -m stable_agent.cli task run \
-  --task-input "任务描述" \
-  --open-dashboard \
-  --json
-```
-
-### 3. Stdio MCP Mode
-
-把 CLI 包装成一个 stdio MCP server，让 Claude Code 可以通过本地命令方式加载 StableAgent，不依赖 HTTP 服务：
-
-```json
-{
-  "mcpServers": {
-    "stableagent-stdio": {
-      "type": "stdio",
-      "command": "/Users/Zhuanz/OS-Agent/OS-Agent/.venv/bin/python",
-      "args": ["-m", "stable_agent.mcp_stdio"],
-      "env": {
-        "PYTHONPATH": "/Users/Zhuanz/OS-Agent/OS-Agent"
-      }
-    }
-  }
-}
-```
-
-**详细配置指南**：[docs/CLAUDE_CODE_MCP_SETUP.md](docs/CLAUDE_CODE_MCP_SETUP.md)
-
----
-
-## 这个项目一句话是什么？
-
-**StableAgent OS 是一个接在 Claude Code / Codex / Trae / Cursor 这类 AI Coding 工具旁边的“个人 Agent 操作系统”。**
-
-它不训练模型权重，也不是另一个聊天机器人。它做的是：
-
-> 把你的表达习惯、项目上下文、失败经验、评测标准、Token 预算和 Dashboard 轨迹，打包成一套可迁移的 **Agent Capsule**，让不同 AI 工具更稳定地理解你。
-
-可以把它想成：
-
-| 类比 | StableAgent OS 是什么 |
-|---|---|
-| 学生 | 大模型本身，例如 Claude / GPT / Qwen / DeepSeek |
-| 老师 | 你对模型的反馈和纠正 |
-| 错题本 | Bad Case Bank，记录模型犯过的错 |
-| 学习计划 | Skill Patch，把失败经验变成可复用规则 |
-| 书包/U 盘 | Agent Capsule，打包你的记忆、规则、习惯和评测标准 |
-| 仪表盘 | Dashboard，把 Agent 每一步理解、压缩、判断、学习过程可视化 |
-
----
-
-## 为什么需要 StableAgent OS？
-
-AI Coding 工具越来越强，但长任务里经常出现这些问题：
-
-```text
-你说：只修这个小 bug，不要大范围重构。
-
-AI 可能会：
-1. 改了 12 个无关文件；
-2. 忘了你刚刚强调的约束；
-3. 生成看似正确但无法运行的代码；
-4. 同一个错误下次继续犯；
-5. 解释得很自信，但你不知道它到底怎么理解任务；
-6. token 越堆越多，最后上下文又乱又贵。
-```
-
-StableAgent OS 想解决的是：
-
-> **不是让模型“变聪明”，而是给模型外面装一层能记忆、能复盘、能约束、能可视化的使用层。**
-
----
-
-## 核心比喻：给每个模型学生配一套“学习装备”
-
-不同大模型就像不同学生：
-
-- 有些写代码强，但容易过度修改；
-- 有些推理强，但工具调用慢；
-- 有些文案自然，但工程稳定性弱；
-- 有些便宜好用，但上下文保护差。
-
-StableAgent OS 不去改学生的大脑，而是给学生配装备：
+> 想象你开了一家小型工作室。你雇了几个实习生（Claude Code、Codex、Trae），他们很聪明，但总会犯同样的错、忘记你的习惯、把简单任务搞复杂。
+>
+> **OS-agent-slim 就是这家工作室的"项目经理 + 知识管理员"**：它帮你把任务分发给合适的实习生，记住每个任务的全过程，把好的经验沉淀成操作手册，把踩过的坑变成预警规则。
 
 ```mermaid
 flowchart LR
-    A[不同大模型学生<br/>Claude / GPT / Qwen / DeepSeek] --> B[StableAgent OS 外接装备]
-    B --> C[记住你的表达习惯]
-    B --> D[保护任务关键约束]
-    B --> E[记录失败错题]
-    B --> F[生成 Skill Patch]
-    B --> G[Token 预算和压缩]
-    B --> H[Dashboard 可视化]
-    C --> I[更懂你]
-    D --> I
-    E --> I
-    F --> I
-    G --> I
-    H --> I
+    subgraph 你的工作室
+        PM[📋 OS-agent-slim<br/>项目经理 + 知识管理员]
+    end
+
+    subgraph 实习生们
+        A[Claude Code]
+        B[Codex]
+        C[Trae]
+    end
+
+    subgraph 产出物
+        D[📘 操作手册<br/>Skill Library]
+        E[📕 错题本<br/>Bad Case Bank]
+        F[📊 工作日报<br/>Dashboard]
+    end
+
+    你[🧑‍💻 你] -->|分配任务| PM
+    PM -->|调度| A
+    PM -->|调度| B
+    PM -->|调度| C
+    A -->|回传结果| PM
+    B -->|回传结果| PM
+    C -->|回传结果| PM
+    PM --> D
+    PM --> E
+    PM --> F
+    D -.->|下次自动参考| PM
+    E -.->|下次自动避开| PM
 ```
 
-换句话说：
+---
 
-> 模型能力会不断迭代，但你的个人使用层也应该能成长。StableAgent OS 就是这套可迁移的个人使用层。
+## 为什么需要一个"调度塔"？
+
+直接用 AI Coding 工具干活，常见问题：
+
+```
+你：修这个 bug，别改其他文件。
+
+实习生 A：改了 15 个文件，引入 2 个新 bug。
+实习生 B：修好了，但用了一种你讨厌的写法。
+实习生 C：花了 30 分钟在错误方向上，最后问你要不要换思路。
+下个月遇到类似 bug：三个实习生全部重蹈覆辙。
+```
+
+**根本原因**：每个实习生都是"短期记忆"，没有项目级的长期知识沉淀。
+
+**OS-agent-slim 的解法**：
+
+| 问题 | 传统方式 | OS-agent-slim |
+|------|---------|---------------|
+| 忘记你的习惯 | 每次重新交代 | 表达习惯自动记忆 |
+| 重复犯同样的错 | 人工提醒 | 错题本自动预警 |
+| 不知道 AI 干了啥 | 黑箱 | Dashboard 全程可视化 |
+| 好经验没沉淀 | 随风飘散 | 技能库自动进化 |
+| 多个 AI 工具不互通 | 各自为战 | 统一调度 + 统一记忆 |
 
 ---
 
-## 项目目标
-
-StableAgent OS 的目标不是做一个“更大的 Agent”，而是做一个 **AI Coding 用户的个人稳定层**。
-
-它要做到：
-
-1. **不跑偏**：任务开始前先理解你的真实意图；
-2. **不失忆**：把长期偏好、项目记忆、表达习惯存在 Agent Capsule 里；
-3. **不重复犯错**：把 bad case 转成 regression case 和 skill patch；
-4. **不瞎压缩上下文**：Token 预算时保护关键约束；
-5. **不黑箱执行**：Dashboard 展示每一步发生了什么；
-6. **不只靠感觉证明有用**：Effectiveness Dashboard 用 A/B 数据验证是否真的更稳。
-
----
-
-## 整体架构
+## 系统全貌
 
 ```mermaid
 flowchart TB
-    User[用户 / AI Coding 重度用户] --> Client[Claude Code / Codex / Trae / Cursor]
-    Client --> MCP[MCP Gateway<br/>55 tools]
-    MCP --> OSAgent[stableagent.task.os_agent]
+    subgraph 云端服务器 2核2GB
+        CC[🏢 Control Center<br/>任务调度中枢]
+        TQ[📦 Task Queue<br/>SQLite 任务队列]
+        WR[👷 Worker Registry<br/>Worker 注册表]
+        ES[📝 Event Store<br/>事件记录]
+        SK[📚 Skill Library<br/>技能库 BM25]
+        CU[🔬 Curator Service<br/>技能策展引擎]
+        DB[📊 Dashboard<br/>可视化面板]
+    end
 
-    OSAgent --> U[Understanding Trace<br/>语义理解轨迹]
-    OSAgent --> C[Context Guard<br/>上下文保护]
-    OSAgent --> T[Token Budget<br/>Token 预算]
-    OSAgent --> M[Agent Capsule<br/>个人记忆胶囊]
-    OSAgent --> E[Evaluation<br/>评测与失败归因]
-    OSAgent --> S[Skill Evolution<br/>规则进化]
+    subgraph 你的电脑
+        W1[🔧 Worker A<br/>Claude Code]
+        W2[🔧 Worker B<br/>Codex]
+        CLI[⌨️ CLI 命令行]
+    end
 
-    U --> Dash[Dashboard Observer]
-    C --> Dash
-    T --> Dash
-    M --> Dash
-    E --> Dash
-    S --> Dash
+    subgraph MCP 入口
+        M1[HTTP MCP]
+        M2[stdio MCP]
+    end
 
-    Dash --> Human[用户人工确认 / 纠正 / 审批]
-    Human --> Capsule[长期记忆与规则沉淀]
-    Capsule --> OSAgent
+    M1 --> CC
+    M2 --> CC
+    CLI --> CC
+    CC --> TQ
+    CC --> WR
+    CC --> ES
+    CC --> SK
+    SK --> CU
+    CC --> DB
+    TQ <-->|心跳 + 拉取 + 回传| W1
+    TQ <-->|心跳 + 拉取 + 回传| W2
+    CU -.->|自动沉淀| SK
 ```
 
 ---
 
-## Agent Capsule：像 U 盘一样带走你的 AI 使用习惯
+## 核心类比：把 AI 任务管理想成"餐厅后厨"
 
-StableAgent OS 的核心不是一次任务，而是长期积累的 **Agent Capsule**。
+```mermaid
+flowchart LR
+    subgraph 前厅
+        食客[🧑‍💻 你<br/>点菜 = 提交任务]
+    end
 
-它可以理解为：
+    subgraph 后厨
+        主厨[👨‍🍳 Control Center<br/>接单 + 分配 + 质检]
+        灶台A[🔥 Worker A<br/>掌勺 = 执行代码]
+        灶台B[🔥 Worker B<br/>掌勺 = 执行代码]
+        食谱架[📖 Skill Library<br/>食谱 = 操作手册]
+        错题本[📕 Event Store<br/>每道菜的全过程记录]
+    end
 
-```text
-.stableagent-capsule/
-├── profile/              # 你的表达习惯，比如“不要AI味”是什么意思
-├── memory/               # 长期记忆、项目记忆、偏好记忆
-├── skills/               # 经过验证的工作规则
-├── bad_cases/            # 模型犯过的错
-├── evals/                # 个人评测样例和回归测试
-├── token_ledger/         # Token 使用和节省记录
-├── model_profiles/       # 不同模型的能力画像
-└── effectiveness/        # 项目有效性 A/B 数据
+    subgraph 菜品
+        完成的任务[✅ 菜品上桌<br/>任务完成]
+        新食谱[📘 沉淀新食谱<br/>技能进化]
+    end
+
+    食客 -->|我要一份...<br/>不要辣，少油| 主厨
+    主厨 -->|参考食谱| 食谱架
+    食谱架 -.->|推荐| 主厨
+    主厨 -->|派单| 灶台A
+    主厨 -->|派单| 灶台B
+    灶台A -->|出菜| 主厨
+    灶台B -->|出菜| 主厨
+    主厨 -->|质检| 错题本
+    主厨 --> 完成的任务
+    错题本 -.->|经验沉淀| 新食谱
+    新食谱 -.->|更新| 食谱架
 ```
 
-它的目标是：
+**每个角色的职责**：
 
-> 不管你今天用 Claude Code，明天用 Codex，后天换 Trae，你的习惯、错题本、评测标准和任务边界都可以继续迁移。
+- **🧑‍💻 你（食客）**：告诉系统要做什么，有什么偏好和约束
+- **👨‍🍳 Control Center（主厨）**：接单、分配给合适的 Worker、质检、记录全过程
+- **🔥 Worker（灶台）**：真正执行代码的 AI 工具（Claude Code / Codex / Trae）
+- **📖 Skill Library（食谱架）**：经过验证的操作手册，新任务来了先查
+- **📕 Event Store（错题本）**：每道菜的完整过程记录，出了问题能回溯
+- **🔬 Curator（菜品研发）**：从成功经验中提炼新食谱，从失败中总结教训
 
 ---
 
-## 一次任务在 StableAgent 里如何流动？
+## 一次任务的完整旅程
 
 ```mermaid
 sequenceDiagram
-    participant U as 用户
-    participant C as Coding Agent
-    participant S as StableAgent OS
-    participant D as Dashboard
-    participant P as Agent Capsule
+    participant 你 as 🧑‍💻 你
+    participant CC as 🏢 Control Center
+    participant SK as 📚 Skill Library
+    participant W as 🔧 Worker
+    participant D as 📊 Dashboard
 
-    U->>C: 继续优化这个项目，不要AI味，不要大范围重构
-    C->>S: 调用 stableagent.task.os_agent
-    S->>S: 生成 Understanding Trace
-    S->>P: 读取表达习惯与项目记忆
-    S->>S: 保护关键约束，压缩上下文
-    S->>S: 生成 Token Report
-    S->>D: 写入事件流和可视化面板
-    D-->>U: 展示理解轨迹、Token预算、记忆、bad case
-    U->>D: 纠正 / 记住 / 下次别这样
-    D->>P: 写入表达习惯、bad case、skill patch
+    你->>CC: "修登录页 bug，不要改其他模块"
+    CC->>SK: 搜索相关技能 (BM25)
+    SK-->>CC: 命中 2 个相关技能
+    CC->>CC: 创建任务 + 注入技能上下文
+    CC->>W: 分配任务给空闲 Worker
+    W->>W: 参考技能 + 执行代码
+    W-->>CC: 回传结果 + 日志
+    CC->>CC: 质检 (OutcomeJudge)
+    CC->>D: 更新可视化面板
+    CC->>SK: 成功 → 沉淀新技能 / 失败 → 记录错题
+    D-->>你: 实时查看任务进度
 ```
 
 ---
 
-## V11 Dashboard：让 Agent 的“脑内过程”可视化
+## 三种接入方式
 
-Dashboard 不是普通日志页面，它更像是 Agent 的监控仪表盘。
-
-它会展示：
-
-| 面板 | 作用 |
-|---|---|
-| Run Trace / 事件时间线 | 这次任务从接收到完成经历了哪些步骤 |
-| Understanding Panel | 系统如何理解你的原话，有哪些假设和不确定点 |
-| Token Budget | 原本要塞多少上下文，实际保留多少，节省多少 |
-| Memory Map | 这次任务用了哪些长期记忆和表达习惯 |
-| Bad Case Bank | 出现了哪些失败案例，是否生成回归测试 |
-| Skill Evolution | 是否生成新的 Skill Patch，是否进入验证/人工审核 |
-| Memory Health | 哪些记忆该保留、合并、删除或人工审核 |
+就像餐厅可以堂食、外卖、电话订餐一样，OS-agent-slim 提供三种接入方式：
 
 ```mermaid
 flowchart LR
-    A[任务输入] --> B[理解轨迹]
-    B --> C[上下文保护]
-    C --> D[Token 预算]
-    D --> E[执行与评测]
-    E --> F[Bad Case]
-    F --> G[Skill Patch]
-    G --> H[Human Review]
-    A --> UI[Dashboard 可视化]
-    B --> UI
-    C --> UI
-    D --> UI
-    E --> UI
-    F --> UI
-    G --> UI
+    subgraph 接入方式
+        A[🌐 HTTP MCP<br/>正式集成]
+        B[📡 stdio MCP<br/>本地直连]
+        C[⌨️ CLI<br/>命令行保底]
+    end
+
+    subgraph 特点
+        A --> A1[Claude Code 识别为工具]
+        B --> B1[不依赖 HTTP 服务]
+        C --> C1[任何工具都能用]
+    end
+
+    A -->|转发| CC[Control Center]
+    B -->|转发| CC
+    C -->|HTTP| CC
 ```
 
----
-
-## 反馈闭环：把“下次别这样”变成可验证规则
-
-传统 AI 工具里，你说一句“下次别这样”，模型可能下一轮就忘了。
-
-StableAgent OS 会把这句话变成结构化闭环：
-
-```mermaid
-flowchart TB
-    A[用户反馈：下次别这样] --> B[BadCaseRecord<br/>记录失败案例]
-    B --> C[PersonalEvalCase<br/>生成个人评测样例]
-    C --> D[SkillPatchCandidate<br/>提出规则补丁]
-    D --> E[RegressionValidationRunner<br/>回归验证]
-    E -->|通过| F[HumanReviewQueue<br/>进入人工审核]
-    E -->|失败| G[拒绝进入长期规则]
-    F --> H[人工确认]
-    H --> I[长期 Skill / 记忆沉淀]
-```
-
-关键原则：
-
-> 失败经验不能直接污染长期规则，必须经过验证和人工审核。
-
----
-
-## 表达习惯学习：让模型理解你的“人话”
-
-比如你说：
-
-```text
-不要AI味。
-```
-
-模型可能不知道你具体指什么。
-
-StableAgent 可以把它记录成：
-
-```json
-{
-  "phrase": "不要AI味",
-  "normalized_meaning": [
-    "避免模板化表达",
-    "保持克制",
-    "减少空泛营销腔"
-  ],
-  "scope": "global",
-  "confidence": 0.7
-}
-```
-
-之后你再说：
-
-```text
-这个 README 不要AI味，写得自然一点。
-```
-
-StableAgent 会在 Understanding Trace 里命中这个表达习惯，让 Coding Agent 少猜一步。
-
----
-
-## Effectiveness Dashboard：不靠感觉，靠数据证明项目有没有用
-
-工程闭环成立，不等于产品有效。
-
-StableAgent OS 新增了 Effectiveness Dashboard，用来做 A/B 对比：
-
-```mermaid
-flowchart LR
-    T[同一类任务] --> A[Baseline<br/>直接用 Coding Agent]
-    T --> B[StableAgent Mode<br/>先调用 os_agent]
-
-    A --> M[记录指标]
-    B --> M
-
-    M --> R[Effectiveness Dashboard]
-    R --> V{是否真的有效？}
-
-    V -->|跑偏更少| YES[有效性增强]
-    V -->|返工更少| YES
-    V -->|约束保留更好| YES
-    V -->|没有改善| NO[继续优化系统]
-```
-
-它关注这些指标：
-
-| 指标 | 解释 | 希望变化 |
-|---|---|---|
-| success_rate | 任务是否完成 | 上升 |
-| test_pass_rate | 测试是否通过 | 上升 |
-| intent_drift_rate | 是否跑偏 | 下降 |
-| over_editing_rate | 是否过度修改 | 下降 |
-| constraint_preservation_rate | 是否保留约束 | 上升 |
-| bad_case_recurrence_rate | 同类错误是否复发 | 下降 |
-| avg_rework_count | 平均返工次数 | 下降 |
-| avg_estimated_tokens | Token 消耗 | 下降或不明显上升 |
-| avg_user_satisfaction | 用户满意度 | 上升 |
-
----
-
-## 默认调用规则：AGENTS.md / CLAUDE.md
-
-项目已经加入默认规则文件：
-
-```text
-AGENTS.md
-CLAUDE.md
-```
-
-目标是让 Coding Agent 打开本仓库时默认知道：
-
-> 非平凡编码任务开始前，先调用 `stableagent.task.os_agent`，生成 run_id 和 Dashboard，再继续执行。
-
-典型调用：
-
-```json
-{
-  "method": "tools/call",
-  "params": {
-    "name": "stableagent.task.os_agent",
-    "arguments": {
-      "task_input": "继续优化这个项目，不要AI味，不要大范围重构无关文件",
-      "open_dashboard": true
-    }
-  }
-}
-```
+| 方式 | 是否需要 server | AI 工具识别为工具 | 适合场景 |
+|------|:-:|:-:|------|
+| HTTP MCP | ✅ 需要 | ✅ 是 | 正式集成、远程服务器 |
+| stdio MCP | ❌ 不需要 | ✅ 是 | 本地开发、稳定集成 |
+| CLI | ❌ 不需要 | ❌ 通过 Bash | fallback、自动化脚本 |
 
 ---
 
 ## 快速开始
 
-### 1. 克隆项目
+### 1. 克隆
 
 ```bash
-git clone https://github.com/liuanye9-lab/OS-Agent.git
-cd OS-Agent
+git clone https://github.com/liuanye9-lab/OS-agent-slim.git
+cd OS-agent-slim
 ```
 
-### 2. 使用 Python 3.11+
-
-macOS 示例：
+### 2. 安装依赖
 
 ```bash
-brew install python@3.11
 python3.11 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+pip install -r requirements-slim.txt
 ```
 
 ### 3. 启动服务
 
 ```bash
-# 推荐使用 CLI 启动
-PYTHONPATH=. .venv/bin/python -m stable_agent.cli serve
-
-# 或直接使用 uvicorn
-# PYTHONPATH=. uvicorn web.server:app --host 127.0.0.1 --port 8000
+PYTHONPATH=. .venv/bin/python -m stable_agent.cli serve --profile slim
 ```
 
-启动成功后访问：
-
-```text
-http://127.0.0.1:8000/api/health
-```
-
-预期：
-
-```json
-{
-  "ok": true,
-  "service": "StableAgent OS"
-}
-```
-
-### 4. 健康检查（V11.4）
+### 4. 验证
 
 ```bash
-PYTHONPATH=. .venv/bin/python -m stable_agent.cli health --json
+# 健康检查
+curl http://127.0.0.1:18789/api/cloud/health
+
+# Dashboard
+open http://127.0.0.1:18789/slim
 ```
 
-### 5. 执行任务（V11.4 CLI Mode）
+### 5. 通过 MCP 接入 Claude Code
 
-```bash
-PYTHONPATH=. .venv/bin/python -m stable_agent.cli task run \
-  --task-input "你的任务描述" \
-  --open-dashboard \
-  --json
-```
-
----
-
-## MCP 接入配置
-
-推荐配置：
+在 `.mcp.json` 中添加：
 
 ```json
 {
   "mcpServers": {
     "stableagent": {
-      "type": "streamableHttp",
-      "url": "http://127.0.0.1:8000/mcp/",
+      "type": "http",
+      "url": "http://127.0.0.1:18789/mcp/",
       "timeout": 60000
     }
   }
 }
 ```
 
-调试工具列表：
+---
 
-```bash
-curl http://127.0.0.1:8000/mcp/tools
+## 部署到云服务器
+
+OS-agent-slim 专为 2 核 2GB 云服务器设计（如阿里云 ECS）。
+
+```mermaid
+flowchart LR
+    subgraph 本地电脑
+        你[🧑‍💻 你]
+        IDE[VS Code / Cursor]
+    end
+
+    subgraph 云服务器 2核2GB
+        SA[🏢 OS-agent-slim<br/>127.0.0.1:18789]
+    end
+
+    subgraph SSH Tunnel
+        T[🔒 加密通道]
+    end
+
+    IDE -->|MCP| T
+    T -->|转发| SA
+    你 -->|SSH 管理| SA
 ```
 
-调用主工具：
-
 ```bash
-curl -s -X POST http://127.0.0.1:8000/mcp/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "method": "tools/call",
-    "params": {
-      "name": "stableagent.task.os_agent",
-      "arguments": {
-        "task_input": "继续优化这个项目，不要AI味，不要大范围重构无关文件",
-        "open_dashboard": true
-      }
-    },
-    "id": 1
-  }'
+# 一键部署到服务器
+bash scripts/deploy_openclaw_slim.sh
+
+# SSH Tunnel（本地访问）
+ssh -fN -i "your-key.pem" \
+  -o IdentitiesOnly=yes \
+  -o ExitOnForwardFailure=yes \
+  -L 18789:127.0.0.1:18789 \
+  root@YOUR_SERVER_IP
+
+# 然后本地访问 http://127.0.0.1:18789/slim
 ```
 
 ---
 
-## 常用页面
+## SkillOS：技能自进化系统
 
-| 页面 | 地址 |
-|---|---|
-| 健康检查 | `http://127.0.0.1:8000/api/health` |
-| MCP 工具列表 | `http://127.0.0.1:8000/mcp/tools` |
-| Run Observer | `http://127.0.0.1:8000/observe/{run_id}?check=1` |
-| Run Detail | `http://127.0.0.1:8000/runs/{run_id}` |
-| Effectiveness Dashboard | `http://127.0.0.1:8000/effectiveness` |
-| API Docs | `http://127.0.0.1:8000/docs` |
-
----
-
-## CLI Mode：稳定保底入口（V11.4）
-
-MCP 是推荐集成方式，但不同 Coding 软件对 MCP 的支持不稳定（Trae / Codex / Claude Code 可能因配置路径、streamableHttp、SSE、JSON-RPC 兼容问题导致工具列表无法加载）。
-
-**CLI Mode 是稳定保底入口**，所有 Coding 软件都可以通过 shell 命令调用 StableAgent。
-
-### 启动服务（推荐用 CLI）
-
-```bash
-PYTHONPATH=. .venv/bin/python -m stable_agent.cli serve
-```
-
-### 健康检查
-
-```bash
-PYTHONPATH=. .venv/bin/python -m stable_agent.cli health --json
-```
-
-### 执行任务
-
-```bash
-PYTHONPATH=. .venv/bin/python -m stable_agent.cli task run \
-  --task-input "继续优化这个项目，不要AI味，不要大范围重构无关文件" \
-  --open-dashboard \
-  --json
-```
-
-### 反馈命令
-
-```bash
-# 记住这个
-PYTHONPATH=. .venv/bin/python -m stable_agent.cli feedback remember \
-  --run-id run_xxx --note "以后记住这个约束" --json
-
-# 下次别这样
-PYTHONPATH=. .venv/bin/python -m stable_agent.cli feedback dont \
-  --run-id run_xxx --note "下次不要大范围重构无关文件" --json
-
-# 纠正表达习惯
-PYTHONPATH=. .venv/bin/python -m stable_agent.cli feedback correct \
-  --run-id run_xxx \
-  --phrase "不要AI味" \
-  --meaning "避免模板化表达，保持克制，减少空泛营销腔" \
-  --json
-```
-
-### 效果评估
-
-```bash
-PYTHONPATH=. .venv/bin/python -m stable_agent.cli effectiveness summary --json
-```
-
-### MCP Mode vs CLI Mode
-
-| 特性 | MCP Mode | CLI Mode |
-|------|----------|----------|
-| 集成方式 | Claude Code / Codex / Trae 直接识别为工具 | 所有 Coding 软件通过 shell 命令调用 |
-| 稳定性 | 依赖 MCP 配置兼容性 | 稳定保底入口 |
-| 输出格式 | JSON-RPC 2.0 | `--json` 模式输出 JSON |
-| 推荐场景 | MCP 正常工作时 | MCP 识别失败时作为 fallback |
-| Dashboard | 自动展示 | 通过 Web 服务展示 |
-
----
-
-## 当前能力状态
-
-| 能力 | 状态 |
-|---|---|
-| MCP Gateway | 已支持 JSON-RPC / tools / health / SSE |
-| CLI Mode (V11.4) | 已支持 task run / serve / health / feedback / effectiveness / dashboard |
-| stdio MCP Server (V11.4) | 已支持 initialize / tools/list / tools/call |
-| stableagent.task.os_agent | 已接入主流程 |
-| Understanding Trace | 已支持 |
-| Expression Profile | 已支持 |
-| Token Budget Ledger | 已支持 |
-| FeedbackLearningService | 已支持 |
-| Bad Case → Eval Case → Skill Patch | 已支持 |
-| Validation → Human Review | 已支持 |
-| Dashboard 六大面板 | 已支持 |
-| AGENTS.md / CLAUDE.md | 已支持（含 MCP/CLI 优先级规则） |
-| Effectiveness Dashboard | MVP 已支持，仍需真实 A/B 数据积累 |
-
----
-
-## 项目不是在做什么？
-
-StableAgent OS **不是**：
-
-- 不是微调模型；
-- 不是训练新的基础大模型；
-- 不是另一个聊天壳；
-- 不是普通 prompt 模板库；
-- 不是只做日志记录。
-
-它真正做的是：
-
-> 把 AI Coding 的使用过程变成一个可记忆、可评测、可纠正、可迁移、可视化的系统。
-
----
-
-## 适合谁使用？
-
-适合：
-
-- 高频使用 Claude Code / Codex / Trae / Cursor 的开发者；
-- 经常遇到 AI 长任务跑偏的人；
-- 想把个人提示词、项目习惯、失败经验沉淀下来的人；
-- 想验证 AI Coding 是否真的提升效率的人；
-- 想做 Agent / MCP / AI Workflow 产品的人。
-
-不适合：
-
-- 只想一次性问答的人；
-- 不需要长期项目记忆的人；
-- 不关心可视化、评测和复盘的人。
-
----
-
-## 项目路线图
+这是 OS-agent-slim 最核心的差异化能力。用"错题本 → 操作手册"的类比来理解：
 
 ```mermaid
 flowchart TB
-    V10[V10<br/>事件链和 Dashboard 打通] --> V11[V11<br/>Agent Capsule]
-    V11 --> V112[V11.2<br/>Trustworthy Feedback Loop]
-    V112 --> V113[V11.3<br/>Default Agent Rules + Effectiveness MVP]
-    V113 --> V1131[V11.3.1<br/>Effectiveness Hardening]
-    V1131 --> V114[V11.4<br/>MCP + CLI Dual Gateway]
-    V114 --> V12[V12<br/>多工具稳定接入与真实数据评测]
+    subgraph 输入
+        A[任务完成]
+    end
+
+    subgraph Curator 策展引擎
+        B[OutcomeJudge<br/>判断成功/失败]
+        C{成功？}
+        D[ContentJudge<br/>评估内容质量]
+        E[生成 CurationOp<br/>策展操作]
+    end
+
+    subgraph 技能库
+        F[📝 新技能草案]
+        G[📖 更新已有技能]
+        H[⚠️ 标记失败陷阱]
+        I[🗄️ 归档低效技能]
+    end
+
+    subgraph 人工审核
+        J[👀 Review Queue<br/>审批 / 拒绝]
+    end
+
+    A --> B
+    B --> C
+    C -->|是| D
+    C -->|否| H
+    D --> E
+    E -->|无命中技能| F
+    E -->|有命中技能| G
+    E -->|多次失败| I
+    F --> J
+    G --> J
+    H --> J
+    J -->|批准| K[✅ 技能库更新]
+    J -->|拒绝| L[❌ 丢弃]
 ```
 
-### 下一步重点
-
-- [ ] 修正 Effectiveness schema，加入 `test_passed / rework_count / user_satisfaction` 等完整指标；
-- [ ] 将 Effectiveness 数据默认写入 `.stableagent-capsule/effectiveness/`；
-- [ ] 统一 `/api/effectiveness/*` 返回结构；
-- [ ] Run Observer 增加“记录到 Effectiveness”；
-- [ ] 积累至少 10 个真实 A/B 任务数据；
-- [ ] 输出一份真实效果报告。
+**关键原则**：失败经验不能直接污染技能库，必须经过验证和人工审核。
 
 ---
 
-## 最小有效性实验
-
-想证明 StableAgent 是否真的有用，不要靠感觉，跑 10 个任务：
+## 项目结构
 
 ```text
-同类任务 A：直接用 Coding Agent 做。
-同类任务 B：先调用 StableAgent，再让 Coding Agent 做。
+OS-agent-slim/
+├── stable_agent/           # 核心代码
+│   ├── cloud/              # 🏢 Control Center（调度中枢）
+│   │   ├── control_center.py   # 核心调度
+│   │   ├── task_queue.py       # SQLite 任务队列
+│   │   ├── worker_registry.py  # Worker 注册表
+│   │   ├── worker_client.py    # 本地 Worker 客户端
+│   │   ├── event_store.py      # 事件记录
+│   │   ├── scheduler.py        # 任务调度器
+│   │   ├── security.py         # Token 认证
+│   │   └── config.py           # 配置管理
+│   ├── skills/             # 📚 SkillOS（技能系统）
+│   │   ├── repo.py             # 技能库（SQLite）
+│   │   ├── retriever.py        # BM25 检索
+│   │   ├── curator_service.py  # 策展引擎
+│   │   ├── judges.py           # 结果/内容评判
+│   │   ├── rollback.py         # 版本回滚
+│   │   └── schema.py           # 数据模型
+│   ├── gateway/            # 🌐 MCP Gateway
+│   │   ├── mcp_gateway.py      # MCP 入口
+│   │   ├── tool_schemas.py     # 工具定义
+│   │   └── unified_tool_registry.py  # 工具注册
+│   ├── cli.py              # ⌨️ CLI 命令行
+│   └── mcp_stdio.py        # 📡 stdio MCP
+├── web/                    # 🌐 Web 服务
+│   ├── app_slim.py             # Slim 应用工厂
+│   ├── server_slim.py          # Slim 入口
+│   ├── routes/                 # API 路由
+│   └── templates/              # Dashboard 模板
+├── scripts/                # 🔧 部署脚本
+├── tests/                  # 🧪 测试
+└── docs/                   # 📖 文档
 ```
-
-记录：
-
-```json
-{
-  "task_id": "T01",
-  "mode": "baseline | stableagent",
-  "success": true,
-  "test_passed": true,
-  "intent_drift": false,
-  "over_editing": false,
-  "constraint_preserved": true,
-  "rework_count": 1,
-  "estimated_tokens": 12000,
-  "user_satisfaction": 4
-}
-```
-
-如果 StableAgent 组出现：
-
-```text
-跑偏率下降
-返工次数下降
-约束保留率上升
-bad case 复发率下降
-测试通过率不下降
-```
-
-才说明它真的有效。
 
 ---
 
-## 项目背后的核心思想
+## 核心设计原则
 
-StableAgent OS 的底层判断是：
+| 原则 | 说明 |
+|------|------|
+| 🪶 轻量优先 | 2 核 2GB 可跑，SQLite 单文件，无 Redis/Postgres/Celery |
+| 🔒 安全默认 | 本地 127.0.0.1 绑定，可选 Token 认证，危险命令拦截 |
+| 📦 可迁移 | Agent Capsule 可导出/导入，换工具不丢记忆 |
+| 👁️ 可观测 | Dashboard 全程可视化，事件时间线可回溯 |
+| 🔄 可回滚 | 技能版本化存储，一键回退到任意历史版本 |
+| 🧪 可验证 | Effectiveness Dashboard 用 A/B 数据证明有效性 |
 
-> 未来的大模型会越来越强，但每个人真正需要的是“适配自己”的外部使用层。
+---
 
-模型像发动机，StableAgent 像仪表盘、导航、刹车、错题本和驾驶习惯记录器。
+## 适合谁？
 
-发动机升级当然重要，但如果没有稳定的驾驶系统，长任务依然会跑偏。
+**适合**：
+- 高频使用 Claude Code / Codex / Trae / Cursor 的开发者
+- 经常遇到 AI 长任务跑偏、重复犯错的人
+- 想把项目经验和失败教训沉淀下来的人
+- 想做 Agent / MCP / AI Workflow 产品的人
 
-StableAgent OS 想做的就是这套系统。
+**不适合**：
+- 只想一次性问答的人
+- 不需要长期项目记忆的人
 
 ---
 
@@ -739,5 +438,5 @@ MIT
 ---
 
 <p align="center">
-  <strong>StableAgent OS — 让 AI Coding 不只是会做，而是可记忆、可复盘、可验证地越用越懂你。</strong>
+  <strong>OS-agent-slim — 让 AI Coding 从"一次性对话"变成"长期积累的工作伙伴"。</strong>
 </p>
