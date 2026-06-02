@@ -1,0 +1,19 @@
+[Unit]
+Description=StableAgent OS Slim Cloud Center
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/os-agent
+EnvironmentFile=/opt/os-agent/.env.slim
+Environment=PYTHONPATH=/opt/os-agent
+Environment=STABLEAGENT_PROFILE=slim
+ExecStart=/opt/os-agent/.venv/bin/python -m stable_agent.cli serve --host 127.0.0.1 --port 18789 --profile slim
+Restart=always
+RestartSec=5
+MemoryMax=1200M
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

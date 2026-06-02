@@ -273,8 +273,14 @@ def cmd_task_run(args: argparse.Namespace) -> None:
 
 def cmd_serve(args: argparse.Namespace) -> None:
     """启动 StableAgent Web 服务。"""
+    import os
     host: str = args.host
     port: int = args.port
+    profile: str = getattr(args, "profile", "slim")
+
+    # 设置环境变量
+    os.environ["STABLEAGENT_PROFILE"] = profile
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         sock.bind((host, port))
@@ -285,15 +291,23 @@ def cmd_serve(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     base = f"http://{host}:{port}"
-    print(f"启动 StableAgent 服务...")
-    print(f"  Health URL:        {base}/api/health")
-    print(f"  MCP URL:           {base}/mcp/")
-    print(f"  Dashboard URL:     {base}/")
-    print(f"  Effectiveness URL: {base}/effectiveness")
+    print(f"启动 StableAgent 服务 (profile={profile})...")
+    if profile == "slim":
+        print(f"  Health URL:    {base}/api/cloud/health")
+        print(f"  MCP URL:       {base}/mcp/")
+        print(f"  Dashboard URL: {base}/slim")
+        app_module = "web.server_slim:app"
+    else:
+        print(f"  Health URL:        {base}/api/health")
+        print(f"  MCP URL:           {base}/mcp/")
+        print(f"  Dashboard URL:     {base}/")
+        print(f"  Effectiveness URL: {base}/effectiveness")
+        app_module = "web.server:app"
     print()
     try:
         import uvicorn
-        uvicorn.run("web.server:app", host=host, port=port, log_level="info")
+        uvicorn.run(app_module, host=host, port=port, log_level="info",
+                     workers=1 if profile == "slim" else 1)
     except ImportError:
         print("错误: uvicorn 未安装。请运行: pip install uvicorn")
         sys.exit(1)
@@ -438,6 +452,65 @@ def cmd_dashboard_open(args: argparse.Namespace) -> None:
             print("无法打开浏览器，请手动访问上述 URL。")
 
 
+def cmd_cloud_health(args: argparse.Namespace) -> None:
+    """Cloud Center 健康检查。"""
+    base = _base_url(args)
+    try:
+        result = _http_get(f"{base}/api/cloud/health", timeout=3.0)
+    except Exception as exc:
+        _output({"ok": False, "error": f"Cloud Center 不可达: {exc}",
+                 "suggestion": "请先运行: PYTHONPATH=. .venv/bin/python -m stable_agent.cli serve --profile slim"}, args)
+        sys.exit(1)
+    _output(result, args)
+    if not result.get("ok"):
+        sys.exit(1)
+
+
+def cmd_worker_start(args: argparse.Namespace) -> None:
+    """启动 Worker Agent。"""
+    from stable_agent.cloud.worker_client import WorkerClient
+    caps = args.capability if args.capability else ["coding", "shell"]
+    client = WorkerClient(
+        server_url=args.server,
+        worker_id=args.worker_id,
+        name=args.name,
+        machine_type=args.machine_type,
+        capabilities=caps,
+        poll_interval=args.poll_interval,
+        allow_shell=args.allow_shell,
+        token=args.token,
+    )
+    client.run()
+
+
+def cmd_worker_list(args: argparse.Namespace) -> None:
+    """列出 Workers。"""
+    base = _base_url(args)
+    try:
+        result = _http_get(f"{base}/api/workers", timeout=5.0)
+    except Exception as exc:
+        _output({"ok": False, "error": f"请求失败: {exc}",
+                 "suggestion": "请先运行: PYTHONPATH=. .venv/bin/python -m stable_agent.cli serve --profile slim"}, args)
+        sys.exit(1)
+    _output(result, args)
+
+
+def cmd_task_list(args: argparse.Namespace) -> None:
+    """列出任务。"""
+    base = _base_url(args)
+    status = getattr(args, "status", None)
+    url = f"{base}/api/tasks"
+    if status:
+        url += f"?status={status}"
+    try:
+        result = _http_get(url, timeout=5.0)
+    except Exception as exc:
+        _output({"ok": False, "error": f"请求失败: {exc}",
+                 "suggestion": "请先运行: PYTHONPATH=. .venv/bin/python -m stable_agent.cli serve --profile slim"}, args)
+        sys.exit(1)
+    _output(result, args)
+
+
 def _add_json_flag(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", default=False, help="JSON 输出模式")
 
@@ -506,6 +579,8 @@ def main() -> None:
     # ---- V11.4: serve ----
     serve_p = subparsers.add_parser("serve", help="启动 StableAgent Web 服务")
     _add_server_flags(serve_p)
+    serve_p.add_argument("--profile", default="slim", choices=["slim", "full"],
+                         help="运行 profile (默认: slim)")
     serve_p.set_defaults(func=cmd_serve)
 
     # ---- V11.4: health ----
@@ -600,6 +675,42 @@ def main() -> None:
     dash_open_p.add_argument("--print-only", action="store_true", default=False, help="只打印 URL")
     _add_server_flags(dash_open_p)
     dash_open_p.set_defaults(func=cmd_dashboard_open)
+
+    # ---- Slim Cloud: cloud ----
+    cloud_parser = subparsers.add_parser("cloud", help="Cloud Center 管理")
+    cloud_sub = cloud_parser.add_subparsers(dest="action")
+
+    cloud_health_p = cloud_sub.add_parser("health", help="Cloud 健康检查")
+    _add_server_flags(cloud_health_p)
+    _add_json_flag(cloud_health_p)
+    cloud_health_p.set_defaults(func=cmd_cloud_health)
+
+    # ---- Slim Cloud: worker ----
+    worker_parser = subparsers.add_parser("worker", help="Worker 管理")
+    worker_sub = worker_parser.add_subparsers(dest="action")
+
+    worker_start_p = worker_sub.add_parser("start", help="启动 Worker")
+    worker_start_p.add_argument("--server", default="http://127.0.0.1:18789", help="云端服务器地址")
+    worker_start_p.add_argument("--worker-id", required=True, help="Worker ID")
+    worker_start_p.add_argument("--name", default="", help="Worker 名称")
+    worker_start_p.add_argument("--machine-type", default="macos", help="机器类型")
+    worker_start_p.add_argument("--capability", action="append", default=[], help="能力 (可重复)")
+    worker_start_p.add_argument("--poll-interval", type=int, default=5, help="轮询间隔 (秒)")
+    worker_start_p.add_argument("--allow-shell", action="store_true", default=False, help="允许执行 shell 命令")
+    worker_start_p.add_argument("--token", default="", help="API Token")
+    worker_start_p.set_defaults(func=cmd_worker_start)
+
+    worker_list_p = worker_sub.add_parser("list", help="列出 Workers")
+    _add_server_flags(worker_list_p)
+    _add_json_flag(worker_list_p)
+    worker_list_p.set_defaults(func=cmd_worker_list)
+
+    # ---- Slim Cloud: task list ----
+    task_list_p = task_sub.add_parser("list", help="列出任务")
+    _add_server_flags(task_list_p)
+    _add_json_flag(task_list_p)
+    task_list_p.add_argument("--status", default=None, help="过滤状态")
+    task_list_p.set_defaults(func=cmd_task_list)
 
     args = parser.parse_args()
     if not args.command:

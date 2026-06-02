@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StableAgent OS Slim Cloud Center</title>
+    <link rel="stylesheet" href="/static/slim_dashboard.css">
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>&#9670; StableAgent OS Slim Cloud Center</h1>
+            <span class="profile-badge" id="profile-badge">slim</span>
+        </div>
+    </header>
+
+    <main>
+        <!-- System Status -->
+        <section class="card" id="system-status">
+            <h2>System Status</h2>
+            <div class="status-grid">
+                <div class="stat-item">
+                    <span class="stat-label">Profile</span>
+                    <span class="stat-value" id="stat-profile">-</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Workers Online</span>
+                    <span class="stat-value" id="stat-workers">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Queued Tasks</span>
+                    <span class="stat-value" id="stat-queued">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Running Tasks</span>
+                    <span class="stat-value" id="stat-running">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Total Events</span>
+                    <span class="stat-value" id="stat-events">0</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Worker Panel -->
+        <section class="card" id="worker-panel">
+            <h2>Worker Panel</h2>
+            <div id="worker-list" class="empty-state">No workers registered</div>
+        </section>
+
+        <!-- Task Queue -->
+        <section class="card" id="task-queue">
+            <h2>Task Queue</h2>
+            <div id="task-list" class="empty-state">No tasks</div>
+        </section>
+
+        <!-- Run Timeline -->
+        <section class="card" id="run-timeline">
+            <h2>Run Timeline</h2>
+            <div id="event-list" class="empty-state">No events</div>
+        </section>
+
+        <!-- Agent Capsule Summary -->
+        <section class="card" id="capsule-summary">
+            <h2>Agent Capsule</h2>
+            <div class="status-grid">
+                <div class="stat-item">
+                    <span class="stat-label">Expression Rules</span>
+                    <span class="stat-value" id="capsule-expr">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Memory Items</span>
+                    <span class="stat-value" id="capsule-mem">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Bad Cases</span>
+                    <span class="stat-value" id="capsule-bc">0</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Submit Task Form -->
+        <section class="card" id="submit-task">
+            <h2>Submit Task</h2>
+            <form id="task-form">
+                <div class="form-group">
+                    <label for="task-input">Task Input</label>
+                    <textarea id="task-input" rows="3" placeholder="Describe the task..." required></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="worker-id">Worker ID (optional)</label>
+                        <input type="text" id="worker-id" placeholder="e.g. macbook_pro">
+                    </div>
+                    <div class="form-group">
+                        <label for="priority">Priority</label>
+                        <select id="priority">
+                            <option value="1">1 - Highest</option>
+                            <option value="3">3 - High</option>
+                            <option value="5" selected>5 - Normal</option>
+                            <option value="7">7 - Low</option>
+                            <option value="9">9 - Lowest</option>
+                        </select>
+                    </div>
+                </div>
+                <button type="submit" class="btn-primary">Submit Task</button>
+            </form>
+            <div id="submit-result" class="hidden"></div>
+        </section>
+
+        <!-- Feedback -->
+        <section class="card" id="feedback-section">
+            <h2>Feedback</h2>
+            <div class="feedback-row">
+                <button class="btn-feedback" data-action="remember">&#128278; Remember</button>
+                <button class="btn-feedback btn-warn" data-action="dont">&#9940; Don't do this again</button>
+                <button class="btn-feedback btn-info" data-action="correct">&#9998; Correct & Remember</button>
+            </div>
+            <div id="feedback-result" class="hidden"></div>
+        </section>
+    </main>
+
+    <footer>
+        <p>StableAgent OS Slim Cloud Edition &middot; <span id="footer-time"></span></p>
+    </footer>
+
+    <script src="/static/slim_dashboard.js"></script>
+</body>
+</html>

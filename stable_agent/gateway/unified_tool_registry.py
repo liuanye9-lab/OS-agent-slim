@@ -170,6 +170,13 @@ class UnifiedToolRegistry:
         self._register("stableagent.token.report", self._h_token_report)
         self._register("stableagent.token.run", self._h_token_run)
         self._register("stableagent.token.summary", self._h_token_summary)
+        # Slim Cloud Edition: Cloud Worker/Task 管理工具
+        self._register("stableagent.cloud.worker.list", self._h_cloud_worker_list)
+        self._register("stableagent.cloud.worker.status", self._h_cloud_worker_status)
+        self._register("stableagent.cloud.task.create", self._h_cloud_task_create)
+        self._register("stableagent.cloud.task.list", self._h_cloud_task_list)
+        self._register("stableagent.cloud.task.get", self._h_cloud_task_get)
+        self._register("stableagent.cloud.task.cancel", self._h_cloud_task_cancel)
 
     # ------------------------------------------------------------------
     # 辅助方法
@@ -982,6 +989,10 @@ class UnifiedToolRegistry:
         # False → 强制 validation_failed（不进 human_review）
         # True  → 允许验证通过（进 human_review.required，不自动 export）
         force_validation_passed: bool | None = args.get("force_validation_passed", None)
+
+        # Slim Cloud Edition: 如果没有 orchestrator，路由到 Control Center
+        if self._orchestrator is None:
+            return self._slim_os_agent(ctx, task_input, open_dashboard)
 
         from stable_agent.runtime.run_lifecycle import (
             RunStage, RunStageMeta, get_stage_meta, STAGE_PROGRESS,
@@ -2463,3 +2474,174 @@ class UnifiedToolRegistry:
         except Exception as e:
             return self._make_result(ctx, tool_name, ok=False, is_error=True,
                                      plain_text=f"纠正失败: {e}")
+
+    # ===================================================================
+    # Slim Cloud Edition: Cloud Worker/Task 管理工具 handler
+    # ===================================================================
+
+    def _get_control_center(self):
+        """获取 ControlCenter 实例（延迟导入）。"""
+        from stable_agent.cloud.control_center import ControlCenter
+        return ControlCenter()
+
+    def _h_cloud_worker_list(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.cloud.worker.list — 列出 Workers。"""
+        tool_name = "stableagent.cloud.worker.list"
+        try:
+            cc = self._get_control_center()
+            workers = cc.list_workers()
+            cc.close()
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data={"workers": [w.to_dict() for w in workers], "count": len(workers)},
+                plain_text=f"共 {len(workers)} 个 Worker",
+            )
+        except Exception as e:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"获取 Worker 列表失败: {e}")
+
+    def _h_cloud_worker_status(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.cloud.worker.status — Worker 状态。"""
+        tool_name = "stableagent.cloud.worker.status"
+        worker_id = args.get("worker_id", "")
+        try:
+            cc = self._get_control_center()
+            worker = cc.get_worker_status(worker_id)
+            cc.close()
+            if worker:
+                return self._make_result(
+                    ctx, tool_name, ok=True,
+                    data=worker.to_dict(),
+                    plain_text=f"Worker {worker_id}: {worker.status}",
+                )
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"Worker {worker_id} 未找到")
+        except Exception as e:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"获取 Worker 状态失败: {e}")
+
+    def _h_cloud_task_create(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.cloud.task.create — 创建任务。"""
+        tool_name = "stableagent.cloud.task.create"
+        try:
+            cc = self._get_control_center()
+            task = cc.submit_task(
+                task_input=args.get("task_input", ""),
+                title=args.get("title", ""),
+                priority=args.get("priority", 5),
+                worker_id=args.get("worker_id"),
+                source="mcp",
+            )
+            cc.close()
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data=task.to_dict(),
+                plain_text=f"任务已创建: {task.task_id} (priority={task.priority})",
+            )
+        except Exception as e:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"创建任务失败: {e}")
+
+    def _h_cloud_task_list(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.cloud.task.list — 列出任务。"""
+        tool_name = "stableagent.cloud.task.list"
+        try:
+            cc = self._get_control_center()
+            tasks = cc.list_tasks(
+                status=args.get("status"),
+                limit=args.get("limit", 20),
+            )
+            cc.close()
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data={"tasks": [t.to_dict() for t in tasks], "count": len(tasks)},
+                plain_text=f"共 {len(tasks)} 个任务",
+            )
+        except Exception as e:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"获取任务列表失败: {e}")
+
+    def _h_cloud_task_get(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.cloud.task.get — 获取任务详情。"""
+        tool_name = "stableagent.cloud.task.get"
+        task_id = args.get("task_id", "")
+        try:
+            cc = self._get_control_center()
+            task = cc.get_task(task_id)
+            cc.close()
+            if task:
+                return self._make_result(
+                    ctx, tool_name, ok=True,
+                    data=task.to_dict(),
+                    plain_text=f"任务 {task_id}: {task.status}",
+                )
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"任务 {task_id} 未找到")
+        except Exception as e:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"获取任务详情失败: {e}")
+
+    def _h_cloud_task_cancel(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.cloud.task.cancel — 取消任务。"""
+        tool_name = "stableagent.cloud.task.cancel"
+        task_id = args.get("task_id", "")
+        try:
+            cc = self._get_control_center()
+            ok = cc.cancel_task(task_id)
+            cc.close()
+            if ok:
+                return self._make_result(
+                    ctx, tool_name, ok=True,
+                    plain_text=f"任务 {task_id} 已取消",
+                )
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"任务 {task_id} 无法取消 (可能已完成或不存在)")
+        except Exception as e:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"取消任务失败: {e}")
+
+    def _slim_os_agent(self, ctx: RunContext, task_input: str,
+                       open_dashboard: bool) -> StableAgentToolResult:
+        """Slim 模式下的 os_agent — 路由到 Control Center。
+
+        当 orchestrator 为 None 时（slim 模式），将任务提交到 Cloud Control Center，
+        返回 task_id / run_id / dashboard_url。
+        """
+        tool_name = "stableagent.task.os_agent"
+        try:
+            cc = self._get_control_center()
+            task = cc.submit_task(
+                task_input=task_input,
+                title=task_input[:80],
+                source="mcp",
+                run_id=ctx.run_id,
+            )
+            cc.close()
+
+            return self._make_result(
+                ctx, tool_name, ok=True,
+                data={
+                    "ok": True,
+                    "run_id": task.run_id,
+                    "task_id": task.task_id,
+                    "dashboard_url": f"/slim?task_id={task.task_id}",
+                    "observer_url": f"/slim?task_id={task.task_id}",
+                    "status": task.status,
+                    "assigned_worker_id": task.assigned_worker_id,
+                    "missing_required_events": [],
+                    "understanding_trace": {
+                        "task_input": task_input[:200],
+                        "mode": "slim_cloud",
+                        "trace": "任务已提交到 Cloud Control Center，等待 Worker 执行",
+                    },
+                    "token_report": {
+                        "mode": "slim",
+                        "note": "Slim 模式下 token 统计由 Worker 回传",
+                    },
+                },
+                plain_text=f"任务已提交到 Cloud Control Center: {task.task_id}",
+                plain_text_zh=f"任务已提交: {task.task_id}",
+            )
+        except Exception as e:
+            return self._make_result(ctx, tool_name, ok=False, is_error=True,
+                                     plain_text=f"Slim os_agent 失败: {e}")
