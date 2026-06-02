@@ -1,9 +1,9 @@
-"""StableAgent stdio MCP Server — V11.4.
+"""StableAgent stdio MCP Server — V11.5.
 
 把 CLI 包装成标准 stdio MCP server，让 Claude Code 可以通过本地命令加载 StableAgent。
 
 用法：
-    PYTHONPATH=. .venv/bin/python -m stable_agent.mcp_stdio
+    PYTHONPATH=. .venv/bin/python -m stable_agent.mcp_stdio --profile minimal
 
 Claude Code 配置 (.mcp.json)：
 {
@@ -11,9 +11,10 @@ Claude Code 配置 (.mcp.json)：
     "stableagent-stdio": {
       "type": "stdio",
       "command": "/path/to/.venv/bin/python",
-      "args": ["-m", "stable_agent.mcp_stdio"],
+      "args": ["-m", "stable_agent.mcp_stdio", "--profile", "minimal"],
       "env": {
-        "PYTHONPATH": "/path/to/OS-Agent"
+        "PYTHONPATH": "/path/to/OS-Agent",
+        "STABLE_AGENT_TOOL_PROFILE": "minimal"
       }
     }
   }
@@ -22,8 +23,10 @@ Claude Code 配置 (.mcp.json)：
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
+import os
 import sys
 from typing import Any
 
@@ -37,10 +40,11 @@ logger = logging.getLogger("stable_agent.mcp_stdio")
 
 # 版本信息
 SERVER_NAME = "StableAgent OS stdio"
-SERVER_VERSION = "11.4.0"
+SERVER_VERSION = "11.5.0"
 PROTOCOL_VERSION = "2024-11-05"
 
 # 核心工具列表（最小集，复用 HTTP MCP 的工具定义）
+# V11.5: 使用 profile 过滤
 CORE_TOOLS = [
     {
         "name": "stableagent.task.os_agent",
@@ -164,9 +168,13 @@ def _handle_initialize(req_id: Any) -> dict[str, Any]:
 
 
 def _handle_tools_list(req_id: Any) -> dict[str, Any]:
-    """处理 tools/list 方法。"""
+    """处理 tools/list 方法。
+
+    V11.5: 使用 profile 过滤工具列表。
+    """
+    tools = _get_tools_for_profile()
     return _make_response(req_id, {
-        "tools": CORE_TOOLS,
+        "tools": tools,
     })
 
 
@@ -182,7 +190,8 @@ def _handle_tools_call(req_id: Any, params: dict[str, Any]) -> dict[str, Any]:
         return _make_error(req_id, -32602, "缺少必要参数：name")
 
     # 检查工具是否在列表中
-    tool_names = {t["name"] for t in CORE_TOOLS}
+    tools = _get_tools_for_profile()
+    tool_names = {t["name"] for t in tools}
     if tool_name not in tool_names:
         return _make_error(req_id, -32602, f"未知工具：{tool_name}")
 
@@ -239,9 +248,31 @@ def _handle_tools_call(req_id: Any, params: dict[str, Any]) -> dict[str, Any]:
         })
 
 
+def _get_tools_for_profile() -> list[dict[str, Any]]:
+    """根据当前 profile 返回工具列表。
+
+    V11.5: 支持 tool_profiles 过滤。
+    """
+    try:
+        from stable_agent.gateway.tool_profiles import should_expose_tool
+        return [t for t in CORE_TOOLS if should_expose_tool(t["name"])]
+    except ImportError:
+        # 如果 tool_profiles 不可用，返回全部
+        return CORE_TOOLS
+
+
 def main() -> None:
     """stdio MCP server 主循环。"""
-    logger.info("StableAgent stdio MCP server 启动")
+    # V11.5: 解析 --profile 参数
+    parser = argparse.ArgumentParser(description="StableAgent stdio MCP Server")
+    parser.add_argument("--profile", default="minimal", choices=["minimal", "default", "full"],
+                        help="工具暴露级别 (默认: minimal)")
+    args, _ = parser.parse_known_args()
+
+    # 设置环境变量
+    os.environ["STABLE_AGENT_TOOL_PROFILE"] = args.profile
+
+    logger.info("StableAgent stdio MCP server 启动 (profile=%s)", args.profile)
 
     for line in sys.stdin:
         line = line.strip()

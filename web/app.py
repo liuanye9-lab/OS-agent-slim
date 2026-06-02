@@ -91,7 +91,11 @@ def create_app() -> FastAPI:
     try:
         from stable_agent.gateway.mcp_gateway import MCPGateway
         from stable_agent.observation.dashboard_sync import DashboardSync
-        gateway = MCPGateway(orchestrator=orchestrator)
+        # V11.5: 注入 SQLite db_path 到 RunStore
+        from pathlib import Path
+        _db_path = str(Path.cwd() / "data" / "run_events.sqlite")
+        os.makedirs(os.path.dirname(_db_path), exist_ok=True)
+        gateway = MCPGateway(orchestrator=orchestrator, db_path=_db_path)
         gateway_run_store = gateway.run_store
         app.mount("/mcp", gateway.create_fastapi_app())
         dash_sync = DashboardSync(gateway.event_stream)

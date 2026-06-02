@@ -4,6 +4,29 @@ All notable changes to StableAgent OS — AI 降智防御系统.
 
 ---
 
+## V11.5 (2026-06-02) — SkillOS Convergence Refactor
+
+### Added
+- `stable_agent/gateway/tool_profiles.py` — Tool Profile 三级暴露策略 (minimal/default/full)
+- `stable_agent/core/` — 核心模块 (models, executor, curator, validator, contracts)
+- `stable_agent/skills/` — SkillRepo v2 (文件 + SQLite 双层存储)
+- `scripts/connect_claude_code.sh` — Claude Code MCP 配置生成
+- `scripts/quickstart.sh` — 快速启动脚本
+- CLI 新增 `doctor`, `skill list/show/validate/promote` 命令
+- 6 个新测试文件 (70 个测试)
+- 8 个新文档文件
+
+### Changed
+- `unified_tool_registry.py` — list_tools() 支持 profile 过滤
+- `run_store.py` — 新增 SQLite 持久化层 (解决 Observer 0% 问题)
+- `cli.py` — 新增 doctor 和 skill 命令
+
+### Fixed
+- Observer 0% 问题: RunStore 从纯内存改为内存+SQLite 双层存储
+- 已完成 run 刷新页面后仍可回放历史事件
+
+---
+
 ## V8.1 (2026-05-30) — Phase 1-9 闭环硬化 + 最后一公里打通
 
 ### Added

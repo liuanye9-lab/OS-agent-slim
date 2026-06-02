@@ -21,7 +21,10 @@ from typing import Any, Callable, TYPE_CHECKING
 
 from stable_agent.gateway.run_context import RunContext
 from stable_agent.gateway.tool_schemas import TOOLS
+from stable_agent.gateway.tool_profiles import filter_tools, get_tool_profile
 from stable_agent.models import StableAgentToolResult, TaskType, EvaluationResult
+from stable_agent.core.models import TaskSpec
+from stable_agent.core.contracts import ContractBuilder
 
 if TYPE_CHECKING:
     pass
@@ -48,6 +51,8 @@ class UnifiedToolRegistry:
         self._orchestrator: Any = orchestrator
         self._tool_router: Any = tool_router
         self._handlers: dict[str, Callable[[RunContext, dict[str, Any]], StableAgentToolResult]] = {}
+        # V11.5: 初始化 OSAgentExecutor (延迟导入避免循环)
+        self._executor: Any = None
         self._register_all()
 
     # ------------------------------------------------------------------
@@ -66,10 +71,14 @@ class UnifiedToolRegistry:
         return self._handlers.get(name)
 
     def list_tools(self) -> list[dict[str, Any]]:
-        """返回所有 14 个注册工具的 MCP 格式列表。
+        """返回当前 profile 下注册工具的 MCP 格式列表。
+
+        根据 STABLE_AGENT_TOOL_PROFILE 环境变量过滤工具集：
+        - minimal: 只暴露核心闭环工具 (<=12)
+        - default: 核心 + eval/skill 调试工具
+        - full: 暴露所有旧工具 (兼容旧行为)
 
         每个工具条目包含 name、title、description 和 inputSchema（MCP 标准字段名）。
-        同时保留 input_schema 以兼容旧版调试端点。
 
         Returns:
             MCP 格式工具定义列表。
@@ -91,7 +100,8 @@ class UnifiedToolRegistry:
             if "title" in tool_def:
                 entry["title"] = tool_def["title"]
             result.append(entry)
-        return result
+        # 根据 profile 过滤工具列表
+        return filter_tools(result)
 
     # ------------------------------------------------------------------
     # 内部方法
@@ -958,6 +968,50 @@ class UnifiedToolRegistry:
 
     # V6.5: /os-agent 快捷入口
     def _h_task_os_agent(self, ctx: RunContext, args: dict[str, Any]) -> StableAgentToolResult:
+        """处理 stableagent.task.os_agent — 完整闭环自优化工作流。
+
+        V11.5: 委托给 OSAgentExecutor + ContractBuilder。
+        如果 executor 不可用，回退到原始内联实现。
+        """
+        tool_name = "stableagent.task.os_agent"
+        task = TaskSpec.from_args(args)
+        open_dashboard = task.open_dashboard
+
+        # V11.5: 委托给 OSAgentExecutor
+        try:
+            from stable_agent.core.executor import OSAgentExecutor
+            if self._executor is None:
+                self._executor = OSAgentExecutor(
+                    orchestrator=self._orchestrator,
+                    tool_router=self._tool_router,
+                )
+                # 传递 registry 引用以访问 _run_store / _event_stream
+                self._executor._registry = self._tool_router or self
+
+            import asyncio
+            trace = asyncio.get_event_loop().run_until_complete(
+                self._executor.run(task, ctx)
+            )
+
+            result = ContractBuilder.build_tool_result(trace, open_dashboard=open_dashboard)
+            data = ContractBuilder.to_dict(result)
+
+            return self._make_result(
+                ctx, tool_name,
+                ok=result.ok,
+                data=data,
+                plain_text=f"任务完成: {task.task_input[:80]}" if result.ok else f"任务失败",
+                plain_text_zh=f"任务完成: {task.task_input[:80]}" if result.ok else f"任务失败",
+                plain_text_en=f"Task completed: {task.task_input[:80]}" if result.ok else "Task failed",
+                dashboard_url=f"/runs/{ctx.run_id}" if open_dashboard else "",
+                is_error=not result.ok,
+            )
+        except Exception as delegate_exc:
+            logging.getLogger(__name__).warning(
+                "Executor delegation failed, falling back to inline: %s", delegate_exc
+            )
+
+        # 原始内联实现 (回退路径)
         """处理 stableagent.task.os_agent — 完整闭环自优化工作流。
 
         V9.0: 显式阶段流水线，每阶段发布事件到 EventStream + RunStore。

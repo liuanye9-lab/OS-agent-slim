@@ -1,8 +1,8 @@
 # IMPLEMENTATION_LOG.md — StableAgent Cloud 闭环优化实施日志
 
 **开始时间**: 2026-05-30 23:00
-**完成时间**: 2026-05-31 01:20
-**最终状态**: V9.0 — Final Closed-Loop Hardening
+**完成时间**: 2026-06-02 22:55
+**最终状态**: V11.5 — SkillOS Convergence Refactor
 
 ---
 
@@ -236,3 +236,83 @@
 ---
 
 ## [进度 100%] 全部 Phase 完成
+
+---
+
+# V11.5 — SkillOS Convergence Refactor (2026-06-02)
+
+## [进度 0%] 审计开始
+- 扫描项目结构: 23 个子包, 55 个 MCP 工具, 135 个测试文件
+- unified_tool_registry.py: 2465 行, 职责过重
+- RunStore: 纯内存存储, Observer 0% 问题根因
+
+## [进度 10%] 合同冻结完成
+- 生成 CURRENT_STATE_AUDIT.md
+- 生成 CONTRACT_FREEZE.md (冻结 stableagent.task.os_agent 外部契约)
+- 生成 SKILLOS_ADAPTATION_PLAN.md
+- 生成 RISK_AND_ROLLBACK.md
+
+## [进度 20%] Tool Profile 完成
+- 新增 stable_agent/gateway/tool_profiles.py
+- 实现 minimal/default/full 三级 profile
+- 默认 minimal (10 个工具)
+- 集成到 unified_tool_registry.list_tools()
+- 新增 tests/test_tool_profiles.py (15 个测试)
+
+## [进度 35%] unified_tool_registry 拆分完成
+- 新增 stable_agent/core/ (6 个文件)
+- models.py: TaskSpec, RunTrace, ToolRunResult, SkillCandidate, ValidationResult
+- executor.py: OSAgentExecutor (从 _h_task_os_agent 提取)
+- curator.py: CuratorService (规则型 Curator v1)
+- validator.py: ValidationGate (Schema/Regression/Promotion)
+- contracts.py: ContractBuilder (外部契约保障)
+
+## [进度 50%] SkillRepo v2 完成
+- 新增 stable_agent/skills/ (6 个文件)
+- 文件 + SQLite 双层存储
+- Skill 生命周期: draft→candidate→validated→promoted→deprecated→archived
+- promotion_log.jsonl 审计日志
+- 新增 tests/test_skill_repo_v2.py (14 个测试)
+
+## [进度 62%] Curator v1 完成
+- 规则型 learning-worthy 判断
+- 多维 reward proxy 计算
+- Skill candidate 生成
+- 反馈摄入 (dont_do_this)
+- 新增 tests/test_curator_policy.py (12 个测试)
+
+## [进度 72%] Delayed Validation 完成
+- ValidationGate: Schema/Regression/Promotion
+- Promotion policy: validations>=2, score_delta>=0.03, regression=0
+- Canary policy: validations>=1, score_delta>=0.01
+- 高风险 skill 必须 human_review
+- dry_run_learning 安全边界
+- 新增 tests/test_promotion_gate.py (13 个测试)
+- 新增 tests/test_dry_run_learning_safety.py (4 个测试)
+
+## [进度 82%] CLI / MCP stdio 完成
+- cli.py: +doctor, skill list/show/validate/promote 命令
+- scripts/connect_claude_code.sh: Claude Code MCP 配置生成
+- scripts/quickstart.sh: 快速启动脚本
+- docs/CLI_FIRST_GUIDE.md: CLI-first 接入指南
+
+## [进度 90%] Observer Replay 修复完成
+- run_store.py: +SQLite 持久化层
+- 内存 + SQLite 双层存储
+- get_events: 先查内存, 再从 SQLite 回放
+- create_run/append_event/mark_completed 同时持久化
+- 新增 tests/test_observer_replay_api.py (12 个测试)
+
+## [进度 95%] 兼容迁移完成
+- docs/MIGRATION_GUIDE.md
+- docs/TOOL_PROFILES.md
+- docs/SKILLOS_ADAPTATION.md
+
+## [进度 100%] 测试与文档完成
+- py_compile: 16/16 通过
+- pytest: 146/146 通过 (70 新增 + 76 已有)
+- check_closed_loop: 28/28 通过
+- docs/refactor/FINAL_REFACTOR_REPORT.md
+- docs/refactor/SKILLOS_ENGINEERING_NOTES.md
+- docs/refactor/TEST_RESULTS.md
+- docs/refactor/REMAINING_RISKS.md

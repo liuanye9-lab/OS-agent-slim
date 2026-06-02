@@ -49,7 +49,7 @@ class MCPGateway:
         _orchestrator: StableAgentOrchestrator 引用。
     """
 
-    def __init__(self, orchestrator: Any = None) -> None:
+    def __init__(self, orchestrator: Any = None, db_path: str | None = None) -> None:
         """初始化 MCPGateway。
 
         创建所有内部组件（UnifiedToolRegistry、ToolRouter、
@@ -58,11 +58,12 @@ class MCPGateway:
         Args:
             orchestrator: StableAgentOrchestrator 实例，用于注入各组件。
                           None 时创建独立运行的 Gateway（部分功能受限）。
+            db_path: RunStore SQLite 数据库路径 (可选，用于持久化)。
         """
         self._orchestrator: Any = orchestrator
 
-        # 创建独立组件
-        self.run_store: RunStore = RunStore()
+        # V11.5: 创建独立组件 (支持 SQLite 持久化)
+        self.run_store: RunStore = RunStore(db_path=db_path)
         self.event_stream: EventStream = EventStream()
 
         # 创建工具注册中心

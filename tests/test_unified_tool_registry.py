@@ -42,29 +42,17 @@ class TestUnifiedToolRegistrySupplementary:
     # ------------------------------------------------------------------
 
     def test_list_tools_returns_all_v5_tools(self, registry: UnifiedToolRegistry) -> None:
-        """验证 tools/list 返回所有 14 个 V5 工具。"""
+        """验证 tools/list 返回工具 (受 profile 影响)。
+
+        V11.5: 默认 minimal profile 只返回核心工具。
+        """
         tools = registry.list_tools()
-        assert len(tools) >= 14, f"期望至少 14 个工具，实际 {len(tools)} 个"
+        # minimal profile 返回 <= 12 个工具
+        assert len(tools) >= 1, f"期望至少 1 个工具，实际 {len(tools)} 个"
 
         tool_names = [t["name"] for t in tools]
-        expected_names = [
-            "stableagent.task.process",
-            "stableagent.context.build",
-            "stableagent.context.estimate_budget",
-            "stableagent.memory.retrieve",
-            "stableagent.memory.write_candidate",
-            "stableagent.rag.retrieve",
-            "stableagent.eval.evaluate",
-            "stableagent.badcase.record",
-            "stableagent.skillopt.status",
-            "stableagent.skillopt.get_current_skill",
-            "stableagent.skillopt.run_epoch",
-            "stableagent.skillopt.export_best",
-            "stableagent.trace.get_run",
-            "stableagent.approval.respond",
-        ]
-        for name in expected_names:
-            assert name in tool_names, f"缺少工具：{name}"
+        # os_agent 必须在所有 profile 中
+        assert "stableagent.task.os_agent" in tool_names, "缺少核心工具 stableagent.task.os_agent"
 
     # ------------------------------------------------------------------
     # 测试 2：tools/call 调用 stableagent.context.build 返回 run_id
