@@ -820,6 +820,89 @@ TOOLS: dict[str, dict[str, Any]] = {
         },
         "risk_level": "low",
     },
+    # =======================================================================
+    # Slim Cloud Edition: Cloud Worker/Task 管理工具
+    # =======================================================================
+    "stableagent.cloud.worker.list": {
+        "name": "stableagent.cloud.worker.list",
+        "title": "列出 Workers",
+        "description": "列出所有已注册的 Worker 节点及其状态",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "按状态过滤 (online/offline/busy)"},
+            },
+        },
+        "risk_level": "low",
+    },
+    "stableagent.cloud.worker.status": {
+        "name": "stableagent.cloud.worker.status",
+        "title": "Worker 状态",
+        "description": "获取指定 Worker 的详细状态",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "worker_id": {"type": "string", "description": "Worker ID"},
+            },
+            "required": ["worker_id"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.cloud.task.create": {
+        "name": "stableagent.cloud.task.create",
+        "title": "创建任务",
+        "description": "向 Cloud Control Center 提交新任务",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_input": {"type": "string", "description": "任务描述"},
+                "title": {"type": "string", "description": "任务标题"},
+                "priority": {"type": "integer", "default": 5, "description": "优先级 1-9"},
+                "worker_id": {"type": "string", "description": "指定 Worker (可选)"},
+            },
+            "required": ["task_input"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.cloud.task.list": {
+        "name": "stableagent.cloud.task.list",
+        "title": "列出任务",
+        "description": "列出 Cloud 任务队列",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "按状态过滤"},
+                "limit": {"type": "integer", "default": 20, "description": "返回数量"},
+            },
+        },
+        "risk_level": "low",
+    },
+    "stableagent.cloud.task.get": {
+        "name": "stableagent.cloud.task.get",
+        "title": "获取任务详情",
+        "description": "获取指定任务的完整详情",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "任务 ID"},
+            },
+            "required": ["task_id"],
+        },
+        "risk_level": "low",
+    },
+    "stableagent.cloud.task.cancel": {
+        "name": "stableagent.cloud.task.cancel",
+        "title": "取消任务",
+        "description": "取消指定的 queued/assigned/running 任务",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "任务 ID"},
+            },
+            "required": ["task_id"],
+        },
+        "risk_level": "medium",
+    },
 }
 
 # ---------------------------------------------------------------------------
