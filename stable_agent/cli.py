@@ -438,6 +438,177 @@ def cmd_dashboard_open(args: argparse.Namespace) -> None:
             print("无法打开浏览器，请手动访问上述 URL。")
 
 
+# ===================================================================
+# V11.5: Doctor + Skill Commands (Phase 6)
+# ===================================================================
+
+
+def cmd_doctor(args: argparse.Namespace) -> None:
+    """综合健康检查。"""
+    base = _base_url(args)
+    use_json = getattr(args, "json", False)
+    checks = {}
+
+    # 1. Server health
+    try:
+        health = _http_get(f"{base}/api/health", timeout=3.0)
+        checks["server"] = health.get("ok", False)
+    except Exception:
+        checks["server"] = False
+
+    # 2. MCP health
+    try:
+        mcp_health = _http_get(f"{base}/mcp/health", timeout=3.0)
+        checks["mcp"] = mcp_health.get("ok", False)
+    except Exception:
+        checks["mcp"] = False
+
+    # 3. Tools
+    try:
+        tools = _http_get(f"{base}/mcp/tools", timeout=3.0)
+        tool_list = tools.get("result", {}).get("tools", [])
+        checks["tool_count"] = len(tool_list)
+        checks["has_os_agent"] = any(t.get("name") == "stableagent.task.os_agent" for t in tool_list)
+    except Exception:
+        checks["tool_count"] = 0
+        checks["has_os_agent"] = False
+
+    # 4. Profile
+    from stable_agent.gateway.tool_profiles import get_tool_profile
+    checks["profile"] = get_tool_profile().value
+
+    # 5. Skills directory
+    skills_dir = Path.cwd() / ".skills"
+    checks["skills_dir_exists"] = skills_dir.exists()
+    checks["skills_index_exists"] = (skills_dir / "index.sqlite").exists()
+
+    # Summary
+    checks["ok"] = all([
+        checks.get("server", False),
+        checks.get("mcp", False),
+        checks.get("has_os_agent", False),
+    ])
+
+    if use_json:
+        print(json.dumps(checks, ensure_ascii=False, indent=2))
+    else:
+        print("StableAgent Doctor")
+        print("=" * 40)
+        for key, value in checks.items():
+            status = "OK" if value is True else ("FAIL" if value is False else value)
+            print(f"  {key}: {status}")
+        print("=" * 40)
+        if checks["ok"]:
+            print("All checks passed!")
+        else:
+            print("Some checks failed. Run with --json for details.")
+
+    if not checks["ok"]:
+        sys.exit(1)
+
+
+def cmd_skill_list(args: argparse.Namespace) -> None:
+    """列出 skills。"""
+    from stable_agent.skills.repository import SkillRepository
+    repo = SkillRepository(base_path=Path.cwd() / ".skills")
+    status_filter = getattr(args, "status", None)
+    skills = repo.list_skills(status=status_filter)
+
+    if getattr(args, "json", False):
+        print(json.dumps([{
+            "skill_id": s.skill_id,
+            "status": s.status.value,
+            "domain": s.domain,
+            "risk_level": s.risk_level,
+            "created_at": s.created_at,
+        } for s in skills], ensure_ascii=False, indent=2))
+    else:
+        if not skills:
+            print("No skills found.")
+            return
+        print(f"Skills ({len(skills)}):")
+        for s in skills:
+            print(f"  [{s.status.value}] {s.skill_id} (domain={s.domain}, risk={s.risk_level})")
+
+
+def cmd_skill_show(args: argparse.Namespace) -> None:
+    """显示 skill 详情。"""
+    from stable_agent.skills.repository import SkillRepository
+    repo = SkillRepository(base_path=Path.cwd() / ".skills")
+    record = repo.get_skill(args.skill_id)
+    if not record:
+        print(f"Skill not found: {args.skill_id}")
+        sys.exit(1)
+
+    if getattr(args, "json", False):
+        import dataclasses
+        print(json.dumps(dataclasses.asdict(record), ensure_ascii=False, indent=2, default=str))
+    else:
+        print(f"Skill: {record.skill_id}")
+        print(f"  Status: {record.status.value}")
+        print(f"  Domain: {record.domain}")
+        print(f"  Risk: {record.risk_level}")
+        print(f"  Created: {record.created_at}")
+        print(f"  Intent: {record.intent[:200]}")
+        print(f"  Procedure: {record.procedure[:200]}")
+
+
+def cmd_skill_validate(args: argparse.Namespace) -> None:
+    """验证 skill。"""
+    from stable_agent.skills.repository import SkillRepository
+    from stable_agent.core.validator import ValidationGate
+    from stable_agent.core.models import SkillCandidate
+
+    repo = SkillRepository(base_path=Path.cwd() / ".skills")
+    record = repo.get_skill(args.skill_id)
+    if not record:
+        print(f"Skill not found: {args.skill_id}")
+        sys.exit(1)
+
+    # 创建 candidate 用于验证
+    candidate = SkillCandidate(
+        candidate_id=record.skill_id,
+        source_run_id=record.source_runs[0] if record.source_runs else "",
+        failure_mode="",
+        evidence_events=[],
+        proposed_rule=record.intent,
+        when_to_use=record.procedure,
+        do_not_use_when=record.guardrails,
+        validation_plan="manual validation",
+        risk_level=record.risk_level,
+    )
+
+    gate = ValidationGate()
+    result = gate.validate_schema(candidate)
+
+    if getattr(args, "json", False):
+        import dataclasses
+        print(json.dumps(dataclasses.asdict(result), ensure_ascii=False, indent=2))
+    else:
+        print(f"Validation result for {args.skill_id}:")
+        print(f"  Schema valid: {result.schema_valid}")
+        print(f"  Passed: {result.passed}")
+        if result.reason:
+            print(f"  Reason: {result.reason}")
+
+
+def cmd_skill_promote(args: argparse.Namespace) -> None:
+    """晋升 skill。"""
+    from stable_agent.skills.repository import SkillRepository
+    repo = SkillRepository(base_path=Path.cwd() / ".skills")
+    reason = getattr(args, "reason", "manual promote via CLI")
+    success = repo.promote_skill(args.skill_id, reason=reason)
+
+    if getattr(args, "json", False):
+        print(json.dumps({"ok": success, "skill_id": args.skill_id}, ensure_ascii=False))
+    else:
+        if success:
+            print(f"Skill {args.skill_id} promoted successfully.")
+        else:
+            print(f"Failed to promote skill {args.skill_id}.")
+            sys.exit(1)
+
+
 def _add_json_flag(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", default=False, help="JSON 输出模式")
 
@@ -600,6 +771,37 @@ def main() -> None:
     dash_open_p.add_argument("--print-only", action="store_true", default=False, help="只打印 URL")
     _add_server_flags(dash_open_p)
     dash_open_p.set_defaults(func=cmd_dashboard_open)
+
+    # ---- V11.5: doctor ----
+    doctor_p = subparsers.add_parser("doctor", help="综合健康检查")
+    _add_server_flags(doctor_p)
+    _add_json_flag(doctor_p)
+    doctor_p.set_defaults(func=cmd_doctor)
+
+    # ---- V11.5: skill ----
+    skill_parser = subparsers.add_parser("skill", help="技能管理")
+    skill_sub = skill_parser.add_subparsers(dest="action")
+
+    skill_list_p = skill_sub.add_parser("list", help="列出技能")
+    skill_list_p.add_argument("--status", default=None, help="按状态过滤")
+    _add_json_flag(skill_list_p)
+    skill_list_p.set_defaults(func=cmd_skill_list)
+
+    skill_show_p = skill_sub.add_parser("show", help="显示技能详情")
+    skill_show_p.add_argument("skill_id", help="技能 ID")
+    _add_json_flag(skill_show_p)
+    skill_show_p.set_defaults(func=cmd_skill_show)
+
+    skill_validate_p = skill_sub.add_parser("validate", help="验证技能")
+    skill_validate_p.add_argument("skill_id", help="技能 ID")
+    _add_json_flag(skill_validate_p)
+    skill_validate_p.set_defaults(func=cmd_skill_validate)
+
+    skill_promote_p = skill_sub.add_parser("promote", help="晋升技能")
+    skill_promote_p.add_argument("skill_id", help="技能 ID")
+    skill_promote_p.add_argument("--reason", default="manual promote via CLI", help="晋升原因")
+    _add_json_flag(skill_promote_p)
+    skill_promote_p.set_defaults(func=cmd_skill_promote)
 
     args = parser.parse_args()
     if not args.command:
